@@ -1,0 +1,9 @@
+/build/
+/gen/
+/.gradle/
+/.idea/
+/src/main/gen/
+/src/main/gen/
+/Compilation
+/.intellijPlatform/localPlatformArtifacts/
+/.intellijPlatform/

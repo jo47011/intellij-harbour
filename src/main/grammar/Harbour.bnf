@@ -1,0 +1,361 @@
+{
+  parserClass="org.intellij.sdk.language.parser.HarbourParser"
+  parserUtilClass="com.intellij.lang.parser.GeneratedParserUtilBase"
+  psiPackage="org.intellij.sdk.language.psi"
+  psiImplPackage="org.intellij.sdk.language.psi.impl"
+
+  extends="com.intellij.extapi.psi.ASTWrapperPsiElement"
+  implements="org.intellij.sdk.language.psi.HarbourPsiElement"
+
+  // Generate PSI classes but use our existing token types
+  generateTokens=false
+  tokenTypeClass="org.intellij.sdk.language.psi.HarbourTokenType"
+  elementTypeClass="org.intellij.sdk.language.psi.HarbourElementType"
+  elementTypeHolderClass="org.intellij.sdk.language.psi.HarbourTypes"
+
+  // List all tokens we reference so Grammar-Kit knows about them
+  tokens = [
+    // Common tokens
+    IDENT='regexp:[a-zA-Z_][a-zA-Z0-9_]*'
+    NUMBER='regexp:[0-9]+(\.[0-9]+)?'
+    STRING_LITERAL='regexp:"([^"\\]|\\.)*"|\'([^\'\\]|\\.)*\''
+    EOL_COMMENT='regexp://.*'
+    BLOCK_COMMENT='regexp:/\*(.|\n)*?\*/'
+    PREPROC_DIRECTIVE='regexp:#.*'
+
+    // Punctuation
+    LPAREN='('
+    RPAREN=')'
+    LBRACKET='['
+    RBRACKET=']'
+    LBRACE='{'
+    RBRACE='}'
+    COMMA=','
+    COLON=':'
+    DOT='.'
+    SEMICOLON=';'
+
+    // Operators
+    PLUS='+'
+    MINUS='-'
+    MUL='*'
+    DIV='/'
+    ASSIGN=':='
+    EQ='='
+    EQEQ='=='
+    NEQ='!='
+    GT='>'
+    LT='<'
+    GTEQ='>='
+    LTEQ='<='
+    DOUBLE_COLON='::'
+    EXCLAM='!'
+    AT='@'
+    AMP='&'
+    DOLLAR='$'
+
+    // Keywords
+    FUNCTION='function'
+    PROCEDURE='procedure'
+    CLASS='class'
+    METHOD='method'
+    INHERIT='inherit'
+    ENDMETHOD='endmethod'
+    ENDCLASS='endclass'
+    ENDFUNCTION='endfunction'
+    ENDPROCEDURE='endprocedure'
+    LOCAL='local'
+    STATIC='static'
+    IF='if'
+    ELSE='else'
+    ENDIF='endif'
+    DO='do'
+    WHILE='while'
+    ENDDO='enddo'
+    FOR='for'
+    TO='to'
+    NEXT='next'
+    SWITCH='switch'
+    CASE='case'
+    OTHERWISE='otherwise'
+    ENDSWITCH='endswitch'
+    RETURN='return'
+    EXIT='exit'
+    LOOP='loop'
+
+    // Logical operators
+    AND='and'
+    OR='or'
+    NOT='not'
+    DOT_AND='.and.'
+    DOT_OR='.or.'
+    DOT_NOT='.not.'
+
+    // Special values
+    LOGICAL='regexp:\.t\.|\.f\.'
+    NIL='nil'
+    SELF='self'
+    SUPER='super'
+
+    // Additional keywords
+    MEMVAR='memvar'
+    PRIVATE='private'
+    TROUBLE='trouble'
+    DATA='data'
+    INIT='init'
+    DEFAULT='default'
+    RUN='run'
+    HIDDEN='hidden'
+  ]
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Root file rule
+////////////////////////////////////////////////////////////////////////////////
+
+HarbourFile ::= item_* { pin=1 psi=true }
+
+private item_ ::= Statement | PreprocLine | Comment
+
+////////////////////////////////////////////////////////////////////////////////
+// Comments & preprocessor
+////////////////////////////////////////////////////////////////////////////////
+
+Comment ::= EOL_COMMENT | BLOCK_COMMENT { psi=true }
+PreprocLine ::= PREPROC_DIRECTIVE STRING_LITERAL? { pin=1 psi=true }
+
+////////////////////////////////////////////////////////////////////////////////
+// Statements (including data/default/run)
+////////////////////////////////////////////////////////////////////////////////
+
+Statement ::=
+    FunctionDeclaration
+  | ProcedureDeclaration
+  | StaticFunctionDeclaration
+  | StaticProcedureDeclaration
+  | ClassDeclaration
+  | MethodDeclaration
+  | LocalDeclaration
+  | IfStatement
+  | DoWhileStatement
+  | ForStatement
+  | ReturnStatement
+  | DataStatement
+  | DefaultStatement
+  | RunStatement
+  | SimpleStatement { psi=true }
+
+IfStatement ::=
+    IF Expr Statement* (ELSE Statement*)? ENDIF? {
+      pin=1
+      psi=true
+    }
+
+DoWhileStatement ::=
+    DO WHILE Expr Statement* ENDDO? {
+      pin=1
+      psi=true
+    }
+
+ForStatement ::=
+    FOR IDENT EQ Expr TO Expr Statement* NEXT? {
+      pin=1
+      psi=true
+    }
+
+ReturnStatement ::= RETURN Expr? { pin=1 psi=true }
+
+// DATA varName [INIT <expr>] [HIDDEN]
+DataStatement ::=
+    DATA IDENT DataSuffix? {
+      pin=1 psi=true
+    }
+
+DataSuffix ::=
+    INIT Expr HIDDEN?
+  | HIDDEN
+  { psi=true }
+
+// DEFAULT varName := expr
+DefaultStatement ::=
+    DEFAULT IDENT (ASSIGN | EQ) Expr {
+      pin=1
+      psi=true
+    }
+
+// RUN( expr )
+RunStatement ::=
+    RUN LPAREN Expr RPAREN {
+      pin=1
+      psi=true
+    }
+
+////////////////////////////////////////////////////////////////////////////////
+// Declarations
+////////////////////////////////////////////////////////////////////////////////
+
+FunctionDeclaration ::=
+    FUNCTION IDENT ParameterList? Statement* ENDFUNCTION? {
+      pin=1
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourNamedElementImpl"
+    }
+
+ProcedureDeclaration ::=
+    PROCEDURE IDENT ParameterList? Statement* ENDPROCEDURE? {
+      pin=1
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourNamedElementImpl"
+    }
+
+StaticFunctionDeclaration ::=
+    STATIC FUNCTION IDENT ParameterList? Statement* ENDFUNCTION? {
+      pin=2
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourNamedElementImpl"
+    }
+
+StaticProcedureDeclaration ::=
+    STATIC PROCEDURE IDENT ParameterList? Statement* ENDPROCEDURE? {
+      pin=2
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourNamedElementImpl"
+    }
+
+// Use your custom implementation for ClassDeclaration
+ClassDeclaration ::=
+    CLASS className (INHERIT IDENT)? Statement* ENDCLASS? {
+      pin=1
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourClassDeclarationImpl"
+    }
+
+private className ::= IDENT { name="cls" }
+
+// METHOD ident paramList? HIDDEN? statement* ENDMETHOD? allowed
+MethodDeclaration ::=
+    METHOD IDENT ParameterList? MethodDeclSuffix? Statement* ENDMETHOD? {
+      pin=1
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourNamedElementImpl"
+    }
+
+MethodDeclSuffix ::= HIDDEN { psi=true }
+
+ParameterList ::= LPAREN [IDENT (COMMA IDENT)*] RPAREN { pin=1 psi=true }
+
+////////////////////////////////////////////////////////////////////////////////
+// Local declarations
+////////////////////////////////////////////////////////////////////////////////
+
+LocalDeclaration ::= LOCAL LocalVarList { pin=1 psi=true }
+
+// e.g. LOCAL M_Neu := "", hilfe := .f.
+LocalVarList ::= LocalVar (COMMA LocalVar)* { psi=true }
+
+// Handling both normal variables and array declarations
+LocalVar ::=
+    IDENT (LBRACKET Expr RBRACKET)* ((ASSIGN | EQ) Expr)? {
+      psi=true
+    }
+
+////////////////////////////////////////////////////////////////////////////////
+// Expressions
+////////////////////////////////////////////////////////////////////////////////
+
+SimpleStatement ::=
+    AssignmentStatement
+  | FunctionCall
+  | MethodCall
+  | SuperMethodCall
+  | PropertyAccess
+  | Expr { psi=true }
+
+// Property access like getUser():date
+PropertyAccess ::=
+    (FunctionCall | IDENT) COLON IDENT {
+      pin=2
+      psi=true
+    }
+
+AssignmentStatement ::=
+    IDENT (LBRACKET Expr RBRACKET)* (ASSIGN | EQ) Expr {
+      pin=2
+      psi=true
+    }
+
+SuperMethodCall ::=
+    DOUBLE_COLON SUPER COLON IDENT LPAREN [Expr (COMMA Expr)*] RPAREN {
+      pin=3
+      psi=true
+    }
+
+MethodCall ::= (IDENT | SELF) COLON IDENT LPAREN [Expr (COMMA Expr)*] RPAREN {
+  pin=3
+  psi=true
+}
+
+FunctionCall ::=
+    IDENT LPAREN [Expr (COMMA Expr)*] RPAREN {
+      pin=2
+      psi=true
+      implements=[
+        "org.intellij.sdk.language.psi.HarbourNamedElement",
+        "com.intellij.psi.PsiNameIdentifierOwner"
+      ]
+      mixin="org.intellij.sdk.language.psi.impl.HarbourFunctionCallMixin"
+    }
+
+ArrayLiteral ::= LBRACE [Expr (COMMA Expr)*] RBRACE { psi=true }
+
+Expr ::=
+    LPAREN Expr RPAREN
+  | Atom
+  | ArrayAccess
+  | FunctionCall
+  | PropertyAccess
+  | BinaryExpr
+  | UnaryExpr { psi=true }
+
+Atom ::=
+    IDENT
+  | NUMBER
+  | STRING_LITERAL
+  | LOGICAL
+  | NIL
+  | SELF
+  | SUPER
+  | ArrayLiteral { psi=true }
+
+ArrayAccess ::= IDENT LBRACKET Expr RBRACKET { psi=true }
+
+UnaryExpr ::= (EXCLAM | NOT | DOT_NOT) Expr { psi=true }
+
+BinaryExpr ::=
+    Expr (PLUS | MINUS | MUL | DIV | AND | OR | DOT_AND | DOT_OR | EQEQ | NEQ | GT | LT | GTEQ | LTEQ) Expr {
+      psi=true
+    }
