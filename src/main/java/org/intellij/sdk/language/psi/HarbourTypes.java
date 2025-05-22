@@ -1,0 +1,124 @@
+package org.intellij.sdk.language.psi;
+
+import com.intellij.psi.tree.IElementType;
+
+/**
+ * Token and element types for Harbour language.
+ * Manually created to ensure all required tokens are available.
+ */
+public interface HarbourTypes {
+    // Token types from .flex file
+    IElementType FUNCTION = new HarbourTokenType("FUNCTION");
+    IElementType PROCEDURE = new HarbourTokenType("PROCEDURE");
+    IElementType CLASS = new HarbourTokenType("CLASS");
+    IElementType METHOD = new HarbourTokenType("METHOD");
+    IElementType INHERIT = new HarbourTokenType("INHERIT");
+    IElementType ENDMETHOD = new HarbourTokenType("ENDMETHOD");
+    IElementType ENDCLASS = new HarbourTokenType("ENDCLASS");
+    IElementType ENDFUNCTION = new HarbourTokenType("ENDFUNCTION");
+    IElementType ENDPROCEDURE = new HarbourTokenType("ENDPROCEDURE");
+    IElementType LOCAL = new HarbourTokenType("LOCAL");
+    IElementType STATIC = new HarbourTokenType("STATIC");
+    IElementType IF = new HarbourTokenType("IF");
+    IElementType ELSE = new HarbourTokenType("ELSE");
+    IElementType ELSEIF = new HarbourTokenType("ELSEIF");
+    IElementType ENDIF = new HarbourTokenType("ENDIF");
+    IElementType DO = new HarbourTokenType("DO");
+    IElementType WHILE = new HarbourTokenType("WHILE");
+    IElementType ENDDO = new HarbourTokenType("ENDDO");
+    IElementType FOR = new HarbourTokenType("FOR");
+    IElementType NEXT = new HarbourTokenType("NEXT");
+    IElementType SWITCH = new HarbourTokenType("SWITCH");
+    IElementType CASE = new HarbourTokenType("CASE");
+    IElementType OTHERWISE = new HarbourTokenType("OTHERWISE");
+    IElementType ENDSWITCH = new HarbourTokenType("ENDSWITCH");
+    IElementType RETURN = new HarbourTokenType("RETURN");
+    IElementType EXIT = new HarbourTokenType("EXIT");
+    IElementType LOOP = new HarbourTokenType("LOOP");
+    IElementType AND = new HarbourTokenType("AND");
+    IElementType OR = new HarbourTokenType("OR");
+    IElementType NOT = new HarbourTokenType("NOT");
+    IElementType MEMVAR = new HarbourTokenType("MEMVAR");
+    IElementType PRIVATE = new HarbourTokenType("PRIVATE");
+    IElementType LPAREN = new HarbourTokenType("LPAREN");
+    IElementType RPAREN = new HarbourTokenType("RPAREN");
+    IElementType LBRACKET = new HarbourTokenType("LBRACKET");
+    IElementType RBRACKET = new HarbourTokenType("RBRACKET");
+    IElementType LBRACE = new HarbourTokenType("LBRACE");
+    IElementType RBRACE = new HarbourTokenType("RBRACE");
+    IElementType COMMA = new HarbourTokenType("COMMA");
+    IElementType COLON = new HarbourTokenType("COLON");
+    IElementType DOUBLE_COLON = new HarbourTokenType("DOUBLE_COLON");
+    IElementType PLUS = new HarbourTokenType("PLUS");
+    IElementType MINUS = new HarbourTokenType("MINUS");
+    IElementType MUL = new HarbourTokenType("MUL");
+    IElementType DIV = new HarbourTokenType("DIV");
+    IElementType EQ = new HarbourTokenType("EQ");
+    IElementType ASSIGN = new HarbourTokenType("ASSIGN");
+    IElementType EQEQ = new HarbourTokenType("EQEQ");
+    IElementType NEQ = new HarbourTokenType("NEQ");
+    IElementType GT = new HarbourTokenType("GT");
+    IElementType LT = new HarbourTokenType("LT");
+    IElementType GTEQ = new HarbourTokenType("GTEQ");
+    IElementType LTEQ = new HarbourTokenType("LTEQ");
+    IElementType EXCLAM = new HarbourTokenType("EXCLAM");
+    IElementType DOLLAR = new HarbourTokenType("DOLLAR");
+    IElementType DOT = new HarbourTokenType("DOT");
+    IElementType DOT_NOT = new HarbourTokenType("DOT_NOT");
+    IElementType DOT_OR = new HarbourTokenType("DOT_OR");
+    IElementType DOT_AND = new HarbourTokenType("DOT_AND");
+    IElementType EOL_COMMENT = new HarbourTokenType("EOL_COMMENT");
+    IElementType BLOCK_COMMENT = new HarbourTokenType("BLOCK_COMMENT");
+    IElementType LOGICAL = new HarbourTokenType("LOGICAL");
+    IElementType IDENT = new HarbourTokenType("IDENT");
+    IElementType NUMBER = new HarbourTokenType("NUMBER");
+    IElementType STRING_LITERAL = new HarbourTokenType("STRING_LITERAL");
+    IElementType AT = new HarbourTokenType("AT");
+    IElementType AMP = new HarbourTokenType("AMP");
+    IElementType NIL = new HarbourTokenType("NIL");
+    IElementType SELF = new HarbourTokenType("SELF");
+    IElementType SUPER = new HarbourTokenType("SUPER");
+    IElementType TROUBLE = new HarbourTokenType("TROUBLE");
+    IElementType TO = new HarbourTokenType("TO");
+    IElementType DATA = new HarbourTokenType("DATA");
+    IElementType INIT = new HarbourTokenType("INIT");
+    IElementType DEFAULT = new HarbourTokenType("DEFAULT");
+    IElementType RUN = new HarbourTokenType("RUN");
+    IElementType HIDDEN = new HarbourTokenType("HIDDEN");
+    IElementType SEMICOLON = new HarbourTokenType("SEMICOLON");
+    IElementType PREPROC_DIRECTIVE = new HarbourTokenType("PREPROC_DIRECTIVE");
+
+    // Element types from .bnf file
+    IElementType FUNCTION_DECLARATION = new HarbourElementType("FUNCTION_DECLARATION");
+    IElementType PROCEDURE_DECLARATION = new HarbourElementType("PROCEDURE_DECLARATION");
+    IElementType CLASS_DECLARATION = new HarbourElementType("CLASS_DECLARATION");
+    IElementType METHOD_DECLARATION = new HarbourElementType("METHOD_DECLARATION");
+    IElementType LOCAL_DECLARATION = new HarbourElementType("LOCAL_DECLARATION");
+    IElementType IF_STATEMENT = new HarbourElementType("IF_STATEMENT");
+    IElementType DO_WHILE_STATEMENT = new HarbourElementType("DO_WHILE_STATEMENT");
+    IElementType FOR_STATEMENT = new HarbourElementType("FOR_STATEMENT");
+    IElementType RETURN_STATEMENT = new HarbourElementType("RETURN_STATEMENT");
+    IElementType DATA_STATEMENT = new HarbourElementType("DATA_STATEMENT");
+    IElementType DEFAULT_STATEMENT = new HarbourElementType("DEFAULT_STATEMENT");
+    IElementType RUN_STATEMENT = new HarbourElementType("RUN_STATEMENT");
+    IElementType SIMPLE_STATEMENT = new HarbourElementType("SIMPLE_STATEMENT");
+    IElementType LOCAL_VAR = new HarbourElementType("LOCAL_VAR");
+    IElementType LOCAL_VAR_LIST = new HarbourElementType("LOCAL_VAR_LIST");
+    IElementType PARAMETER_LIST = new HarbourElementType("PARAMETER_LIST");
+    IElementType METHOD_DECL_SUFFIX = new HarbourElementType("METHOD_DECL_SUFFIX");
+    IElementType DATA_SUFFIX = new HarbourElementType("DATA_SUFFIX");
+    IElementType ASSIGNMENT_STATEMENT = new HarbourElementType("ASSIGNMENT_STATEMENT");
+    IElementType FUNCTION_CALL = new HarbourElementType("FUNCTION_CALL");
+    IElementType METHOD_CALL = new HarbourElementType("METHOD_CALL");
+    IElementType SUPER_METHOD_CALL = new HarbourElementType("SUPER_METHOD_CALL");
+    IElementType PROPERTY_ACCESS = new HarbourElementType("PROPERTY_ACCESS");
+    IElementType EXPR = new HarbourElementType("EXPR");
+    IElementType BINARY_EXPR = new HarbourElementType("BINARY_EXPR");
+    IElementType UNARY_EXPR = new HarbourElementType("UNARY_EXPR");
+    IElementType ARRAY_ACCESS = new HarbourElementType("ARRAY_ACCESS");
+    IElementType ARRAY_LITERAL = new HarbourElementType("ARRAY_LITERAL");
+    IElementType ATOM = new HarbourElementType("ATOM");
+    IElementType COMMENT = new HarbourElementType("COMMENT");
+    IElementType PREPROC_LINE = new HarbourElementType("PREPROC_LINE");
+    IElementType STATEMENT = new HarbourElementType("STATEMENT");
+}

@@ -1,0 +1,628 @@
+package org.intellij.sdk.language;
+
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.impl.source.codeStyle.PostFormatProcessor;
+import org.intellij.sdk.language.psi.HarbourFile;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
+/**
+ * Post-processes Harbour files after formatting to apply custom indentation rules
+ * and line breaking according to settings
+ */
+public class HarbourPostFormatProcessor implements PostFormatProcessor {
+    // Use HarbourLogger for centralized logging instead of local Logger instance
+
+    // Improved patterns for function/procedure detection
+    private static final Pattern FUNCTION_START_PATTERN =
+            Pattern.compile("^\\s*((?:STATIC\\s+)?(?:FUNCTION|PROCEDURE)\\s+\\w+\\s*\\(?.*)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern FUNCTION_END_PATTERN =
+            Pattern.compile("^\\s*RETURN(?:\\s+.*)?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LOCAL_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*LOCAL\\s+.*$", Pattern.CASE_INSENSITIVE);
+
+    // Patterns for detecting string continuations
+    private static final Pattern STRING_CONTINUATION_PATTERN =
+            Pattern.compile(".*[\"']\\s*\\+\\s*;\\s*$");
+    private static final Pattern STRING_START_PATTERN =
+            Pattern.compile("^\\s*[\"'].*");
+
+    // New patterns for switch/case statements
+    private static final Pattern SWITCH_PATTERN =
+            Pattern.compile("^\\s*SWITCH\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CASE_PATTERN =
+            Pattern.compile("^\\s*CASE\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENDSWITCH_PATTERN =
+            Pattern.compile("^\\s*ENDSWITCH.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LINE_CONTINUATION_PATTERN =
+            Pattern.compile(".*;\\s*$");
+
+    // Pattern for detecting comment-only lines
+    private static final Pattern COMMENT_LINE_PATTERN =
+            Pattern.compile("^\\s*(?://.*|/\\*.*\\*/\\s*)$");
+
+    @Override
+    public @NotNull PsiElement processElement(@NotNull PsiElement element, @NotNull CodeStyleSettings settings) {
+        return element;
+    }
+
+    @Override
+    public @NotNull TextRange processText(@NotNull PsiFile file, @NotNull TextRange textRange, @NotNull CodeStyleSettings settings) {
+        if (!(file instanceof HarbourFile)) {
+            log("Not a Harbour file, skipping");
+            return textRange;
+        }
+
+        Project project = file.getProject();
+        HarbourSettings harbourSettings = HarbourSettings.getInstance(project);
+        if (harbourSettings == null) {
+            log("No Harbour settings found for file: " + file.getName());
+            return textRange;
+        }
+
+        int lineBreakPosition = harbourSettings.getLineBreakPosition();
+        log("Processing file: " + file.getName() + " with line break position: " + lineBreakPosition);
+
+        PsiDocumentManager documentManager = PsiDocumentManager.getInstance(project);
+        Document document = documentManager.getDocument(file);
+        if (document == null) {
+            log("No document found for file: " + file.getName());
+            return textRange;
+        }
+
+        log("Post-processing text in Harbour file: " + file.getName());
+        HarbourTokenTypeExtension.setFormattingInProgress(true);
+
+        try {
+            String originalText = document.getText();
+            log("Original document length: " + originalText.length());
+
+            // Preserve exact original trailing whitespace - store it separately
+            String originalTrailingWhitespace = extractTrailingWhitespace(originalText);
+            log("Original trailing whitespace: '" + originalTrailingWhitespace.replace("\n", "\\n") + "'");
+
+            // Process step by step
+            String formattedText = formatHarbourCode(originalText, lineBreakPosition, harbourSettings);
+
+            // Make sure to restore exact original trailing whitespace
+            formattedText = ensureTrailingWhitespace(formattedText, originalTrailingWhitespace);
+            log("Restored original trailing whitespace");
+
+            if (!originalText.equals(formattedText)) {
+                log("Text changed after formatting, applying changes");
+                final String textToApply = formattedText;
+                ApplicationManager.getApplication().runWriteAction(() -> {
+                    try {
+                        document.setText(textToApply);
+                        documentManager.commitDocument(document);
+                        log("Successfully applied text changes");
+                    } catch (Exception e) {
+                        log("Error applying text changes: " + e.getMessage());
+                    }
+                });
+            } else {
+                log("No text changes needed after formatting");
+            }
+        } catch (Exception e) {
+            log("Exception during formatting: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            HarbourTokenTypeExtension.setFormattingInProgress(false);
+        }
+
+        return textRange;
+    }
+
+    /**
+     * Extract the exact trailing whitespace from text
+     */
+    private String extractTrailingWhitespace(String text) {
+        int lastNonWhitespace = text.length() - 1;
+        while (lastNonWhitespace >= 0 && Character.isWhitespace(text.charAt(lastNonWhitespace))) {
+            lastNonWhitespace--;
+        }
+
+        if (lastNonWhitespace >= text.length() - 1) {
+            return ""; // No trailing whitespace
+        }
+
+        return text.substring(lastNonWhitespace + 1);
+    }
+
+    /**
+     * Ensure the text has exactly the specified trailing whitespace
+     */
+    private String ensureTrailingWhitespace(String text, String trailingWhitespace) {
+        // First remove all trailing whitespace
+        String trimmed = text.replaceAll("\\s+$", "");
+
+        // Then add the original trailing whitespace
+        return trimmed + trailingWhitespace;
+    }
+
+    /**
+     * Main formatting method
+     */
+    private String formatHarbourCode(String text, int lineBreakPosition, HarbourSettings settings) {
+        String[] lines = text.split("\n", -1);
+        StringBuilder result = new StringBuilder(text.length());
+
+        int indentLevel = 0;
+        boolean inFunctionBody = false;
+        boolean inSwitchBlock = false;
+        int indentSize = settings.getIndentationSize();
+        boolean formatReturnAtLevel0 = settings.isReturnStatementsAtLevel0();
+        boolean formatLocalAtLevel0 = settings.isLocalStatementsAtLevel0();
+
+        log("Formatting with indentSize: " + indentSize +
+                ", lineBreak: " + lineBreakPosition +
+                ", formatReturn: " + formatReturnAtLevel0 +
+                ", formatLocal: " + formatLocalAtLevel0);
+
+        // Lines to skip (continuation lines)
+        List<Integer> skipLines = new ArrayList<>();
+        // Lines that are continuations of previous lines
+        List<Integer> continuationLines = new ArrayList<>();
+
+        // First pass - identify continuation lines
+        for (int i = 0; i < lines.length - 1; i++) {
+            String line = lines[i].trim();
+            String nextLine = lines[i+1].trim();
+
+            // String continuation pattern
+            if (STRING_CONTINUATION_PATTERN.matcher(line).matches() &&
+                    STRING_START_PATTERN.matcher(nextLine).matches()) {
+                log("Found string continuation at line " + (i+1));
+                skipLines.add(i+1); // Skip the next line
+            }
+
+            // Regular line continuation with semicolon
+            if (LINE_CONTINUATION_PATTERN.matcher(line).matches() && !nextLine.isEmpty()) {
+                log("Found line continuation with semicolon at line " + (i+1));
+                continuationLines.add(i+1); // Mark the next line as a continuation
+            }
+        }
+
+        // Store previous line's *actual* indentation for comment alignment
+        String previousLineActualIndent = "";
+
+        // Main processing loop
+        for (int i = 0; i < lines.length; i++) {
+            // Skip lines that are part of continuation pairs
+            if (skipLines.contains(i)) {
+                log("Skipping continuation line at index " + i);
+                continue;
+            }
+
+            String lineWithWhitespace = lines[i];
+            String line = lineWithWhitespace.trim();
+
+            // Skip empty lines
+            if (line.isEmpty()) {
+                result.append("\n");
+                continue;
+            }
+
+            // Skip lone semicolons
+            if (line.equals(";")) {
+                continue;
+            }
+
+            // Process indentation and code structure
+            String lowerLine = line.toLowerCase();
+
+            // Check for function/procedure start
+            Matcher functionStartMatcher = FUNCTION_START_PATTERN.matcher(line);
+            if (functionStartMatcher.matches()) {
+                log("Found function/procedure start: " + line);
+                indentLevel = 0;
+                inFunctionBody = true;
+                inSwitchBlock = false;
+            }
+
+            // Check for switch statement
+            boolean isSwitchStatement = SWITCH_PATTERN.matcher(line).matches();
+            if (isSwitchStatement) {
+                log("Found switch statement: " + line);
+                inSwitchBlock = true;
+            }
+
+            // Check for case statement
+            boolean isCaseStatement = CASE_PATTERN.matcher(line).matches();
+
+            // Check for endswitch statement
+            boolean isEndSwitchStatement = ENDSWITCH_PATTERN.matcher(line).matches();
+            if (isEndSwitchStatement) {
+                log("Found endswitch statement: " + line);
+                inSwitchBlock = false;
+            }
+
+            // FIX: Improved return statement detection
+            boolean isReturnStatement = FUNCTION_END_PATTERN.matcher(line).matches();
+            boolean isReturnStatementAtEnd = false;
+
+            if (inFunctionBody && isReturnStatement) {
+                // Check if this RETURN statement should be treated as function end
+                boolean isEndOfFunction = false;
+
+                // Case 1: It's followed by a function start or end of file
+                if (i == lines.length - 1) {
+                    isEndOfFunction = true;
+                } else {
+                    // Check the next non-empty line
+                    int nextNonEmptyLineIndex = i + 1;
+                    while (nextNonEmptyLineIndex < lines.length && lines[nextNonEmptyLineIndex].trim().isEmpty()) {
+                        nextNonEmptyLineIndex++;
+                    }
+
+                    if (nextNonEmptyLineIndex >= lines.length) {
+                        isEndOfFunction = true; // End of file
+                    } else {
+                        String nextNonEmptyLine = lines[nextNonEmptyLineIndex].trim();
+                        isEndOfFunction = FUNCTION_START_PATTERN.matcher(nextNonEmptyLine).matches();
+                    }
+                }
+
+                if (isEndOfFunction) {
+                    log("Found function/procedure end: " + line);
+                    inFunctionBody = false;
+                    isReturnStatementAtEnd = true;
+                }
+            }
+
+            // Special handling for LOCAL declarations if configured
+            boolean isLocalDeclaration = LOCAL_DECLARATION_PATTERN.matcher(line).matches();
+            int effectiveIndentLevel = indentLevel;
+
+            // FIX: Apply indentation settings for RETURN and LOCAL
+            // Make sure we format ALL return statements if formatReturnAtLevel0 is true
+            if ((isReturnStatement && formatReturnAtLevel0) ||
+                    (isReturnStatementAtEnd && formatReturnAtLevel0)) {
+                log("Applying zero indentation for RETURN statement");
+                effectiveIndentLevel = 0;
+            } else if (isLocalDeclaration && formatLocalAtLevel0 && inFunctionBody) {
+                log("Applying zero indentation for LOCAL declaration");
+                effectiveIndentLevel = 0;
+            }
+
+            // Block ending check
+            boolean isBlockEnd = lowerLine.startsWith("endif") ||
+                    lowerLine.startsWith("enddo") ||
+                    lowerLine.startsWith("endcase") ||
+                    lowerLine.startsWith("next");
+
+            // Additional block end check for endswitch
+            if (isEndSwitchStatement) {
+                isBlockEnd = true;
+            }
+
+            // Adjust indentation for case statements in switch blocks and content inside them
+            if (isCaseStatement && inSwitchBlock) {
+                log("Handling case statement in switch block");
+                // Case statements are at the same level as switch
+                effectiveIndentLevel = indentLevel - 1;
+            } else if (inSwitchBlock && !isEndSwitchStatement) {
+                // For content inside case blocks, use switch level + 1
+                // This gives one level of indentation instead of two
+                effectiveIndentLevel = Math.min(effectiveIndentLevel, (indentLevel - 1) + 1);
+            }
+
+            // Reduce indentation for endings
+            if (isBlockEnd || lowerLine.equals("else") || lowerLine.startsWith("elseif")) {
+                if (indentLevel > 0) indentLevel--;
+            }
+
+            // Check if this line is a continuation of previous line
+            boolean isLineContinuation = continuationLines.contains(i);
+
+            // Handle comment-only lines - use previous line's indentation
+            boolean isCommentOnlyLine = COMMENT_LINE_PATTERN.matcher(line).matches();
+            String newIndent;
+
+            if (isCommentOnlyLine) {
+                // Always use the previous line's indentation for comments, even if it was zero
+                newIndent = previousLineActualIndent;
+                log("Using previous indentation for comment line: '" + line + "'");
+            } else if (isLineContinuation) {
+                // For continuation lines, add extra indent
+                newIndent = previousLineActualIndent + " ".repeat(indentSize);
+                log("Using continuation indentation for line: '" + line + "'");
+            } else {
+                // Apply standard indent
+                int finalIndentLevel = isBlockEnd ? indentLevel : effectiveIndentLevel;
+                newIndent = " ".repeat(finalIndentLevel * indentSize);
+            }
+
+            // Log indentation decisions for debugging
+            log("Line: '" + line + "', indentLevel: " + indentLevel +
+                    ", effectiveLevel: " + effectiveIndentLevel +
+                    (isCommentOnlyLine ? ", comment line" : "") +
+                    (isLineContinuation ? ", continuation line" : ""));
+
+            // Remove double spaces while preserving strings
+            StringBuilder processedContent = new StringBuilder();
+            boolean inString = false;
+            char stringDelimiter = 0;
+
+            // Special handling for the last line - preserve trailing spaces
+            boolean isLastLine = (i == lines.length - 1);
+
+            for (int j = 0; j < line.length(); j++) {
+                char c = line.charAt(j);
+
+                // Handle string delimiters
+                if ((c == '"' || c == '\'') && (j == 0 || line.charAt(j - 1) != '\\')) {
+                    if (!inString) {
+                        inString = true;
+                        stringDelimiter = c;
+                    } else if (c == stringDelimiter) {
+                        inString = false;
+                    }
+                }
+
+                // Handle spaces - preserve all spaces on last line
+                if (c == ' ' && !inString && !isLastLine) {
+                    if (processedContent.length() == 0 || processedContent.charAt(processedContent.length() - 1) != ' ') {
+                        processedContent.append(c);
+                    }
+                } else {
+                    processedContent.append(c);
+                }
+            }
+
+            // Processed line with proper indent
+            String processedLine = newIndent + processedContent.toString();
+
+            // Store this actual indentation for the next line's potential comment
+            // This needs to be stored AFTER all special handling is done
+            if (!isCommentOnlyLine && !isLineContinuation) {
+                previousLineActualIndent = newIndent;
+            }
+
+            // Check for string continuation pattern
+            boolean hasStringContinuation = STRING_CONTINUATION_PATTERN.matcher(processedLine).matches();
+
+            if (hasStringContinuation && i < lines.length - 1) {
+                // This is a line with string continuation
+                log("Processing continuation line: " + processedLine);
+
+                // Add the first line as is
+                result.append(processedLine);
+                result.append("\n");
+
+                // Process the continuation line if it exists and starts with a string
+                String nextLine = lines[i+1];
+                String nextLineTrimmed = nextLine.trim();
+
+                if (STRING_START_PATTERN.matcher(nextLineTrimmed).matches()) {
+                    // Get proper indentation for continuation
+                    String contIndent = newIndent + " ".repeat(indentSize);
+
+                    // FIX: Make sure not to duplicate quote marks
+                    // First ensure we have a proper string start (exactly one quote)
+                    String stringContent = nextLineTrimmed;
+                    // Count leading quotes to handle multiple formats
+                    int quoteCount = 0;
+                    while (quoteCount < stringContent.length() &&
+                            (stringContent.charAt(quoteCount) == '"' || stringContent.charAt(quoteCount) == '\'')) {
+                        quoteCount++;
+                    }
+
+                    // Use only one quote
+                    String fixedContent;
+                    if (quoteCount > 0) {
+                        char quote = stringContent.charAt(0);
+                        fixedContent = quote + stringContent.substring(quoteCount);
+                    } else {
+                        fixedContent = stringContent;
+                    }
+
+                    // Add with proper indent
+                    result.append(contIndent).append(fixedContent);
+
+                    // If not at end, add newline
+                    if (i < lines.length - 2) {
+                        result.append("\n");
+                    }
+                }
+            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition) {
+                // Line needs breaking
+                List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
+
+                for (int j = 0; j < brokenLines.size(); j++) {
+                    result.append(brokenLines.get(j));
+                    if (j < brokenLines.size() - 1) {
+                        result.append("\n");
+                    } else if (i < lines.length - 1) {
+                        // Only add newline after last segment if not at end of file
+                        result.append("\n");
+                    }
+                }
+            } else {
+                // Regular line, no breaking needed
+                result.append(processedLine);
+
+                // Add newline if not at end of file
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+            }
+
+            // Update indentation for next lines
+            if (lowerLine.startsWith("if ") ||
+                    lowerLine.startsWith("while ") ||
+                    lowerLine.startsWith("for ") ||
+                    lowerLine.startsWith("do ") ||
+                    (lowerLine.startsWith("case ") && !inSwitchBlock) || // Don't increase indent for case in switch
+                    lowerLine.equals("else") ||
+                    lowerLine.startsWith("elseif")) {
+                indentLevel++;
+            }
+
+            // Increase indent after switch statement
+            if (isSwitchStatement) {
+                indentLevel++;
+            }
+
+            // Function body indentation
+            if (inFunctionBody && functionStartMatcher.matches()) {
+                indentLevel = 1;
+                log("Setting indent level to 1 for function body");
+            }
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Break a long line into multiple lines with proper continuation
+     */
+    private List<String> breakLine(String line, int lineBreakPosition, int indentSize) {
+        List<String> result = new ArrayList<>();
+
+        // Find indentation
+        int indentLength = 0;
+        while (indentLength < line.length() && Character.isWhitespace(line.charAt(indentLength))) {
+            indentLength++;
+        }
+
+        String indent = line.substring(0, indentLength);
+        String content = line.substring(indentLength);
+
+        // Check if this line already contains string continuation
+        if (STRING_CONTINUATION_PATTERN.matcher(line).matches()) {
+            log("Not breaking line with existing string continuation");
+            result.add(line);
+            return result;
+        }
+
+        // Start with base indent
+        String currentLine = indent;
+        int pos = 0;
+
+        // Track string context
+        boolean inString = false;
+        char stringDelimiter = 0;
+
+        while (pos < content.length()) {
+            // Calculate available space
+            int availableSpace = lineBreakPosition - currentLine.length();
+
+            // Check if remaining content fits
+            if (pos + availableSpace >= content.length()) {
+                currentLine += content.substring(pos);
+                result.add(currentLine);
+                currentLine = null; // Prevent duplication
+                break;
+            }
+
+            // Find break point
+            int breakPos = findBreakPoint(content, pos, pos + availableSpace);
+
+            // Update string context
+            for (int i = pos; i < breakPos; i++) {
+                char c = content.charAt(i);
+                if ((c == '"' || c == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
+                    if (!inString) {
+                        inString = true;
+                        stringDelimiter = c;
+                    } else if (c == stringDelimiter) {
+                        inString = false;
+                    }
+                }
+            }
+
+            // Add segment
+            String segment = content.substring(pos, breakPos);
+
+            // Handle string breaks
+            if (inString) {
+                log("Breaking inside string at position " + breakPos);
+
+                // Check for space at break point
+                boolean breakAtSpace = breakPos < content.length() && content.charAt(breakPos) == ' ';
+                if (breakAtSpace) {
+                    segment += " ";
+                    breakPos++;
+                }
+
+                // Close string and add continuation
+                currentLine += segment + stringDelimiter + " +;";
+                result.add(currentLine);
+
+                // Start new line with string
+                String continuationIndent = indent + " ".repeat(indentSize);
+                currentLine = continuationIndent + stringDelimiter;
+            } else {
+                // Normal break
+                if (!segment.trim().endsWith(";") && !segment.trim().endsWith("+") && !segment.trim().endsWith("//")) {
+                    currentLine += segment + " ;";
+                } else {
+                    currentLine += segment;
+                }
+
+                result.add(currentLine);
+
+                // Start new line
+                currentLine = indent + " ".repeat(indentSize);
+            }
+
+            pos = breakPos;
+        }
+
+        // Add remaining content if any
+        if (currentLine != null && currentLine.length() > indent.length()) {
+            result.add(currentLine);
+        }
+
+        return result;
+    }
+
+    /**
+     * Find a good break point
+     */
+    private int findBreakPoint(String content, int startPos, int endPos) {
+        if (endPos >= content.length()) return content.length();
+
+        // Look for good break points
+        for (int i = endPos; i > startPos; i--) {
+            char c = content.charAt(i);
+
+            // Don't break arrow operator
+            if (i > 0 && content.charAt(i-1) == '-' && c == '>') continue;
+            if (i < content.length()-1 && c == '-' && content.charAt(i+1) == '>') continue;
+
+            // Check for logical operators
+            if (c == '.') {
+                String nearby = content.substring(
+                        Math.max(0, i-4),
+                        Math.min(content.length(), i+5)
+                );
+                if (nearby.contains(".and.") || nearby.contains(".or.")) continue;
+            }
+
+            // Good break points
+            if (c == ',' || c == ' ' || c == '.' || c == ';' || c == ')') return i + 1;
+        }
+
+        return startPos;
+    }
+
+    /**
+     * Log a message via the common HarbourLogger
+     */
+    private void log(String message) {
+        HarbourLogger.log("PostFormatter", message);
+    }
+}

@@ -1,0 +1,18 @@
+# Harbour Debug HBP file
+# Place in: src/main/resources/debug/harbour_debug.hbp
+
+-inc
+-b
+-es2
+-w3
+
+# Include debug functions
+{win}-cflag=-DWIN32
+{win}-cflag=-D_WIN32_WINNT=0x0600
+{win}-cflag=-DWINVER=0x0600
+
+# Link debug libraries
+-lhbdebug
+
+# Debug initialization
+-dhbdebug=true

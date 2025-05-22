@@ -1,0 +1,91 @@
+<idea-plugin>
+    <id>org.intellij.sdk.language</id>
+    <name>Harbour Language Support</name>
+    <version>1.0.0</version>
+    <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
+
+    <description><![CDATA[
+      Harbour language support for IntelliJ Platform IDEs.
+      Provides syntax highlighting, code completion, and debugging support.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- File Type -->
+        <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
+                  fieldName="INSTANCE" language="Harbour" extensions="prg;hb"/>
+
+        <!-- Language -->
+        <lang.parserDefinition language="Harbour"
+                               implementationClass="org.intellij.sdk.language.HarbourParserDefinition"/>
+
+        <!-- Syntax Highlighter -->
+        <lang.syntaxHighlighterFactory language="Harbour"
+                                       implementationClass="org.intellij.sdk.language.HarbourSyntaxHighlighterFactory"/>
+
+        <!-- Color Settings -->
+        <colorSettingsPage implementation="org.intellij.sdk.language.HarbourColorSettingsPage"/>
+
+        <!-- Code Style Settings -->
+        <langCodeStyleSettingsProvider implementation="org.intellij.sdk.language.HarbourLanguageCodeStyleSettingsProvider"/>
+
+        <!-- Commenter -->
+        <lang.commenter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourCommenter"/>
+
+        <!-- Code Completion -->
+        <completion.contributor language="Harbour"
+                                implementationClass="org.intellij.sdk.language.HarbourCompletionContributor"/>
+
+        <!-- Reference Contributors - Only existing classes -->
+        <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.HarbourIncludeReferenceContributor"/>
+        <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.HarbourMethodReferenceContributor"/>
+        <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.HarbourClassMethodReferenceContributor"/>
+        <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.DirectHarbourReferenceContributor"/>
+        <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.HarbourDirectIncludeReferenceContributor"/>
+
+        <!-- Annotators -->
+        <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourAnnotator"/>
+        <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFunctionCallAnnotator"/>
+        <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourIncludeAnnotator"/>
+
+        <!-- Structure View -->
+        <lang.psiStructureViewFactory language="Harbour"
+                                      implementationClass="org.intellij.sdk.language.HarbourStructureViewFactory"/>
+
+        <!-- Go to Declaration -->
+        <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourGoToDeclarationHandler"/>
+
+        <!-- Documentation Provider -->
+        <lang.documentationProvider language="Harbour"
+                                    implementationClass="org.intellij.sdk.language.HarbourDocumentationProvider"/>
+
+        <!-- Settings Service -->
+        <projectService serviceImplementation="org.intellij.sdk.language.HarbourSettings"/>
+
+        <!-- Settings -->
+        <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourSettingsConfigurable"
+                                 id="org.intellij.sdk.language.HarbourSettingsConfigurable"
+                                 displayName="Harbour"/>
+
+        <!-- Debug Support -->
+        <configurationType implementation="org.intellij.sdk.language.HarbourDebuggerConfigType"/>
+        <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner"/>
+        <xdebugger.breakpointType implementation="org.intellij.sdk.language.HarbourDebuggerLineBreakpointType"/>
+    </extensions>
+
+    <actions>
+        <!-- Format Action -->
+        <action id="HarbourFormatAction" class="org.intellij.sdk.language.HarbourFormatAction"
+                text="Format Harbour Code" description="Format Harbour code">
+            <add-to-group group-id="CodeFormatGroup" anchor="after" relative-to-action="ReformatCode"/>
+        </action>
+
+        <!-- Next Error Action -->
+        <action id="HarbourNextErrorAction" class="org.intellij.sdk.language.HarbourNextErrorAction"
+                text="Next Harbour Error" description="Go to next Harbour error">
+            <add-to-group group-id="CodeMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

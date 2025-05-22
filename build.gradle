@@ -1,0 +1,88 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij.platform' version '2.1.0'
+    id 'org.jetbrains.grammarkit' version '2022.3.2.1'
+}
+
+group = 'org.intellij.sdk'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs 'src/main/gen'
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+
+    intellijPlatform {
+        intellijIdeaCommunity('2024.3.4')
+        bundledPlugin('com.intellij.java')
+        pluginVerifier()
+        zipSigner()
+        instrumentationTools()
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+intellijPlatform {
+    buildSearchableOptions = false
+    instrumentCode = false
+
+    pluginConfiguration {
+        version = project.version
+    }
+
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
+}
+
+// Configure main JAR only
+jar {
+    archiveBaseName = 'harbour-language-plugin'
+    archiveVersion = '1.0.0'
+}
+
+// Disable the instrumentedJar task which creates the base JAR
+tasks.matching {
+    it.name == 'instrumentedJar' ||
+            it.name == 'composedJar' ||
+            it.name.endsWith('BaseJar')
+}.configureEach {
+    enabled = false
+}
+
+// Task configuration
+task createGenDir {
+    doLast {
+        def genDir = new File(projectDir, 'src/main/gen/org/intellij/sdk/language')
+        genDir.mkdirs()
+    }
+}
+
+generateLexer {
+    sourceFile = file('src/main/grammar/Harbour.flex')
+    targetDir = 'src/main/gen/org/intellij/sdk/language'
+    targetClass = '_HarbourLexer'
+    purgeOldFiles = true
+    dependsOn createGenDir
+}
+
+tasks.compileJava.dependsOn tasks.generateLexer
