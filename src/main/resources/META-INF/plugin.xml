@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.0</version>
+    <version>1.0.2</version>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
@@ -65,7 +65,7 @@
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourSettings"/>
 
         <!-- Settings -->
-        <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourSettingsConfigurable"
+        <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"
                                  id="org.intellij.sdk.language.HarbourSettingsConfigurable"
                                  displayName="Harbour"/>
 
@@ -73,6 +73,9 @@
         <configurationType implementation="org.intellij.sdk.language.HarbourDebuggerConfigType"/>
         <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner"/>
         <xdebugger.breakpointType implementation="org.intellij.sdk.language.HarbourDebuggerLineBreakpointType"/>
+        
+        <!-- Notification Group -->
+        <notificationGroup id="Harbour Debugger" displayType="BALLOON" isLogByDefault="true"/>
     </extensions>
 
     <actions>

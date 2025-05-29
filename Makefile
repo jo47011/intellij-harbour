@@ -28,6 +28,8 @@ bnf:
 
 clean-log:
 	rm -rf ~/log/*
+	rm -f ../logs/*.log
+	rm -f ./build/idea-sandbox/IC-2024.3.4/log/idea.log
 
 clean: clean-log
 	# Remove all generated Java code from src/main/gen etc.
@@ -39,9 +41,9 @@ clean: clean-log
 
 build:
 	# ./gradlew build
-	./gradlew clean buildPlugin --no-configuration-cache
+	./gradlew buildPlugin --no-configuration-cache
 
-run:
+run: build
 	./gradlew runIde
 
 plugin:

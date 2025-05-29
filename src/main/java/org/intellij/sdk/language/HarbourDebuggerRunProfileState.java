@@ -9,10 +9,13 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.filters.TextConsoleBuilder;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.process.OSProcessHandler;
+import com.intellij.execution.process.ProcessAdapter;
+import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.project.Project;
@@ -25,8 +28,13 @@ import org.jetbrains.annotations.NotNull;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * RunProfileState that compiles and runs a Harbour program with debugging enabled.
@@ -56,10 +64,53 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         }
 
         commandLine.setRedirectErrorStream(true);
+        
+        // Log full command details before starting
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Starting process with command: " + commandLine.getCommandLineString());
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Working directory: " + commandLine.getWorkDirectory());
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Environment: " + commandLine.getEnvironment());
 
-        OSProcessHandler handler = new OSProcessHandler(commandLine);
-        ProcessTerminatedListener.attach(handler);
-        handler.startNotify();
+        OSProcessHandler handler;
+        try {
+            handler = new OSProcessHandler(commandLine);
+            ProcessTerminatedListener.attach(handler);
+            handler.startNotify();
+            
+            // Log process start status
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Process started successfully: " + handler.getProcess().isAlive());
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Process PID: " + handler.getProcess().pid());
+            
+            // Add process output listener for debugging
+            handler.addProcessListener(new com.intellij.execution.process.ProcessAdapter() {
+                @Override
+                public void onTextAvailable(@NotNull com.intellij.execution.process.ProcessEvent event, 
+                                          @NotNull com.intellij.openapi.util.Key outputType) {
+                    String text = event.getText();
+                    if (text != null && !text.trim().isEmpty()) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                "Process output: " + text.trim());
+                    }
+                }
+                
+                @Override
+                public void processTerminated(@NotNull com.intellij.execution.process.ProcessEvent event) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Process terminated with exit code: " + event.getExitCode());
+                }
+            });
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Failed to start process: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebugger", e);
+            throw new ExecutionException("Failed to start Harbour process: " + e.getMessage(), e);
+        }
+        
         return handler;
     }
 
@@ -68,6 +119,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (StringUtil.isEmpty(hbmk2Path)) {
             throw new ExecutionException("hbmk2 compiler path is not specified");
         }
+        
+        // Fix Windows/WSL path issues for hbmk2 path
+        if (hbmk2Path.contains("C:\\") || hbmk2Path.contains("\\")) {
+            // Convert Windows path to Linux path
+            if (hbmk2Path.contains("C:\\3pp\\harbour\\bin\\hbmk2.exe")) {
+                hbmk2Path = "/home/developer/workspace/harbour/bin/linux/gcc/hbmk2";
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Converted Windows hbmk2 path to Linux path: " + hbmk2Path);
+            }
+        }
 
         commandLine.setExePath(hbmk2Path);
 
@@ -75,6 +136,84 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (StringUtil.isEmpty(workingDir)) {
             File sourceFile = new File(runConfig.getSourceFile());
             workingDir = sourceFile.getParent();
+        }
+        
+        // Fix Windows/WSL path issues for working directory
+        if (workingDir != null && workingDir.contains("\\wsl.localhost\\")) {
+            // Convert WSL path back to Linux path
+            workingDir = workingDir.replaceAll(".*\\\\wsl\\.localhost\\\\Ubuntu-22\\.04", "");
+            workingDir = workingDir.replace("\\", "/");
+            // Ensure it starts with /
+            if (!workingDir.startsWith("/")) {
+                workingDir = "/" + workingDir;
+            }
+            
+            // Map the user path to our actual workspace
+            if (workingDir.contains("/home/gruhn/myprog-linux/claude/developer/workspace")) {
+                workingDir = workingDir.replace("/home/gruhn/myprog-linux/claude/developer/workspace", 
+                                               "/home/developer/workspace/mytest");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Mapped user workspace to container workspace: " + workingDir);
+            }
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Converted WSL working directory to Linux path: " + workingDir);
+        }
+        
+        // Copy remote debug library to working directory
+        copyDebugLibrary(workingDir);
+        
+        // Instrument source file if needed
+        String buildTarget = runConfig.getSourceFile();
+        
+        // Fix Windows/WSL path issues
+        if (buildTarget.contains("\\wsl.localhost\\")) {
+            // Convert WSL path back to Linux path
+            buildTarget = buildTarget.replaceAll(".*\\\\wsl\\.localhost\\\\Ubuntu-22\\.04", "");
+            buildTarget = buildTarget.replace("\\", "/");
+            // Ensure it starts with /
+            if (!buildTarget.startsWith("/")) {
+                buildTarget = "/" + buildTarget;
+            }
+            
+            // Map the user path to our actual workspace
+            if (buildTarget.contains("/home/gruhn/myprog-linux/claude/developer/workspace")) {
+                buildTarget = buildTarget.replace("/home/gruhn/myprog-linux/claude/developer/workspace", 
+                                                 "/home/developer/workspace/mytest");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Mapped user source file to container workspace: " + buildTarget);
+            }
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Converted WSL path to Linux path: " + buildTarget);
+        }
+        
+        boolean shouldInstrument = shouldInstrumentSource();
+        File instrumentedFile = null;
+        
+        if (shouldInstrument) {
+            try {
+                // Ensure we have an absolute path for the source file
+                File sourceFile = new File(buildTarget);
+                if (!sourceFile.isAbsolute()) {
+                    sourceFile = new File(workingDir, buildTarget);
+                }
+                
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Attempting to instrument source file: " + sourceFile.getAbsolutePath());
+                
+                HarbourSourceInstrumenter instrumenter = new HarbourSourceInstrumenter(sourceFile);
+                instrumentedFile = instrumenter.instrument();
+                buildTarget = instrumentedFile.getAbsolutePath();
+                
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Instrumented source file: " + buildTarget);
+            } catch (IOException e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Failed to instrument source file: " + e.getMessage());
+                HarbourLogger.logStackTrace("HarbourDebugger", new Exception("Instrumentation failed", e));
+                // Continue with original file
+            }
         }
 
         // Get build directory setting
@@ -87,22 +226,51 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
 
+        // Create build directory if it doesn't exist
+        File buildDirFile = new File(workingDir, buildDir);
+        if (!buildDirFile.exists()) {
+            if (!buildDirFile.mkdirs()) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Warning: Failed to create build directory: " + buildDirFile.getPath());
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Created build directory: " + buildDirFile.getPath());
+            }
+        }
+
         List<String> parameters = new ArrayList<>();
 
         // Look for .hbp file in working directory
-        String sourceFile = runConfig.getSourceFile();
         File workingDirFile = new File(workingDir);
-        String buildTarget = findHbpFileOrUseSource(workingDirFile, sourceFile);
-        parameters.add(buildTarget);
-
+        // If we instrumented the file, use the instrumented version directly, don't look for .hbp
+        String finalBuildTarget;
+        if (instrumentedFile != null && instrumentedFile.exists()) {
+            finalBuildTarget = instrumentedFile.getAbsolutePath();
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Using instrumented file: " + finalBuildTarget);
+        } else {
+            finalBuildTarget = findHbpFileOrUseSource(workingDirFile, buildTarget);
+        }
+        parameters.add(finalBuildTarget);
+        
+        // Add debug library for IntelliJ debugging only if not already building it
+        if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
+            parameters.add("harbour_debug.prg");
+        }
+        
         parameters.add("-b");
         parameters.add("-run");
 
         // Use only -workdir like earlier working versions
         parameters.add("-workdir=" + buildDir);
         parameters.add("-D__HARBOUR_DEBUG__");
+        parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
+        
+        // Force standard GT driver to prevent ANSI escape sequences
+        parameters.add("-gtSTD");
 
-        commandLine.withEnvironment("ALTD", "BREAK");
+        // Don't set ALTD environment variable for remote debugging
+        // commandLine.withEnvironment("ALTD", "BREAK");
 
         if (!StringUtil.isEmpty(runConfig.getCompilerOptions())) {
             parameters.addAll(StringUtil.split(runConfig.getCompilerOptions(), " "));
@@ -124,33 +292,47 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         System.out.println("=== HBMK2 COMMAND ===");
         System.out.println(fullCommand);
         System.out.println("Working Directory: " + workingDir);
-        System.out.println("Build Target: " + buildTarget);
+        System.out.println("Build Target: " + finalBuildTarget);
+        System.out.println("Instrumented: " + shouldInstrument);
         System.out.println("=====================");
 
         commandLine.addParameters(parameters);
         commandLine.setWorkDirectory(workingDir);
         commandLine.withEnvironment("HB_DBG_PATH", ".");
+        commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
     }
 
     /**
      * Finds the first .hbp file in the working directory or returns the source file path
      */
     private String findHbpFileOrUseSource(File workingDir, String sourceFile) {
-        // Look for any .hbp file in the working directory
-        File[] hbpFiles = workingDir.listFiles((dir, name) ->
-                name.toLowerCase().endsWith(".hbp"));
-
-        if (hbpFiles != null && hbpFiles.length > 0) {
-            // Use the first .hbp file found
-            String hbpFileName = hbpFiles[0].getName();
-            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "Found .hbp file: " + hbpFileName + " in " + workingDir.getPath());
-            return hbpFileName;
+        // Extract the base name of the source file (without extension)
+        String sourceBaseName = sourceFile;
+        int lastDot = sourceFile.lastIndexOf('.');
+        if (lastDot > 0) {
+            sourceBaseName = sourceFile.substring(0, lastDot);
         }
-
-        // No .hbp file found, use source file
+        
+        // Look for a matching .hbp file for this source
+        File matchingHbp = new File(workingDir, sourceBaseName + ".hbp");
+        if (matchingHbp.exists()) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "Found matching .hbp file: " + matchingHbp.getName());
+            return matchingHbp.getName();
+        }
+        
+        // If no matching .hbp, just use the source file directly
         HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                "No .hbp file found, using source file: " + sourceFile);
+                "No matching .hbp file found for " + sourceFile + ", using source file directly");
+        
+        // Ensure the source file has .prg extension
+        if (!sourceFile.endsWith(".prg")) {
+            // Check if the .prg file exists
+            File prgFile = new File(workingDir, sourceFile + ".prg");
+            if (prgFile.exists()) {
+                return sourceFile + ".prg";
+            }
+        }
         return sourceFile;
     }
 
@@ -170,7 +352,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         List<String> parameters = new ArrayList<>();
 
-        commandLine.withEnvironment("ALTD", "BREAK");
+        // Don't set ALTD environment variable for remote debugging
+        // commandLine.withEnvironment("ALTD", "BREAK");
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
             parameters.addAll(StringUtil.split(runConfig.getProgramArguments(), " "));
@@ -179,6 +362,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         commandLine.addParameters(parameters);
         commandLine.setWorkDirectory(workingDir);
         commandLine.withEnvironment("HB_DBG_PATH", ".");
+        commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
     }
 
     private void exportBreakpointsToFile() {
@@ -209,7 +393,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
 
             int totalBreakpoints = 0;
+            Set<String> breakpointFiles = new HashSet<>();
+            String sourceFileName = new File(runConfig.getSourceFile()).getName();
 
+            // Check if we're debugging an instrumented file
+            boolean isInstrumented = sourceFileName.endsWith("_instrumented.prg");
+            String originalFileName = isInstrumented ? 
+                sourceFileName.replace("_instrumented.prg", ".prg") : sourceFileName;
+            
             try (FileWriter writer = new FileWriter(breakpointFile)) {
                 for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
                     if (bp instanceof XLineBreakpoint &&
@@ -220,9 +411,38 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         String fileName = file.getName();
                         int line = bp.getSourcePosition().getLine() + 1;
 
-                        writer.write("BP " + line + " " + fileName + "\n");
-                        totalBreakpoints++;
+                        // Only export breakpoints for the file we're actually debugging
+                        if (fileName.equals(originalFileName) || 
+                            (isInstrumented && fileName.equals(sourceFileName))) {
+                            // Always use the original filename in the breakpoint file
+                            writer.write("BP " + line + " " + originalFileName + "\n");
+                            totalBreakpoints++;
+                            breakpointFiles.add(fileName);
+                        }
                     }
+                }
+            }
+            
+            // Check for breakpoint file mismatch
+            if (totalBreakpoints > 0 && !breakpointFiles.isEmpty()) {
+                boolean hasMatchingBreakpoint = false;
+                for (String bpFile : breakpointFiles) {
+                    if (bpFile.equals(sourceFileName) || 
+                        bpFile.equals(sourceFileName.replace(".prg", "_instrumented.prg")) ||
+                        sourceFileName.equals(bpFile.replace("_instrumented.prg", ".prg"))) {
+                        hasMatchingBreakpoint = true;
+                        break;
+                    }
+                }
+                
+                if (!hasMatchingBreakpoint) {
+                    String message = String.format(
+                        "Warning: Breakpoints are set in %s but debugging %s. " +
+                        "The debugger will not stop at these breakpoints.",
+                        breakpointFiles, sourceFileName
+                    );
+                    HarbourLogger.log(project, "HarbourDebugger", message);
+                    HarbourDebuggerNotification.notifyEvent(project, "Breakpoint File Mismatch", message);
                 }
             }
 
@@ -247,5 +467,62 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         console.attachToProcess(processHandler);
 
         return new DefaultExecutionResult(console, processHandler);
+    }
+    
+    /**
+     * Copy the remote debug library from resources to working directory
+     */
+    private void copyDebugLibrary(String workingDir) throws ExecutionException {
+        // Copy the debug library to enable debugging
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Copying IntelliJ debug library to working directory");
+        
+        // Ensure working directory exists
+        File workingDirFile = new File(workingDir);
+        if (!workingDirFile.exists()) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Working directory does not exist, creating: " + workingDir);
+            if (!workingDirFile.mkdirs()) {
+                throw new ExecutionException("Failed to create working directory: " + workingDir);
+            }
+        }
+        
+        // Copy harbour_debug.prg
+        File debugLibFile = new File(workingDir, "harbour_debug.prg");
+        try {
+            copyResourceFile("/debug/harbour_debug.prg", debugLibFile);
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to copy debug library: " + e.getMessage(), e);
+        }
+    }
+    
+    private void copyResourceFile(String resourcePath, File targetFile) throws IOException, ExecutionException {
+        try (InputStream resourceStream = getClass().getResourceAsStream(resourcePath)) {
+            if (resourceStream == null) {
+                throw new ExecutionException("Resource not found: " + resourcePath);
+            }
+            Files.copy(resourceStream, targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            
+            // Verify the file was copied
+            if (targetFile.exists()) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Successfully copied " + resourcePath + " to " + targetFile.getAbsolutePath() + 
+                        " (size: " + targetFile.length() + " bytes)");
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "ERROR: Failed to copy " + resourcePath + " to " + targetFile.getAbsolutePath());
+            }
+        }
+    }
+    
+    /**
+     * Determines if we should instrument the source file for debugging
+     */
+    private boolean shouldInstrumentSource() {
+        // VM-based debugging - no instrumentation needed
+        // The Harbour VM will call __dbgEntry automatically when compiled with -b flag
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "VM-based debugging - instrumentation disabled");
+        return false;
     }
 }

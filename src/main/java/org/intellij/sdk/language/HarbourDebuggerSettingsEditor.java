@@ -34,6 +34,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
     private TextFieldWithBrowseButton executablePathField;
     private JTextField programArgsField;
     private JTextField breakpointFileField;
+    private JTextField debugPortField;
     private JCheckBox useDirectExecutionCheckbox;
 
     public HarbourDebuggerSettingsEditor() {
@@ -73,6 +74,11 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         breakpointFileField = new JTextField();
         breakpointFileField.setText("init.cld");
         commonPanel.add(createLabeledField("Breakpoint File:", breakpointFileField), c);
+
+        // Debug port
+        debugPortField = new JTextField();
+        debugPortField.setText("6110");
+        commonPanel.add(createLabeledField("Debug Port:", debugPortField), c);
 
         // Execution mode selector
         useDirectExecutionCheckbox = new JCheckBox("Use Direct Execution (run executable instead of compiling)");
@@ -162,6 +168,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         workingDirField.setText(StringUtil.notNullize(configuration.getWorkingDirectory()));
         programArgsField.setText(StringUtil.notNullize(configuration.getProgramArguments()));
         breakpointFileField.setText(StringUtil.notNullize(configuration.getBreakpointFile()));
+        debugPortField.setText(StringUtil.notNullize(configuration.getDebugPort()));
 
         // Compilation settings
         hbmk2PathField.setText(StringUtil.notNullize(configuration.getHbmk2Path()));
@@ -189,6 +196,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         configuration.setWorkingDirectory(workingDirField.getText());
         configuration.setProgramArguments(programArgsField.getText());
         configuration.setBreakpointFile(breakpointFileField.getText());
+        configuration.setDebugPort(debugPortField.getText());
 
         // Compilation settings
         configuration.setHbmk2Path(hbmk2PathField.getText());

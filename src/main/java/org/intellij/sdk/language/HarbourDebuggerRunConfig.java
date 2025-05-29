@@ -26,7 +26,7 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
     private String sourceFile;
     private String compilerOptions;
     private String sourcePath;
-    private String debugPort = "9876";
+    private String debugPort = "6110";
     private String breakpointFile = "init.cld";
     private boolean useDirectExecution = false;
 
@@ -88,7 +88,7 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
         programArguments = element.getAttributeValue("programArguments");
         compilerOptions = element.getAttributeValue("compilerOptions");
         sourcePath = element.getAttributeValue("sourcePath");
-        debugPort = element.getAttributeValue("debugPort", "9876");
+        debugPort = element.getAttributeValue("debugPort", "6110");
         breakpointFile = element.getAttributeValue("breakpointFile", "init.cld");
         useDirectExecution = Boolean.parseBoolean(element.getAttributeValue("useDirectExecution", "false"));
     }
@@ -181,6 +181,14 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
 
     public String getDebugPort() {
         return debugPort;
+    }
+    
+    public int getDebugPortAsInt() {
+        try {
+            return Integer.parseInt(debugPort);
+        } catch (NumberFormatException e) {
+            return 6110; // Default port
+        }
     }
 
     public void setDebugPort(String debugPort) {

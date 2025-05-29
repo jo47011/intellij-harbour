@@ -45,6 +45,11 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
 
         HarbourLogger.log(project, "HarbourDebugger", "Starting debug session...");
 
+        // Get debug configuration
+        HarbourDebuggerRunConfig config = (HarbourDebuggerRunConfig) env.getRunProfile();
+        int debugPort = config.getDebugPortAsInt();
+        HarbourLogger.log(project, "HarbourDebugger", "Debug port configured: " + debugPort);
+
         // Start debug session
         XDebuggerManager debuggerManager = XDebuggerManager.getInstance(project);
         ExecutionResult executionResult = state.execute(env.getExecutor(), this);
@@ -58,7 +63,12 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
             @Override
             @NotNull
             public XDebugProcess start(@NotNull XDebugSession session) throws ExecutionException {
-                HarbourDebuggerProcess process = new HarbourDebuggerProcess(session, executionResult);
+                // Get debug configuration
+                HarbourDebuggerRunConfig config = (HarbourDebuggerRunConfig) env.getRunProfile();
+                int debugPort = config.getDebugPortAsInt();
+                
+                // Create remote debug process
+                HarbourDebuggerRemoteProcess process = new HarbourDebuggerRemoteProcess(session, executionResult, debugPort);
 
                 // Listen for process termination
                 executionResult.getProcessHandler().addProcessListener(new ProcessAdapter() {
@@ -66,7 +76,9 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
                     public void processTerminated(@NotNull ProcessEvent event) {
                         HarbourLogger.log(project, "HarbourDebugger",
                                 "Debug process terminated with exit code: " + event.getExitCode());
-                        session.stop();
+                        // Don't stop the debug session immediately - let the debugger decide
+                        // This allows the debug server to keep running even if the program exits
+                        // session.stop();
                     }
                 });
 

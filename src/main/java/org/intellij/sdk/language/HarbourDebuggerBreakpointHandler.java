@@ -18,13 +18,15 @@ import java.util.Map;
  * Breakpoint handler for Harbour debugger using file-based approach.
  */
 public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> {
-    private final HarbourDebuggerProcess debugProcess;
+    private final HarbourDebuggerBaseProcess debugProcess;
     private final List<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> registeredBreakpoints = new ArrayList<>();
     private final Map<XBreakpoint<?>, String> breakpointIds = new HashMap<>();
+    private final boolean isRemoteDebugger;
 
-    public HarbourDebuggerBreakpointHandler(HarbourDebuggerProcess debugProcess) {
+    public HarbourDebuggerBreakpointHandler(HarbourDebuggerBaseProcess debugProcess) {
         super(HarbourDebuggerLineBreakpointType.class);
         this.debugProcess = debugProcess;
+        this.isRemoteDebugger = debugProcess instanceof HarbourDebuggerRemoteProcess;
     }
 
     @Override
@@ -42,7 +44,16 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             registeredBreakpoints.add(breakpoint);
             breakpointIds.put(breakpoint, breakpointId);
 
-            // Note: Breakpoints are handled via init.cld file export, not direct commands
+            // Send breakpoint to remote debugger if using remote debugging
+            if (isRemoteDebugger) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                    String fileName = breakpoint.getSourcePosition().getFile().getName();
+                    // Use harbourCodeExtension protocol
+                    debugProcess.sendCommand("BREAKPOINT");
+                    debugProcess.sendCommand("+:" + fileName + ":" + line);
+                }
+            }
         }
     }
 
@@ -61,7 +72,16 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             registeredBreakpoints.remove(breakpoint);
             breakpointIds.remove(breakpoint);
 
-            // Note: Breakpoints are handled via init.cld file export, not direct commands
+            // Remove breakpoint from remote debugger if using remote debugging
+            if (isRemoteDebugger) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                    String fileName = breakpoint.getSourcePosition().getFile().getName();
+                    // Use harbourCodeExtension protocol
+                    debugProcess.sendCommand("BREAKPOINT");
+                    debugProcess.sendCommand("-:" + fileName + ":" + line);
+                }
+            }
         }
     }
 
@@ -102,5 +122,20 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
 
     public List<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> getRegisteredBreakpoints() {
         return registeredBreakpoints;
+    }
+    
+    /**
+     * Send all registered breakpoints to the remote debugger
+     */
+    public void sendAllBreakpoints() {
+        if (isRemoteDebugger) {
+            for (XLineBreakpoint<HarbourDebuggerBreakpointProperties> breakpoint : registeredBreakpoints) {
+                if (breakpoint.getSourcePosition() != null) {
+                    String fileName = breakpoint.getSourcePosition().getFile().getName();
+                    int line = breakpoint.getSourcePosition().getLine() + 1;
+                    debugProcess.sendCommand("ADDBREAK", fileName, String.valueOf(line));
+                }
+            }
+        }
     }
 }

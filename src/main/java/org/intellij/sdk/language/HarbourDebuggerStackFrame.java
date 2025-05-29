@@ -1,12 +1,8 @@
 package org.intellij.sdk.language;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ColoredTextContainer;
 import com.intellij.ui.SimpleTextAttributes;
-import com.intellij.xdebugger.XDebuggerUtil;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XCompositeNode;
 import com.intellij.xdebugger.frame.XStackFrame;
@@ -21,30 +17,22 @@ import java.util.Map;
  * Shows the current execution position and local variables.
  */
 public class HarbourDebuggerStackFrame extends XStackFrame {
-    private final HarbourDebuggerProcess debugProcess;
+    private final HarbourDebuggerBaseProcess debugProcess;
     private final String functionName;
     private final String filePath;
     private final int lineNumber;
     private XSourcePosition sourcePosition;
 
-    public HarbourDebuggerStackFrame(HarbourDebuggerProcess debugProcess,
+    public HarbourDebuggerStackFrame(HarbourDebuggerBaseProcess debugProcess,
                                      String functionName,
                                      String filePath,
-                                     int lineNumber) {
+                                     int lineNumber,
+                                     XSourcePosition sourcePosition) {
         this.debugProcess = debugProcess;
         this.functionName = functionName;
         this.filePath = filePath;
         this.lineNumber = lineNumber;
-
-        initSourcePosition();
-    }
-
-    private void initSourcePosition() {
-        Project project = debugProcess.getSession().getProject();
-        VirtualFile file = LocalFileSystem.getInstance().findFileByPath(filePath);
-        if (file != null) {
-            this.sourcePosition = XDebuggerUtil.getInstance().createPosition(file, lineNumber - 1);
-        }
+        this.sourcePosition = sourcePosition;
     }
 
     @Nullable

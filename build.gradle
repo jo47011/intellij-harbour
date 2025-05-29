@@ -1,11 +1,11 @@
 plugins {
     id 'java'
-    id 'org.jetbrains.intellij.platform' version '2.1.0'
+    id 'org.jetbrains.intellij.platform' version '2.6.0'
     id 'org.jetbrains.grammarkit' version '2022.3.2.1'
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.0'
+version = '1.0.89'
 
 repositories {
     mavenCentral()
@@ -52,22 +52,19 @@ intellijPlatform {
             recommended()
         }
     }
+    
+    // Configure sandbox to auto-open mytest project
+    sandboxContainer = file("$buildDir/idea-sandbox")
 }
 
 // Configure main JAR only
 jar {
     archiveBaseName = 'harbour-language-plugin'
-    archiveVersion = '1.0.0'
+    archiveVersion = '1.0.4'
 }
 
-// Disable the instrumentedJar task which creates the base JAR
-tasks.matching {
-    it.name == 'instrumentedJar' ||
-            it.name == 'composedJar' ||
-            it.name.endsWith('BaseJar')
-}.configureEach {
-    enabled = false
-}
+// Configure tasks properly for the new plugin version
+// Don't disable important tasks
 
 // Task configuration
 task createGenDir {
@@ -86,3 +83,74 @@ generateLexer {
 }
 
 tasks.compileJava.dependsOn tasks.generateLexer
+
+// Task to configure IDE with mytest project
+task configureIDEProject {
+    doLast {
+        def sandboxConfig = file("$buildDir/idea-sandbox/config")
+        sandboxConfig.mkdirs()
+        
+        // Create recentProjects.xml to auto-open mytest
+        def recentProjectsXml = new File(sandboxConfig, "options/recentProjects.xml")
+        recentProjectsXml.parentFile.mkdirs()
+        recentProjectsXml.text = '''<application>
+  <component name="RecentProjectsManager">
+    <option name="recentPaths">
+      <list>
+        <option value="/home/developer/workspace/mytest" />
+      </list>
+    </option>
+    <option name="lastProjectPath" value="/home/developer/workspace/mytest" />
+  </component>
+</application>'''
+
+        // Create trusted-paths.xml to trust the workspace
+        def trustedPathsXml = new File(sandboxConfig, "options/trusted-paths.xml")
+        trustedPathsXml.parentFile.mkdirs()
+        trustedPathsXml.text = '''<application>
+  <component name="Trusted.Paths.Settings">
+    <option name="trustedPaths">
+      <list>
+        <option value="/home/developer/workspace" />
+        <option value="/home/developer/workspace/mytest" />
+      </list>
+    </option>
+  </component>
+</application>'''
+        
+        println "Configured IDE to auto-open and trust mytest project"
+    }
+}
+
+// Task to ensure gradle directories exist
+task ensureGradleDirs {
+    doLast {
+        // Create necessary gradle directories
+        def gradleUserHome = gradle.gradleUserHomeDir
+        def projectName = project.name ?: 'intellij-harbour'
+        
+        // Create daemon directory for current gradle version
+        def gradleVersion = gradle.gradleVersion
+        def daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
+        if (!daemonDir.exists()) {
+            daemonDir.mkdirs()
+            println "Created gradle daemon directory: ${daemonDir.absolutePath}"
+        }
+        
+        // Also create a generic daemon directory as fallback
+        def genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
+        if (!genericDaemonDir.exists()) {
+            genericDaemonDir.mkdirs()
+        }
+    }
+}
+
+// Ensure directories exist before running IDE
+tasks.named('runIde') {
+    dependsOn ensureGradleDirs
+}
+
+// Configure sandbox before running
+tasks.named('prepareSandbox') {
+    dependsOn configureIDEProject
+}
