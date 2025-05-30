@@ -25,6 +25,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -45,9 +48,29 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private int currentLine;
     private boolean isConnected = false;
     private volatile boolean isLocked = false;
+    private volatile String lastCommand = "";
+    private volatile long lastCommandTime = 0;
     
-    // Simple state management
-    private final Object stateLock = new Object();
+    // Enhanced command execution management
+    private final Object commandLock = new Object();
+    private final BlockingQueue<DebugCommand> commandQueue = new LinkedBlockingQueue<>();
+    private final Thread commandExecutor;
+    private volatile boolean shutdownRequested = false;
+    
+    // Command throttling settings - tuned for optimal stability
+    private static final long MIN_COMMAND_INTERVAL = 200; // Minimum ms between commands
+    private static final long NEXT_COMMAND_DELAY = 350;   // Extra delay for NEXT commands
+    
+    // Debugger state management - prevents rapid command execution
+    public enum DebuggerState {
+        DISCONNECTED,  // Not connected to debug target
+        RUNNING,       // Program is running
+        SUSPENDED,     // Stopped at breakpoint, ready for commands
+        STEPPING       // Executing a step command, ignore new commands
+    }
+    
+    private volatile DebuggerState debuggerState = DebuggerState.DISCONNECTED;
+    private volatile boolean hasPendingStepCommand = false;
     
     public HarbourDebuggerRemoteProcess(@NotNull XDebugSession session,
                                        @NotNull ExecutionResult executionResult,
@@ -67,6 +90,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Discover source files
         discoverSourceFiles();
         
+        // Start command executor thread
+        commandExecutor = new Thread(this::processCommandQueue, "Harbour-Debug-Command-Executor");
+        commandExecutor.setDaemon(true);
+        commandExecutor.start();
+        
         // Start debug server in background
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
@@ -75,11 +103,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 
                 if (isConnected) {
                     HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection established");
+                    updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
                     
                     // Send initial breakpoints
                     sendInitialBreakpoints();
                 } else {
                     HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to establish debug connection");
+                    updateDebuggerState(DebuggerState.DISCONNECTED, false);
                 }
             } catch (IOException e) {
                 // Don't log socket exceptions as errors if they're due to normal session termination
@@ -96,15 +126,8 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     /**
      * Handle incoming debug messages
      */
-    private synchronized void handleDebugMessage(String message) {
-        // Lock at the start - if already busy, return immediately
-        if (isLocked) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Already processing message, dropping: " + message);
-            return;
-        }
-        
-        isLocked = true;
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Handling message (locked): " + message);
+    private void handleDebugMessage(String message) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Handling message: " + message);
         
         try {
             String[] lines = message.split("\r\n");
@@ -211,8 +234,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 break;
         }
         } finally {
-            isLocked = false;
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Message processing complete (unlocked)");
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Message processing complete");
         }
     }
     
@@ -220,7 +242,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         currentFile = file;
         currentLine = line;
         
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stopped at " + file + ":" + line);
+        // Update debugger state to SUSPENDED when we stop and clear pending step flag
+        updateDebuggerState(DebuggerState.SUSPENDED, false);
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stopped at " + file + ":" + line + " (state: SUSPENDED, pendingStep=false)");
         
         VirtualFile vFile = findSourceFile(file);
         if (vFile != null) {
@@ -291,10 +316,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     private void requestVariables() {
-        connection.sendCommand("LOCALS", "0");
-        connection.sendCommand("STATICS");
-        connection.sendCommand("PRIVATES", "0");
-        connection.sendCommand("PUBLICS");
+        sendCommand("LOCALS", "0");
+        sendCommand("STATICS");
+        sendCommand("PRIVATES", "0");
+        sendCommand("PUBLICS");
     }
     
     private void sendInitialBreakpoints() {
@@ -419,13 +444,26 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             return;
         }
         
-        if (isLocked) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Dropping NEXT command - processing message");
+        // State machine: only allow commands when SUSPENDED and no pending step command
+        if (debuggerState != DebuggerState.SUSPENDED || hasPendingStepCommand) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring NEXT command - debugger state is " + debuggerState + ", hasPendingStepCommand=" + hasPendingStepCommand);
             return;
         }
         
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sending NEXT command");
-        connection.sendCommand("NEXT");
+        // Clear any pending NEXT/STEP/OUT commands from the queue to prevent accumulation
+        clearStepCommandsFromQueue();
+        
+        // Mark that we have a pending step command to prevent rapid clicking
+        updateDebuggerState(DebuggerState.STEPPING, true);
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing NEXT command (state: STEPPING, pendingStep=true)");
+        try {
+            commandQueue.offer(new DebugCommand("NEXT"), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            updateDebuggerState(DebuggerState.SUSPENDED, false); // Reset flags on error
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue NEXT command");
+        }
     }
     
     @Override
@@ -435,13 +473,26 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             return;
         }
         
-        if (isLocked) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Dropping STEP command - processing message");
+        // State machine: only allow commands when SUSPENDED and no pending step command
+        if (debuggerState != DebuggerState.SUSPENDED || hasPendingStepCommand) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring STEP command - debugger state is " + debuggerState + ", hasPendingStepCommand=" + hasPendingStepCommand);
             return;
         }
         
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sending STEP command");
-        connection.sendCommand("STEP");
+        // Clear any pending NEXT/STEP/OUT commands from the queue to prevent accumulation
+        clearStepCommandsFromQueue();
+        
+        // Mark that we have a pending step command to prevent rapid clicking
+        updateDebuggerState(DebuggerState.STEPPING, true);
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing STEP command (state: STEPPING, pendingStep=true)");
+        try {
+            commandQueue.offer(new DebugCommand("STEP"), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            updateDebuggerState(DebuggerState.SUSPENDED, false); // Reset flags on error
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue STEP command");
+        }
     }
     
     @Override
@@ -451,13 +502,26 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             return;
         }
         
-        if (isLocked) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Dropping OUT command - processing message");
+        // State machine: only allow commands when SUSPENDED and no pending step command
+        if (debuggerState != DebuggerState.SUSPENDED || hasPendingStepCommand) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring OUT command - debugger state is " + debuggerState + ", hasPendingStepCommand=" + hasPendingStepCommand);
             return;
         }
         
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sending OUT command");
-        connection.sendCommand("OUT");
+        // Clear any pending NEXT/STEP/OUT commands from the queue to prevent accumulation
+        clearStepCommandsFromQueue();
+        
+        // Mark that we have a pending step command to prevent rapid clicking
+        updateDebuggerState(DebuggerState.STEPPING, true);
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing OUT command (state: STEPPING, pendingStep=true)");
+        try {
+            commandQueue.offer(new DebugCommand("OUT"), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            updateDebuggerState(DebuggerState.SUSPENDED, false); // Reset flags on error
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue OUT command");
+        }
     }
     
     @Override
@@ -467,19 +531,29 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             return;
         }
         
-        if (isLocked) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Dropping GO command - processing message");
+        // State machine: only allow resume when SUSPENDED
+        if (debuggerState != DebuggerState.SUSPENDED) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring GO command - debugger state is " + debuggerState);
             return;
         }
         
-        variables.clear();
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sending GO command");
-        connection.sendCommand("GO");
+        // Change state to RUNNING to prevent additional commands
+        updateDebuggerState(DebuggerState.RUNNING, false);
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing GO command (state: RUNNING)");
+        try {
+            commandQueue.offer(new DebugCommand("GO"), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            updateDebuggerState(DebuggerState.SUSPENDED, false); // Reset state on error
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue GO command");
+        }
     }
     
     @Override
     public void stop() {
-        // Log the stop call but don't prevent it
+        // Update state to DISCONNECTED and clear pending flags
+        updateDebuggerState(DebuggerState.DISCONNECTED, false);
         
         // Don't stop if we're still waiting for the initial connection
         if (connection != null && connection.isWaitingForConnection()) {
@@ -494,9 +568,24 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "  " + stack[i].toString());
         }
         
+        // Signal shutdown to command executor
+        shutdownRequested = true;
+        
         if (isConnected) {
+            // Send EXIT command directly (bypass queue for shutdown)
             connection.sendCommand("EXIT");
         }
+        
+        // Interrupt command executor thread
+        if (commandExecutor != null) {
+            commandExecutor.interrupt();
+            try {
+                commandExecutor.join(1000); // Wait up to 1 second
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        
         connection.close();
         
         if (processHandler != null && !processHandler.isProcessTerminated()) {
@@ -512,10 +601,65 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         resume(context);
     }
     
+    /**
+     * Check if it is possible to perform debugging commands (step, resume, etc.)
+     * This method controls the enabled/disabled state of debug action buttons.
+     * 
+     * @return true if commands can be executed, false to disable debug buttons
+     */
+    @Override
+    public boolean checkCanPerformCommands() {
+        // Disable buttons when not connected
+        if (!isConnected) {
+            return false;
+        }
+        
+        // Disable buttons when disconnected or running (not suspended)
+        if (debuggerState == DebuggerState.DISCONNECTED || 
+            debuggerState == DebuggerState.RUNNING) {
+            return false;
+        }
+        
+        // Disable buttons during stepping operations to prevent rapid clicking
+        if (debuggerState == DebuggerState.STEPPING || hasPendingStepCommand) {
+            return false;
+        }
+        
+        // Enable buttons only when suspended and ready for commands
+        return debuggerState == DebuggerState.SUSPENDED && !hasPendingStepCommand;
+    }
+    
+    /**
+     * Update the debugger state and notify the session to refresh button states
+     */
+    private void updateDebuggerState(DebuggerState newState, boolean pendingStep) {
+        DebuggerState oldState = debuggerState;
+        boolean oldPendingStep = hasPendingStepCommand;
+        
+        debuggerState = newState;
+        hasPendingStepCommand = pendingStep;
+        
+        // Log state changes for debugging
+        if (oldState != newState || oldPendingStep != pendingStep) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                String.format("State change: %s->%s, pendingStep: %s->%s", 
+                    oldState, newState, oldPendingStep, pendingStep));
+        }
+    }
+    
     @Override
     public void sendCommand(String command, String... args) {
-        if (isConnected) {
-            connection.sendCommand(command, args);
+        if (!isConnected) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring " + command + " command - not connected");
+            return;
+        }
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Queuing " + command + " command");
+        try {
+            commandQueue.offer(new DebugCommand(command, args), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue " + command + " command");
         }
     }
     
@@ -557,5 +701,117 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 consoleView.print(processedOutput, ConsoleViewContentType.NORMAL_OUTPUT);
             }
         });
+    }
+    
+    /**
+     * Clear pending step commands (NEXT, STEP, OUT) from the queue to prevent accumulation
+     */
+    private void clearStepCommandsFromQueue() {
+        // Create a new list to hold non-step commands
+        List<DebugCommand> nonStepCommands = new ArrayList<>();
+        
+        // Drain the queue and filter out step commands
+        DebugCommand cmd;
+        while ((cmd = commandQueue.poll()) != null) {
+            if (!"NEXT".equals(cmd.command) && !"STEP".equals(cmd.command) && !"OUT".equals(cmd.command)) {
+                nonStepCommands.add(cmd);
+            } else {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Clearing pending step command: " + cmd.command);
+            }
+        }
+        
+        // Put back the non-step commands
+        for (DebugCommand nonStepCmd : nonStepCommands) {
+            commandQueue.offer(nonStepCmd);
+        }
+    }
+    
+    /**
+     * Internal class representing a debug command
+     */
+    private static class DebugCommand {
+        final String command;
+        final String[] args;
+        final long timestamp;
+        
+        DebugCommand(String command, String... args) {
+            this.command = command;
+            this.args = args;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+    
+    /**
+     * Process commands from the queue with proper throttling
+     */
+    private void processCommandQueue() {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Command executor thread started");
+        long lastExecutionTime = 0;
+        
+        while (!shutdownRequested) {
+            try {
+                // Wait for a command with timeout
+                DebugCommand cmd = commandQueue.poll(200, TimeUnit.MILLISECONDS);
+                
+                if (cmd == null) {
+                    continue;
+                }
+                
+                // Check if we're connected
+                if (!isConnected || connection == null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Dropping command " + cmd.command + " - not connected");
+                    updateDebuggerState(DebuggerState.DISCONNECTED, false);
+                    continue;
+                }
+                
+                // Calculate required delay
+                long now = System.currentTimeMillis();
+                long timeSinceLastCommand = now - lastExecutionTime;
+                long requiredDelay = MIN_COMMAND_INTERVAL;
+                
+                // Extra delay for consecutive NEXT commands
+                if ("NEXT".equals(cmd.command) && "NEXT".equals(lastCommand)) {
+                    requiredDelay = NEXT_COMMAND_DELAY;
+                }
+                
+                // Apply throttling if needed
+                if (timeSinceLastCommand < requiredDelay) {
+                    long sleepTime = requiredDelay - timeSinceLastCommand;
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Throttling " + cmd.command + " command by " + sleepTime + "ms");
+                    Thread.sleep(sleepTime);
+                }
+                
+                // Execute the command
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Executing command: " + cmd.command);
+                
+                if (cmd.args.length > 0) {
+                    connection.sendCommand(cmd.command, cmd.args);
+                } else {
+                    connection.sendCommand(cmd.command);
+                }
+                
+                // Update state
+                lastCommand = cmd.command;
+                lastExecutionTime = System.currentTimeMillis();
+                
+                // Clear variables on GO command
+                if ("GO".equals(cmd.command)) {
+                    variables.clear();
+                }
+                
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Error processing command: " + e.getMessage());
+                HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+            }
+        }
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Command executor thread stopped");
     }
 }

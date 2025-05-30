@@ -77,7 +77,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
 
         // Debug port
         debugPortField = new JTextField();
-        debugPortField.setText("6110");
+        debugPortField.setText("9876");
         commonPanel.add(createLabeledField("Debug Port:", debugPortField), c);
 
         // Execution mode selector
