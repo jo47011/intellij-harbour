@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.178'
+version = '1.0.179'
 
 repositories {
     mavenCentral()
@@ -84,34 +84,19 @@ generateLexer {
 
 tasks.compileJava.dependsOn tasks.generateLexer
 
-// Task to configure IDE with mytest project
-task configureIDEProject {
+// Configure trusted paths using proper PrepareSandboxTask approach
+tasks.withType(org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask) {
     doLast {
-        def sandboxConfig = file("$buildDir/idea-sandbox/config")
-        sandboxConfig.mkdirs()
-
-        // Get parent directory of the project for auto-opening  
+        // Get project paths
         def projectPath = projectDir.absolutePath
         def parentDir = projectDir.parent ?: projectPath
         
-        // Create recentProjects.xml to auto-open project directory
-        def recentProjectsXml = new File(sandboxConfig, "options/recentProjects.xml")
-        recentProjectsXml.parentFile.mkdirs()
-        recentProjectsXml.text = """<application>
-  <component name="RecentProjectsManager">
-    <option name="recentPaths">
-      <list>
-        <option value="${projectPath}" />
-      </list>
-    </option>
-    <option name="lastProjectPath" value="${projectPath}" />
-  </component>
-</application>"""
-
-        // Create trusted-paths.xml to trust the workspace (CORRECT FORMAT)
-        def trustedPathsXml = new File(sandboxConfig, "options/trusted-paths.xml")
-        trustedPathsXml.parentFile.mkdirs()
-        trustedPathsXml.text = """<application>
+        // Create trusted-paths.xml in sandbox config directory
+        def sandboxConfigDir = new File(sandboxDirectory.get().asFile, "config")
+        def trustedPathsFile = new File(sandboxConfigDir, "options/trusted-paths.xml")
+        trustedPathsFile.parentFile.mkdirs()
+        
+        trustedPathsFile.text = """<application>
   <component name="Trusted.Paths">
     <option name="TRUSTED_PROJECT_PATHS">
       <map>
@@ -121,8 +106,8 @@ task configureIDEProject {
     </option>
   </component>
 </application>"""
-
-        println "Configured IDE to auto-open and trust mytest project"
+        
+        println "Configured trusted paths: ${parentDir}, ${projectPath}"
     }
 }
 
@@ -154,7 +139,4 @@ tasks.named('runIde') {
     dependsOn ensureGradleDirs
 }
 
-// Configure sandbox before running
-tasks.named('prepareSandbox') {
-    dependsOn configureIDEProject
-}
+// Note: Trusted paths are now configured via PrepareSandboxTask hook above
