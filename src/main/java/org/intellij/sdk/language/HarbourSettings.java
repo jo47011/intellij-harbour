@@ -16,7 +16,6 @@ import org.intellij.sdk.language.psi.HarbourFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -69,20 +68,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Auto-completion setting
     private boolean autoCompletionEnabled = false; // Default to false (only show on Ctrl+Space)
 
-    // Note: Function colors are now handled by the color scheme, these fields remain for backward compatibility
-    @Deprecated
-    private int localFunctionColorValue = new Color(0, 102, 204).getRGB(); // Standard blue
-    @Deprecated
-    private int externalFunctionColorValue = new Color(0xD0, 0xD6, 0xE1).getRGB(); // D0D6E1 default
-
-    // Transient color objects not serialized directly
-    @Transient
-    @Deprecated
-    private Color localFunctionColor;
-
-    @Transient
-    @Deprecated
-    private Color externalFunctionColor;
 
     public HarbourSettings() {
         // Empty constructor
@@ -326,65 +311,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
         this.localStatementsAtLevel0 = localStatementsAtLevel0;
     }
 
-    // Deprecated function color methods - kept for backward compatibility
-    @Deprecated
-    public int getLocalFunctionColorValue() {
-        return localFunctionColorValue;
-    }
-
-    @Deprecated
-    public void setLocalFunctionColorValue(int localFunctionColorValue) {
-        this.localFunctionColorValue = localFunctionColorValue;
-        this.localFunctionColor = null; // Reset cached color
-    }
-
-    @Deprecated
-    public int getExternalFunctionColorValue() {
-        return externalFunctionColorValue;
-    }
-
-    @Deprecated
-    public void setExternalFunctionColorValue(int externalFunctionColorValue) {
-        this.externalFunctionColorValue = externalFunctionColorValue;
-        this.externalFunctionColor = null; // Reset cached color
-    }
-
-    // Transient color getters that lazy-load from the RGB values - kept for backward compatibility
-    @Transient
-    @Deprecated
-    public Color getLocalFunctionColor() {
-        if (localFunctionColor == null) {
-            localFunctionColor = new Color(localFunctionColorValue);
-        }
-        return localFunctionColor;
-    }
-
-    @Transient
-    @Deprecated
-    public void setLocalFunctionColor(Color localFunctionColor) {
-        this.localFunctionColor = localFunctionColor;
-        if (localFunctionColor != null) {
-            this.localFunctionColorValue = localFunctionColor.getRGB();
-        }
-    }
-
-    @Transient
-    @Deprecated
-    public Color getExternalFunctionColor() {
-        if (externalFunctionColor == null) {
-            externalFunctionColor = new Color(externalFunctionColorValue);
-        }
-        return externalFunctionColor;
-    }
-
-    @Transient
-    @Deprecated
-    public void setExternalFunctionColor(Color externalFunctionColor) {
-        this.externalFunctionColor = externalFunctionColor;
-        if (externalFunctionColor != null) {
-            this.externalFunctionColorValue = externalFunctionColor.getRGB();
-        }
-    }
 
     /**
      * Resolves a path that might be relative to the project

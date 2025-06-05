@@ -74,6 +74,17 @@
         <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner"/>
         <xdebugger.breakpointType implementation="org.intellij.sdk.language.HarbourDebuggerLineBreakpointType"/>
         
+        <!-- Formatting -->
+        <lang.formatter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFormattingModelBuilder"/>
+        <postFormatProcessor implementation="org.intellij.sdk.language.HarbourPostFormatProcessor"/>
+        
+        <!-- Rename -->
+        <renamePsiElementProcessor implementation="org.intellij.sdk.language.HarbourRenameProcessor"/>
+        <renameHandler implementation="org.intellij.sdk.language.HarbourRenameHandler"/>
+        
+        <!-- Enter Handler for auto-indentation -->
+        <enterHandlerDelegate implementation="org.intellij.sdk.language.HarbourEnterHandler"/>
+        
         <!-- Notification Group -->
         <notificationGroup id="Harbour Debugger" displayType="BALLOON" isLogByDefault="true"/>
     </extensions>
@@ -83,6 +94,8 @@
         <action id="HarbourFormatAction" class="org.intellij.sdk.language.HarbourFormatAction"
                 text="Format Harbour Code" description="Format Harbour code">
             <add-to-group group-id="CodeFormatGroup" anchor="after" relative-to-action="ReformatCode"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ReformatCode"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift L"/>
         </action>
 
         <!-- Next Error Action -->

@@ -1,6 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -16,7 +15,6 @@ import java.util.function.Consumer;
  * Implements the same protocol as the VSCode extension.
  */
 public class HarbourDebuggerConnection {
-    private static final Logger LOG = Logger.getInstance(HarbourDebuggerConnection.class);
     private static final int DEFAULT_PORT = 6110;
     private static final int ACCEPT_TIMEOUT = 60000; // 60 seconds
     private static final String CRLF = "\r\n";

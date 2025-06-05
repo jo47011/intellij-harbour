@@ -13,6 +13,7 @@ A plugin for IntelliJ IDEA that provides support for the Harbour/Clipper program
 - Rename refactoring
 - Structure view
 - Code formatting
+- Debugging
 
 ## Introduction
 
