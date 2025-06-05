@@ -1,5 +1,5 @@
-// IntelliJ Harbour Debug Library - Version 1.2.27
-// Fixed: Runtime compilation debug handler registration to receive HB_DBG_MODULENAME events
+// IntelliJ Harbour Debug Library - Version 1.2.25
+// Fixed: Exact VSCode debugger compatibility
 // - Stack lookup formula: l := oDebugInfo["__dbgEntryLevel"] - nLevel
 // - Initialization phase filtering with bInitGlobals/bInitStatics/bInitLines
 // - Error state handling with proper level adjustment
@@ -11,7 +11,7 @@
 REQUEST HB_GT_STD_DEFAULT
 
 #ifndef DBG_PORT
-#define DBG_PORT 9876  // IntelliJ debug server port
+#define DBG_PORT 9877  // IntelliJ uses 9877 for testing
 #endif
 
 #include <hbdebug.ch>
@@ -59,189 +59,86 @@ REQUEST HB_GT_STD_DEFAULT
 
 #define CRLF Chr(13)+Chr(10)
 
-// Static debug info storage - ultra-safe version
+STATIC t_oDebugInfo
+STATIC s_lConsoleRedirect := .T.  // Enable console redirection by default
+
+// Get or create debug info
 STATIC FUNCTION __DEBUGITEM(xValue)
-   STATIC s_oDebugInfo := NIL
-   
-   // Ultra-safe: only set if parameter provided
-   IF PCount() > 0
-      s_oDebugInfo := xValue
+   IF xValue != NIL
+      t_oDebugInfo := xValue
    ENDIF
    
-RETURN s_oDebugInfo
+RETURN t_oDebugInfo
 
 // Initialize debugger when it's safe to do so
 FUNCTION __InitIntelliJDebugger()
    LOCAL oDebugInfo
    
-   // Create simple array instead of hash to avoid initialization issues
-   oDebugInfo := Array(20)
-   oDebugInfo[1] := NIL       // socket
-   oDebugInfo[2] := .F.       // lRunning
-   oDebugInfo[3] := .F.       // lInternalRun 
-   oDebugInfo[4] := {}        // aBreaks (simple array, not hash)
-   oDebugInfo[5] := {}        // aStack
-   oDebugInfo[6] := {}        // aModules
-   oDebugInfo[7] := NIL       // maxLevel
-   oDebugInfo[8] := 0         // __dbgEntryLevel
-   oDebugInfo[9] := 0         // timeCheckForDebug
-   oDebugInfo[10] := .T.      // lInitialized
-   oDebugInfo[11] := .F.      // lSingleStep
-   oDebugInfo[12] := .F.      // lShowAllLocals
-   oDebugInfo[13] := .F.      // bInitGlobals (start false)
-   oDebugInfo[14] := .F.      // bInitStatics (start false)
-   oDebugInfo[15] := .F.      // bInitLines (start false)
-   oDebugInfo[16] := .F.      // bInitPublics
-   oDebugInfo[17] := .F.      // lError
-   oDebugInfo[18] := NIL      // debugHandle
-   oDebugInfo[19] := {}       // aBreakKeys (simple array for breakpoints)
-   oDebugInfo[20] := .T.      // lArrayMode (flag to use array access)
+   // Create the debug info structure
+   oDebugInfo := {=>}
+   oDebugInfo["socket"] := NIL
+   oDebugInfo["lRunning"] := .F.
+   oDebugInfo["lInternalRun"] := .F.
+   oDebugInfo["aBreaks"] := {=>}
+   oDebugInfo["aStack"] := {}
+   oDebugInfo["aModules"] := {}
+   oDebugInfo["maxLevel"] := NIL
+   oDebugInfo["__dbgEntryLevel"] := 0
+   oDebugInfo["timeCheckForDebug"] := 0
+   oDebugInfo["lInitialized"] := .F.
+   oDebugInfo["lSingleStep"] := .F.
+   oDebugInfo["lShowAllLocals"] := .F.
+   oDebugInfo["bInitGlobals"] := .T.
+   oDebugInfo["bInitStatics"] := .T.
+   oDebugInfo["bInitLines"] := .T.
+   oDebugInfo["bInitPublics"] := .F.
+   oDebugInfo["lError"] := .F.
+   oDebugInfo["debugHandle"] := NIL
    
    // Store it
    __DEBUGITEM(oDebugInfo)
    
    // Mark as initialized
-   ? "IntelliJ Harbour Debugger initializing (array mode)..."
+   ? "IntelliJ Harbour Debugger initializing..."
    
 RETURN .T.
 
 // Main debug entry point - called by Harbour VM
 PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3)
-   LOCAL oDebugInfo, i, tmp, lAdd
+   STATIC nDebugCallCount := 0
+   LOCAL oDebugInfo
    
-   // Just return immediately if debug system isn't initialized
-   // No error handling needed - just silent return
-   oDebugInfo := __DEBUGITEM()
-   IF oDebugInfo == NIL
-      RETURN  // Not initialized yet - completely ignore all events
+   // Handle the special case where VM asks for the debugger  
+   IF nMode == HB_DBG_GETENTRY
+      // Like VSCode: just return, don't register as main debugger
+      RETURN
    ENDIF
    
-   // Process debug events based on mode
-   DO CASE
-   CASE nMode == HB_DBG_MODULENAME  // Mode 1
-      // Already ensured debug info exists above
-      
-      // Ensure uParam1 is valid
-      IF uParam1 == NIL
-         RETURN
-      ENDIF
-      
-      // Build stack frame from module/function info
-      i := RAt(":", uParam1)
-      
-      // Get last stack entry safely
-      IF Len(oDebugInfo["aStack"]) > 0
-         tmp := ATail(oDebugInfo["aStack"])
-         lAdd := __dbgProcLevel()-1 != tmp[HB_DBG_CS_LEVEL]
-      ELSE
-         tmp := NIL
-         lAdd := .T.
-      ENDIF
-      lAdd := lAdd .OR. oDebugInfo["bInitStatics"]
-      lAdd := lAdd .OR. oDebugInfo["bInitGlobals"] 
-      lAdd := lAdd .OR. oDebugInfo["bInitLines"]
-      
-      IF lAdd
-         tmp := Array(HB_DBG_CS_LEN)
-      ENDIF
-      
-      // Parse module and function name
-      IF i == 0
-         tmp[HB_DBG_CS_MODULE] := uParam1
-         tmp[HB_DBG_CS_FUNCTION] := ProcName(1)
-      ELSE
-         tmp[HB_DBG_CS_MODULE] := Left(uParam1, i-1)
-         tmp[HB_DBG_CS_FUNCTION] := SubStr(uParam1, i+1)
-      ENDIF
-      
-      tmp[HB_DBG_CS_LINE] := ProcLine(1)
-      tmp[HB_DBG_CS_LEVEL] := __dbgProcLevel()-1
-      tmp[HB_DBG_CS_LOCALS] := {}
-      tmp[HB_DBG_CS_STATICS] := {}
-      
-      // Track initialization phases
-      IF At("_INITSTATICS", tmp[HB_DBG_CS_FUNCTION]) != 0
-         tmp[HB_DBG_CS_MODULE] := ProcFile(1)
-         oDebugInfo["bInitStatics"] := .T.
-      ELSEIF At("_INITGLOBALS", tmp[HB_DBG_CS_FUNCTION]) != 0
-         oDebugInfo["bInitGlobals"] := .T.
-      ELSEIF At("_INITLINES", tmp[HB_DBG_CS_FUNCTION]) != 0
-         oDebugInfo["bInitLines"] := .T.
-      ENDIF
-      
-      IF lAdd
-         AAdd(oDebugInfo["aStack"], tmp)
-         IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] < 0
-            oDebugInfo["maxLevel"]--
-         ENDIF
-      ENDIF
-      RETURN
-      
-   CASE nMode == HB_DBG_LOCALNAME  // Mode 2
-      // Add local variable to current stack frame
-      IF oDebugInfo != NIL .AND. !oDebugInfo["bInitGlobals"] .AND. ;
-         Len(oDebugInfo["aStack"]) > 0
-         AAdd(ATail(oDebugInfo["aStack"])[HB_DBG_CS_LOCALS], {uParam2, uParam1, "L", __dbgProcLevel()-1})
-      ENDIF
-      RETURN
-      
-   CASE nMode == HB_DBG_STATICNAME  // Mode 3
-      // Add static variable to current stack frame  
-      IF oDebugInfo != NIL .AND. Len(oDebugInfo["aStack"]) > 0
-         IF oDebugInfo["bInitStatics"]
-            // TODO: Handle static module initialization if needed
-         ELSEIF !oDebugInfo["bInitGlobals"]
-            AAdd(ATail(oDebugInfo["aStack"])[HB_DBG_CS_STATICS], {uParam3, uParam2, "S", uParam1})
-         ENDIF
-      ENDIF
-      RETURN
-      
-   CASE nMode == HB_DBG_GETENTRY  // Mode 6
-      // Entry point registration - CRITICAL: Register with VM to receive all debug events
-      __dbgSetEntry()
-      RETURN
-      
-   CASE nMode == HB_DBG_SHOWLINE  // Mode 5
-      // Continue with showline processing
-      
-   CASE nMode == HB_DBG_ACTIVATE  // Mode 7
-      // Initialize debug info on first ACTIVATE if needed
-      IF oDebugInfo == NIL
-         ? "=== INITIALIZING DEBUGGER ON ACTIVATE ==="
-         // Create the debug info structure now that VM is ready
-         oDebugInfo := { ;
-            "socket" => NIL, ;
-            "lRunning" => .F., ;
-            "lInternalRun" => .F., ;
-            "aBreaks" => {=>}, ;
-            "aStack" => {}, ;
-            "aModules" => {}, ;
-            "maxLevel" => NIL, ;
-            "__dbgEntryLevel" => 0, ;
-            "timeCheckForDebug" => 0, ;
-            "lInitialized" => .T., ;
-            "lSingleStep" => .F., ;
-            "lShowAllLocals" => .F., ;
-            "bInitGlobals" => .F., ;
-            "bInitStatics" => .F., ;
-            "bInitLines" => .F., ;
-            "bInitPublics" => .F., ;
-            "lError" => .F., ;
-            "debugHandle" => NIL ;
-         }
-         __DEBUGITEM(oDebugInfo)
-         ? "Debug info structure created successfully"
-      ENDIF
-      // Continue with activate processing
-      
-   OTHERWISE
-      // Ignore other modes
-      RETURN
-   ENDCASE
+   // Check if we have debug info
+   oDebugInfo := __DEBUGITEM()
    
-   // Ensure debug info exists for SHOWLINE/ACTIVATE processing
+   // During very early initialization, just return without creating anything
    IF oDebugInfo == NIL
       RETURN
+   ENDIF
+   
+   // Initialize on first real call  
+   IF !Empty(oDebugInfo) .AND. !oDebugInfo["lInitialized"]
+      oDebugInfo["lInitialized"] := .T.
+      ? "IntelliJ Harbour Debugger activated"
+      LogStackBuild("=== DEBUGGER INITIALIZED ===")
+      LogStackBuild("Initial flags:")
+      LogStackBuild("  bInitGlobals: " + IF(oDebugInfo["bInitGlobals"], "T", "F"))
+      LogStackBuild("  bInitStatics: " + IF(oDebugInfo["bInitStatics"], "T", "F"))
+      LogStackBuild("  bInitLines: " + IF(oDebugInfo["bInitLines"], "T", "F"))
+      LogStackBuild("  bInitPublics: " + IF(oDebugInfo["bInitPublics"], "T", "F"))
+      LogStackBuild("  lError: " + IF(oDebugInfo["lError"], "T", "F"))
+      // Enable debugging and disable beep
+      Set( _SET_DEBUG, .T. )
+      Set( _SET_BELL, .F. )  // Disable beep sounds
+      // Try additional ways to disable system beeps
+      Set( _SET_CONSOLE, .T. )
+      Set( _SET_DEVICE, "SCREEN" )
    ENDIF
    
    // Don't process if we're in internal run
@@ -249,26 +146,167 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3)
       RETURN
    ENDIF
    
-   // Handle the allowed debug modes
-   IF nMode == HB_DBG_ACTIVATE  // Mode 7 - called for each line when compiled with -b
-      // Set the current debug entry level  
-      oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
-      
-      // Store the debug handle for later use
-      IF uParam1 != NIL
-         oDebugInfo["debugHandle"] := uParam1
-      ENDIF
-      
-      // Try to establish socket connection and check for breakpoints
-      CheckSocket(.F.)
-      
-   ELSEIF nMode == HB_DBG_SHOWLINE  // Mode 5 - line execution
-      // Set the current debug entry level
-      oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
-      
-      // Try to establish socket connection and check for breakpoints  
-      CheckSocket(.F.)
-   ENDIF
+   SWITCH nMode
+      CASE HB_DBG_MODULENAME
+         // New module/function entered - this is where we build the stack
+         ? "*** HB_DBG_MODULENAME CALLED! Module: " + ValToPrg(uParam1) + " ***"
+         LogStackBuild("HB_DBG_MODULENAME entered: " + ValToPrg(uParam1))
+         LogStackBuild("  Current __dbgProcLevel(): " + Str(__dbgProcLevel()))
+         LogStackBuild("  Current stack count: " + Str(Len(oDebugInfo["aStack"])))
+         LogStackBuild("  bInitGlobals: " + IF(oDebugInfo["bInitGlobals"], "T", "F"))
+         LogStackBuild("  bInitStatics: " + IF(oDebugInfo["bInitStatics"], "T", "F"))
+         LogStackBuild("  bInitLines: " + IF(oDebugInfo["bInitLines"], "T", "F"))
+         
+         IF uParam1 != NIL
+            // Set the current debug entry level for this stack frame
+            oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
+            LogStackBuild("  Set __dbgEntryLevel to: " + Str(oDebugInfo["__dbgEntryLevel"]))
+            
+            // Clear initialization flags after first real function call
+            IF oDebugInfo["bInitLines"] .AND. !("__INIT" $ Upper(uParam1))
+               LogStackBuild("  Clearing initialization flags")
+               oDebugInfo["bInitGlobals"] := .F.
+               oDebugInfo["bInitStatics"] := .F.
+               oDebugInfo["bInitLines"] := .F.
+            ENDIF
+            
+            i := RAt(":", uParam1)
+            tmp := ATail(oDebugInfo["aStack"])
+            lAdd := Empty(tmp) .OR. __dbgProcLevel()-1 != tmp[HB_DBG_CS_LEVEL]
+         ELSE
+            EXIT
+         ENDIF
+         
+         IF lAdd
+            tmp := Array(HB_DBG_CS_LEN)
+         ENDIF
+         
+         IF i == 0
+            tmp[HB_DBG_CS_MODULE] := uParam1
+            tmp[HB_DBG_CS_FUNCTION] := ProcName(1)
+         ELSE
+            tmp[HB_DBG_CS_MODULE] := Left(uParam1, i-1)
+            tmp[HB_DBG_CS_FUNCTION] := SubStr(uParam1, i+1)
+         ENDIF
+         
+         tmp[HB_DBG_CS_LINE] := ProcLine(1)
+         tmp[HB_DBG_CS_LEVEL] := __dbgProcLevel()-1  // Correct level (like VSCode)
+         tmp[HB_DBG_CS_LOCALS] := {}
+         tmp[HB_DBG_CS_STATICS] := {}
+         
+         IF lAdd
+            AAdd(oDebugInfo["aStack"], tmp)
+            LogStackBuild("  ADDED stack frame:")
+            LogStackBuild("    Module: " + tmp[HB_DBG_CS_MODULE])
+            LogStackBuild("    Function: " + tmp[HB_DBG_CS_FUNCTION])
+            LogStackBuild("    Level: " + Str(tmp[HB_DBG_CS_LEVEL]))
+            LogStackBuild("    New stack count: " + Str(Len(oDebugInfo["aStack"])))
+         ELSE
+            LogStackBuild("  UPDATED existing stack frame")
+         ENDIF
+         
+         // Track unique modules
+         IF !Empty(tmp[HB_DBG_CS_MODULE])
+            cModule := tmp[HB_DBG_CS_MODULE]
+            IF hb_AScan(oDebugInfo["aModules"], cModule,,, .T.) == 0
+               AAdd(oDebugInfo["aModules"], cModule)
+               ? "Added new module to module list: " + cModule + " (Total: " + Str(Len(oDebugInfo["aModules"])) + ")"
+            ENDIF
+         ENDIF
+         EXIT
+         
+      CASE HB_DBG_SHOWLINE
+         // Line execution - this is where we check for breakpoints
+         oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
+         
+         // Update current line in stack
+         IF Len(oDebugInfo["aStack"]) > 0
+            ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE] := uParam1
+         ENDIF
+         
+         CheckSocket(.F.)
+         EXIT
+         
+      CASE HB_DBG_LOCALNAME
+         // Local variable - IMPORTANT: This gives us variable names!
+         LogStackBuild("HB_DBG_LOCALNAME: " + ValToPrg(uParam2) + " (index: " + Str(uParam1) + ")")
+         LogStackBuild("  Stack count: " + Str(Len(oDebugInfo["aStack"])))
+         LogStackBuild("  bInitGlobals: " + IF(oDebugInfo["bInitGlobals"], "T", "F"))
+         
+         // Skip during global initialization phase
+         IF !oDebugInfo["bInitGlobals"] .AND. Len(oDebugInfo["aStack"]) > 0
+            tmp := ATail(oDebugInfo["aStack"])
+            // Store: name, index, type, frame (uParam1 is already 0-based)
+            AAdd(tmp[HB_DBG_CS_LOCALS], {uParam2, uParam1, "L", __dbgProcLevel()-1})
+            LogStackBuild("  ADDED local to frame: " + tmp[HB_DBG_CS_FUNCTION])
+            LogStackBuild("    Frame level: " + Str(tmp[HB_DBG_CS_LEVEL]))
+            LogStackBuild("    Local count: " + Str(Len(tmp[HB_DBG_CS_LOCALS])))
+         ELSE
+            LogStackBuild("  SKIPPED local (init phase or no stack)")
+         ENDIF
+         EXIT
+         
+      CASE HB_DBG_STATICNAME
+         // Static variable
+         IF Len(oDebugInfo["aStack"]) > 0
+            tmp := ATail(oDebugInfo["aStack"])
+            // uParam1: variable index, uParam2: variable name, uParam3: module info
+            AAdd(tmp[HB_DBG_CS_STATICS], {uParam2, uParam1, "S", uParam3})
+            
+            // Also track in modules array for cross-function access
+            cCurrentFile := Lower(AllTrim(tmp[HB_DBG_CS_MODULE]))
+            i := AScan(oDebugInfo["aModules"], {|v| v[1] == cCurrentFile})
+            IF i == 0
+               AAdd(oDebugInfo["aModules"], {cCurrentFile, NIL, NIL, {}})
+               i := Len(oDebugInfo["aModules"])
+            ENDIF
+            AAdd(oDebugInfo["aModules"][i][4], {uParam2, uParam1, "S", uParam3})
+         ENDIF
+         EXIT
+         
+      CASE HB_DBG_ENDPROC
+         // End of procedure
+         LogStackBuild("HB_DBG_ENDPROC: level " + Str(uParam1))
+         IF Len(oDebugInfo["aStack"]) > 0
+            tmp := ATail(oDebugInfo["aStack"])
+            LogStackBuild("  Current stack top: " + tmp[HB_DBG_CS_FUNCTION] + " level: " + Str(tmp[HB_DBG_CS_LEVEL]))
+            IF tmp[HB_DBG_CS_LEVEL] == uParam1
+               ASize(oDebugInfo["aStack"], Len(oDebugInfo["aStack"])-1)
+               LogStackBuild("  REMOVED stack frame, new count: " + Str(Len(oDebugInfo["aStack"])))
+            ELSE
+               LogStackBuild("  Level mismatch, NOT removing")
+            ENDIF
+         ELSE
+            LogStackBuild("  Stack is empty!")
+         ENDIF
+         EXIT
+         
+      CASE HB_DBG_ACTIVATE
+         // Activate debugger - this is called for each line when compiled with -b
+         // Set the current debug entry level
+         oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
+         LogStackBuild("HB_DBG_ACTIVATE: __dbgEntryLevel set to " + Str(oDebugInfo["__dbgEntryLevel"]))
+         
+         // Store the debug handle for later use
+         IF uParam1 != NIL
+            oDebugInfo["debugHandle"] := uParam1
+         ENDIF
+         
+         // Don't build stack here - it should be built in HB_DBG_MODULENAME
+         // Just check for debugger connection
+         CheckSocket(.F.)
+         EXIT
+         
+      CASE HB_DBG_VMQUIT
+         // VM is quitting - close debugger connection
+         ? "DEBUG: VM Quitting"
+         IF !Empty(oDebugInfo["socket"])
+            hb_inetSend(oDebugInfo["socket"], "VMQUIT" + CRLF)
+            hb_inetClose(oDebugInfo["socket"])
+            oDebugInfo["socket"] := NIL
+         ENDIF
+         EXIT
+   ENDSWITCH
 RETURN
 
 // Check socket and process debug commands
@@ -281,16 +319,13 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    
    // Try to connect if not connected
    IF Empty(oDebugInfo["socket"]) .AND. oDebugInfo["timeCheckForDebug"] <= 14
-      ? "DEBUG: Attempting socket connection to 127.0.0.1:" + Str(DBG_PORT) + " (attempt " + Str(oDebugInfo["timeCheckForDebug"] + 1) + ")"
       hb_inetInit()
       oDebugInfo["socket"] := hb_inetCreate(140 - oDebugInfo["timeCheckForDebug"]*10)
       hb_inetConnect("127.0.0.1", DBG_PORT, oDebugInfo["socket"])
       
       IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
-         ? "DEBUG: Connection failed, error code:", hb_inetErrorCode(oDebugInfo["socket"])
          tmp := "NO"
       ELSE
-         ? "DEBUG: Connected! Sending handshake..."
          // Send handshake
          hb_inetSend(oDebugInfo["socket"], HB_ARGV(0) + CRLF + Str(__PIDNum()) + CRLF)
          
@@ -300,11 +335,9 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDDO
          
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
-         ? "DEBUG: Received response:", tmp
       ENDIF
       
       IF tmp != "HELLO"
-         ? "DEBUG: Invalid response, disconnecting"
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
@@ -531,13 +564,6 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          // Check for ALTD
          IF __dbgInvokeDebug(.F.)
             oDebugInfo["lRunning"] := .F.
-            
-            // Initialize debug system on first ALTD call if not already done
-            IF !oDebugInfo["lInitialized"]
-               oDebugInfo["lInitialized"] := .T.
-               ? "=== DEBUGGER ACTIVATED BY ALTD ==="
-               ? "Debug system is now active"
-            ENDIF
             IF !lStopSent
                // Get current file and line from the stack
                cCurrentFile := ""
@@ -1149,5 +1175,33 @@ HB_FUNC( __PIDNUM )
 
 #pragma ENDDUMP
 
-// No INIT procedure - completely passive startup to avoid segmentation faults
-// Debug initialization happens only on HB_DBG_ACTIVATE when VM is ready
+// Initialize the debugger when the library is loaded
+INIT PROCEDURE __InitIntelliJDebugger()
+   LOCAL oDebugInfo
+   
+   // Force standard console output
+   Set( _SET_CONSOLE, .T. )
+   Set( _SET_ALTERNATE, .F. )
+   Set( _SET_DEVICE, "SCREEN" )
+   Set( _SET_BELL, .F. )  // Disable beep sounds
+   
+   // Initialize debug info
+   oDebugInfo := __DEBUGITEM()
+   
+   // Register our debugger with the VM
+   __dbgSetEntry()
+   
+   // Enable debugging
+   Set( _SET_DEBUG, .T. )
+   
+   ? "IntelliJ Harbour Debugger initializing..."
+   
+   // Set running state to true initially - don't stop until we hit a breakpoint
+   oDebugInfo["lRunning"] := .T.
+   
+   // VM debugging functions will be called in HB_DBG_ACTIVATE with proper handle
+   ? "Debugger initialized - VM functions will be enabled on first activation"
+   
+   // Try initial connection to debugger
+   CheckSocket(.F.)
+RETURN

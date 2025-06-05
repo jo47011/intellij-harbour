@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.95'
+version = '1.0.178'
 
 repositories {
     mavenCentral()
@@ -52,7 +52,7 @@ intellijPlatform {
             recommended()
         }
     }
-    
+
     // Configure sandbox to auto-open mytest project
     sandboxContainer = file("$buildDir/idea-sandbox")
 }
@@ -89,35 +89,39 @@ task configureIDEProject {
     doLast {
         def sandboxConfig = file("$buildDir/idea-sandbox/config")
         sandboxConfig.mkdirs()
+
+        // Get parent directory of the project for auto-opening  
+        def projectPath = projectDir.absolutePath
+        def parentDir = projectDir.parent ?: projectPath
         
-        // Create recentProjects.xml to auto-open mytest
+        // Create recentProjects.xml to auto-open project directory
         def recentProjectsXml = new File(sandboxConfig, "options/recentProjects.xml")
         recentProjectsXml.parentFile.mkdirs()
-        recentProjectsXml.text = '''<application>
+        recentProjectsXml.text = """<application>
   <component name="RecentProjectsManager">
     <option name="recentPaths">
       <list>
-        <option value="/home/developer/workspace/mytest" />
+        <option value="${projectPath}" />
       </list>
     </option>
-    <option name="lastProjectPath" value="/home/developer/workspace/mytest" />
+    <option name="lastProjectPath" value="${projectPath}" />
   </component>
-</application>'''
+</application>"""
 
-        // Create trusted-paths.xml to trust the workspace
+        // Create trusted-paths.xml to trust the workspace (CORRECT FORMAT)
         def trustedPathsXml = new File(sandboxConfig, "options/trusted-paths.xml")
         trustedPathsXml.parentFile.mkdirs()
-        trustedPathsXml.text = '''<application>
-  <component name="Trusted.Paths.Settings">
-    <option name="trustedPaths">
-      <list>
-        <option value="/home/developer/workspace" />
-        <option value="/home/developer/workspace/mytest" />
-      </list>
+        trustedPathsXml.text = """<application>
+  <component name="Trusted.Paths">
+    <option name="TRUSTED_PROJECT_PATHS">
+      <map>
+        <entry key="${parentDir}" value="true" />
+        <entry key="${projectPath}" value="true" />
+      </map>
     </option>
   </component>
-</application>'''
-        
+</application>"""
+
         println "Configured IDE to auto-open and trust mytest project"
     }
 }
@@ -128,7 +132,7 @@ task ensureGradleDirs {
         // Create necessary gradle directories
         def gradleUserHome = gradle.gradleUserHomeDir
         def projectName = project.name ?: 'intellij-harbour'
-        
+
         // Create daemon directory for current gradle version
         def gradleVersion = gradle.gradleVersion
         def daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
@@ -136,7 +140,7 @@ task ensureGradleDirs {
             daemonDir.mkdirs()
             println "Created gradle daemon directory: ${daemonDir.absolutePath}"
         }
-        
+
         // Also create a generic daemon directory as fallback
         def genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
         if (!genericDaemonDir.exists()) {

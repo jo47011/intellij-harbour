@@ -72,6 +72,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile DebuggerState debuggerState = DebuggerState.DISCONNECTED;
     private volatile boolean hasPendingStepCommand = false;
     
+    // Variables for delayed position notification
+    private volatile boolean waitingForVariables = false;
+    private volatile int variablesExpected = 0;
+    private volatile int variablesReceived = 0;
+    private volatile String pendingStopFile = null;
+    private volatile int pendingStopLine = -1;
+    private volatile XSourcePosition pendingStopPosition = null;
+    
     public HarbourDebuggerRemoteProcess(@NotNull XDebugSession session,
                                        @NotNull ExecutionResult executionResult,
                                        int debugPort) {
@@ -86,6 +94,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         this.connection = new HarbourDebuggerConnection(debugPort);
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Created remote debugger on port " + debugPort);
+        
+        // Add shutdown hook to ensure cleanup even if normal shutdown fails
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "JVM shutdown hook - cleaning up debugger resources");
+            cleanupResources();
+        }, "Harbour-Debug-Cleanup"));
         
         // Discover source files
         discoverSourceFiles();
@@ -210,7 +224,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             case "STATICS":
             case "PRIVATES":
             case "PUBLICS":
-                handleVariables(command, Arrays.copyOfRange(lines, 1, lines.length));
+                String[] varLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "DEBUGGING: " + command + " with " + varLines.length + " variable lines");
+                for (int i = 0; i < varLines.length; i++) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "DEBUGGING varLine[" + i + "]: " + varLines[i]);
+                }
+                handleVariables(command, varLines);
                 break;
                 
             case "END":
@@ -254,21 +275,90 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             
             lastPosition = position;
             
-            ApplicationManager.getApplication().invokeLater(() -> {
-                HarbourDebuggerSuspendContext suspendContext = 
-                        new HarbourDebuggerSuspendContext(this, file, line, position);
-                getSession().positionReached(suspendContext);
-                
-                // Notify user that debugger has stopped
-                HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), file, line);
-                
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended, waiting for user action");
-            });
+            // Store the position information for later use
+            pendingStopFile = file;
+            pendingStopLine = line;
+            pendingStopPosition = position;
             
-            // Request variable information
+            // Request variable information BEFORE notifying about position reached
             requestVariables();
+            
+            // Set a flag to indicate we're waiting for variables
+            waitingForVariables = true;
+            variablesExpected = 4; // LOCALS, STATICS, PRIVATES, PUBLICS
+            variablesReceived = 0;
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables before notifying position reached");
+            
+            // Set a timeout in case variables don't arrive
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                try {
+                    Thread.sleep(1500); // Wait 1.5 seconds for variables (4 types * 200ms throttle + buffer)
+                    if (waitingForVariables && pendingStopPosition != null) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Variable timeout - notifying position reached anyway");
+                        waitingForVariables = false;
+                        
+                        // Capture values before clearing them
+                        final String stopFile = pendingStopFile;
+                        final int stopLine = pendingStopLine;
+                        final XSourcePosition stopPosition = pendingStopPosition;
+                        
+                        // Clear pending info BEFORE invokeLater
+                        pendingStopFile = null;
+                        pendingStopLine = -1;
+                        pendingStopPosition = null;
+                        
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            if (getSession() == null) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null in timeout handler!");
+                                return;
+                            }
+                            
+                            HarbourDebuggerSuspendContext suspendContext = 
+                                    new HarbourDebuggerSuspendContext(this, 
+                                        stopFile != null ? stopFile : "Unknown", 
+                                        stopLine, 
+                                        stopPosition);
+                            
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Calling positionReached after timeout for " + (stopFile != null ? stopFile : "Unknown") + 
+                                ":" + stopLine);
+                            
+                            getSession().positionReached(suspendContext);
+                            
+                            if (stopFile != null) {
+                                HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
+                            }
+                            
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended after timeout");
+                        });
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
         } else {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Could not find source file: " + file);
+            
+            // Even if we can't find the file, we should still notify that we're suspended
+            // Create a suspend context without a valid position
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (getSession() == null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null (no source file)!");
+                    return;
+                }
+                
+                HarbourDebuggerSuspendContext suspendContext = 
+                        new HarbourDebuggerSuspendContext(this, file, line, null);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Calling positionReached without source position for " + file + ":" + line);
+                
+                getSession().positionReached(suspendContext);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended (no source file found)");
+            });
         }
     }
     
@@ -281,7 +371,8 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     private void handleVariables(String scope, String[] varLines) {
-        boolean inVariableList = false;
+        // Clear only this scope's variables to prevent stale data
+        variables.entrySet().removeIf(entry -> entry.getKey().startsWith(scope + "."));
         
         for (String line : varLines) {
             // Check for end markers
@@ -301,6 +392,60 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                         "Variable " + scope + ": " + name + " = " + value + " (" + type + ")");
+            }
+        }
+        
+        // If we're waiting for variables, check if we've received all expected scopes
+        if (waitingForVariables) {
+            variablesReceived++;
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Received " + scope + " variables (" + variablesReceived + "/" + variablesExpected + ")");
+            
+            if (variablesReceived >= variablesExpected) {
+                // All variables received, now notify position reached
+                waitingForVariables = false;
+                variablesReceived = 0;
+                
+                if (pendingStopPosition != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "All variables received, notifying position reached");
+                    
+                    // Capture values before clearing them
+                    final String stopFile = pendingStopFile;
+                    final int stopLine = pendingStopLine;
+                    final XSourcePosition stopPosition = pendingStopPosition;
+                    
+                    // Clear pending info BEFORE invokeLater to prevent race conditions
+                    pendingStopFile = null;
+                    pendingStopLine = -1;
+                    pendingStopPosition = null;
+                    
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        if (getSession() == null) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null!");
+                            return;
+                        }
+                        
+                        HarbourDebuggerSuspendContext suspendContext = 
+                                new HarbourDebuggerSuspendContext(this, 
+                                    stopFile != null ? stopFile : "Unknown", 
+                                    stopLine, 
+                                    stopPosition);
+                        
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Calling positionReached for " + (stopFile != null ? stopFile : "Unknown") + 
+                            ":" + stopLine);
+                        
+                        getSession().positionReached(suspendContext);
+                        
+                        // Notify user that debugger has stopped
+                        if (stopFile != null) {
+                            HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
+                        }
+                        
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended, waiting for user action");
+                    });
+                }
             }
         }
     }
@@ -552,47 +697,74 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     
     @Override
     public void stop() {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "stop() called - beginning shutdown sequence");
+        
         // Update state to DISCONNECTED and clear pending flags
         updateDebuggerState(DebuggerState.DISCONNECTED, false);
-        
-        // Don't stop if we're still waiting for the initial connection
-        if (connection != null && connection.isWaitingForConnection()) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring stop() call - waiting for debug client connection");
-            return;
-        }
         
         // Log stack trace to see what's calling stop()
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "stop() called from:");
         StackTraceElement[] stack = Thread.currentThread().getStackTrace();
-        for (int i = 0; i < Math.min(stack.length, 10); i++) {
+        for (int i = 0; i < Math.min(stack.length, 5); i++) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "  " + stack[i].toString());
         }
         
-        // Signal shutdown to command executor
+        // Signal shutdown to command executor immediately
         shutdownRequested = true;
         
-        if (isConnected) {
-            // Send EXIT command directly (bypass queue for shutdown)
-            connection.sendCommand("EXIT");
-        }
-        
-        // Interrupt command executor thread
-        if (commandExecutor != null) {
-            commandExecutor.interrupt();
+        // 1. Send EXIT command if connected
+        if (isConnected && connection != null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sending EXIT command to debugger");
             try {
-                commandExecutor.join(1000); // Wait up to 1 second
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                connection.sendCommand("EXIT");
+                // Give a brief moment for the command to be sent
+                Thread.sleep(100);
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error sending EXIT command: " + e.getMessage());
             }
         }
         
-        connection.close();
-        
-        if (processHandler != null && !processHandler.isProcessTerminated()) {
-            processHandler.destroyProcess();
+        // 2. Shutdown command executor thread first
+        if (commandExecutor != null && commandExecutor.isAlive()) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Shutting down command executor thread");
+            commandExecutor.interrupt();
+            try {
+                commandExecutor.join(2000); // Wait up to 2 seconds
+                if (commandExecutor.isAlive()) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Command executor thread did not terminate gracefully");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Interrupted while waiting for command executor shutdown");
+            }
         }
         
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debugger stopped");
+        // 3. Close connection (this handles socket cleanup)
+        if (connection != null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Closing debugger connection");
+            try {
+                connection.close();
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error closing connection: " + e.getMessage());
+                HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+            }
+        }
+        
+        // 4. Terminate process if still running
+        if (processHandler != null && !processHandler.isProcessTerminated()) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Destroying process");
+            try {
+                processHandler.destroyProcess();
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error destroying process: " + e.getMessage());
+            }
+        }
+        
+        // 5. Clear state
+        isConnected = false;
+        variables.clear();
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debugger stop sequence completed");
     }
     
     @Override
@@ -797,10 +969,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 lastCommand = cmd.command;
                 lastExecutionTime = System.currentTimeMillis();
                 
-                // Clear variables on GO command
-                if ("GO".equals(cmd.command)) {
-                    variables.clear();
-                }
+                // Don't clear variables on GO - let them persist until new ones are received
                 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -813,5 +982,37 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         }
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Command executor thread stopped");
+    }
+    
+    /**
+     * Helper method to clean up all resources - can be called from shutdown hook
+     */
+    private void cleanupResources() {
+        try {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Performing resource cleanup");
+            
+            // Signal shutdown
+            shutdownRequested = true;
+            isConnected = false;
+            
+            // Interrupt and cleanup command executor
+            if (commandExecutor != null && commandExecutor.isAlive()) {
+                commandExecutor.interrupt();
+            }
+            
+            // Close connection
+            if (connection != null) {
+                connection.close();
+            }
+            
+            // Clear variables
+            if (variables != null) {
+                variables.clear();
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Resource cleanup completed");
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error during resource cleanup: " + e.getMessage());
+        }
     }
 }

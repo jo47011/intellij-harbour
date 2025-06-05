@@ -27,6 +27,11 @@ public class HarbourDebuggerValue extends XValue {
     public void addChild(HarbourDebuggerValue child) {
         children.add(child);
     }
+    
+    // Getter methods for debugging
+    public String getName() { return name; }
+    public String getType() { return type; }
+    public String getValue() { return value; }
 
     @Override
     public void computePresentation(@NotNull XValueNode node, @NotNull XValuePlace place) {

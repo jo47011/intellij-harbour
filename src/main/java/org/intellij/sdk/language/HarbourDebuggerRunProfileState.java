@@ -38,6 +38,10 @@ import java.util.Set;
 
 /**
  * RunProfileState that compiles and runs a Harbour program with debugging enabled.
+ * 
+ * BREAKTHROUGH FIX v1.0.141: Uses pre-compiled static library (libharbour_debug.a) 
+ * instead of runtime source compilation to receive HB_DBG_MODULENAME events.
+ * This enables proper variable name display (nCounter, cMessage vs Local1, Local2).
  */
 public class HarbourDebuggerRunProfileState extends CommandLineState {
     private final HarbourDebuggerRunConfig runConfig;
@@ -120,15 +124,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             throw new ExecutionException("hbmk2 compiler path is not specified");
         }
         
-        // Fix Windows/WSL path issues for hbmk2 path
-        if (hbmk2Path.contains("C:\\") || hbmk2Path.contains("\\")) {
-            // Convert Windows path to Linux path
-            if (hbmk2Path.contains("C:\\3pp\\harbour\\bin\\hbmk2.exe")) {
-                hbmk2Path = "/home/developer/workspace/harbour/bin/linux/gcc/hbmk2";
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Converted Windows hbmk2 path to Linux path: " + hbmk2Path);
-            }
-        }
+        // Use the configured hbmk2 path as-is (user should configure correct path for their OS)
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Using configured hbmk2 path: " + hbmk2Path);
 
         commandLine.setExePath(hbmk2Path);
 
@@ -148,20 +146,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 workingDir = "/" + workingDir;
             }
             
-            // Map the user path to our actual workspace
-            if (workingDir.contains("/home/gruhn/myprog-linux/claude/developer/workspace")) {
-                workingDir = workingDir.replace("/home/gruhn/myprog-linux/claude/developer/workspace", 
-                                               "/home/developer/workspace/mytest");
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Mapped user workspace to container workspace: " + workingDir);
-            }
+            // Remove hardcoded user path mapping - use working directory as-is
             
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "Converted WSL working directory to Linux path: " + workingDir);
         }
         
-        // Copy remote debug library to working directory
+        // Copy debug library from plugin resources to working directory
         copyDebugLibrary(workingDir);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Copied debug library from plugin resources to working directory");
         
         // Instrument source file if needed
         String buildTarget = runConfig.getSourceFile();
@@ -176,13 +170,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 buildTarget = "/" + buildTarget;
             }
             
-            // Map the user path to our actual workspace
-            if (buildTarget.contains("/home/gruhn/myprog-linux/claude/developer/workspace")) {
-                buildTarget = buildTarget.replace("/home/gruhn/myprog-linux/claude/developer/workspace", 
-                                                 "/home/developer/workspace/mytest");
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Mapped user source file to container workspace: " + buildTarget);
-            }
+            // Remove hardcoded user path mapping - use build target as-is
             
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "Converted WSL path to Linux path: " + buildTarget);
@@ -253,9 +241,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         }
         parameters.add(finalBuildTarget);
         
-        // Add debug library for IntelliJ debugging only if not already building it
+        // Add COMPLETE debug source for IntelliJ debugging (Variable names + breakpoint support)
         if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
-            parameters.add("harbour_debug.prg");
+            // Use debug source copied to working directory
+            String debugSourcePath = "harbour_debug_complete.prg";
+            parameters.add(debugSourcePath);
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Added COMPLETE debug source with variable names AND breakpoint support: " + debugSourcePath);
         }
         
         parameters.add("-b");
@@ -487,10 +479,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // Copy harbour_debug.prg
-        File debugLibFile = new File(workingDir, "harbour_debug.prg");
+        // Copy harbour_debug_complete.prg
+        File debugLibFile = new File(workingDir, "harbour_debug_complete.prg");
         try {
-            copyResourceFile("/debug/harbour_debug.prg", debugLibFile);
+            copyResourceFile("/debug/harbour_debug_complete.prg", debugLibFile);
         } catch (IOException e) {
             throw new ExecutionException("Failed to copy debug library: " + e.getMessage(), e);
         }

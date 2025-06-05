@@ -42,9 +42,18 @@ public class HarbourDebuggerExecutionStack extends XExecutionStack {
     }
 
     private String getFunctionNameFromFile(String filePath) {
+        // Handle null filePath
+        if (filePath == null) {
+            return "Unknown";
+        }
+        
         // Extract the function name from the file path
-        String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-        fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
+        int lastSlash = filePath.lastIndexOf('/');
+        int lastBackslash = filePath.lastIndexOf('\\');
+        int lastSeparator = Math.max(lastSlash, lastBackslash);
+        
+        String fileName = (lastSeparator >= 0) ? filePath.substring(lastSeparator + 1) : filePath;
+        
         if (fileName.toLowerCase().endsWith(".prg")) {
             fileName = fileName.substring(0, fileName.length() - 4);
         }

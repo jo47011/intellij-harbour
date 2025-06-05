@@ -26,7 +26,7 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
     private String sourceFile;
     private String compilerOptions;
     private String sourcePath;
-    private String debugPort = "6110";
+    private String debugPort = "9876";
     private String breakpointFile = "init.cld";
     private boolean useDirectExecution = false;
 

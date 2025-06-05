@@ -62,8 +62,15 @@ public class HarbourDebuggerConnection {
                 return false;
             }
             
-            clientSocket = serverSocket.accept();
-            waitingForConnection = false;
+            // Accept connection with proper timeout handling
+            try {
+                clientSocket = serverSocket.accept();
+                waitingForConnection = false;
+                HarbourLogger.log("HarbourDebuggerConnection", "Client connection accepted successfully");
+            } catch (SocketTimeoutException e) {
+                waitingForConnection = false;
+                throw e; // Re-throw to be handled by outer catch block
+            }
             
             // Setup streams
             reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
@@ -283,26 +290,78 @@ public class HarbourDebuggerConnection {
         connected = false;
         waitingForConnection = false;
         
+        // Close resources in reverse order of creation for proper cleanup
         try {
+            // First interrupt the message thread to stop any blocking operations
+            if (messageThread != null && messageThread.isAlive()) {
+                HarbourLogger.log("HarbourDebuggerConnection", "Interrupting message thread");
+                messageThread.interrupt();
+                try {
+                    // Wait briefly for thread to terminate gracefully
+                    messageThread.join(1000);
+                    if (messageThread.isAlive()) {
+                        HarbourLogger.log("HarbourDebuggerConnection", "Message thread did not terminate gracefully");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
+            // Close streams first
             if (writer != null) {
-                writer.close();
+                try {
+                    writer.close();
+                    HarbourLogger.log("HarbourDebuggerConnection", "Writer closed");
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerConnection", "Error closing writer: " + e.getMessage());
+                }
+                writer = null;
             }
+            
             if (reader != null) {
-                reader.close();
+                try {
+                    reader.close();
+                    HarbourLogger.log("HarbourDebuggerConnection", "Reader closed");
+                } catch (IOException e) {
+                    HarbourLogger.log("HarbourDebuggerConnection", "Error closing reader: " + e.getMessage());
+                }
+                reader = null;
             }
+            
+            // Close client socket
             if (clientSocket != null && !clientSocket.isClosed()) {
-                clientSocket.close();
+                try {
+                    clientSocket.close();
+                    HarbourLogger.log("HarbourDebuggerConnection", "Client socket closed");
+                } catch (IOException e) {
+                    HarbourLogger.log("HarbourDebuggerConnection", "Error closing client socket: " + e.getMessage());
+                }
+                clientSocket = null;
             }
+            
+            // Close server socket - most important for port cleanup
             if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close();
+                try {
+                    serverSocket.close();
+                    HarbourLogger.log("HarbourDebuggerConnection", "Server socket closed");
+                } catch (IOException e) {
+                    HarbourLogger.log("HarbourDebuggerConnection", "Error closing server socket: " + e.getMessage());
+                }
+                serverSocket = null;
             }
-        } catch (IOException e) {
-            HarbourLogger.log("HarbourDebuggerConnection", "Error closing connection: " + e.getMessage());
+            
+            // Clear command queue to prevent memory leaks
+            if (commandQueue != null) {
+                commandQueue.clear();
+                HarbourLogger.log("HarbourDebuggerConnection", "Command queue cleared");
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerConnection", "Unexpected error during cleanup: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerConnection", e);
         }
         
-        if (messageThread != null && messageThread.isAlive()) {
-            messageThread.interrupt();
-        }
+        HarbourLogger.log("HarbourDebuggerConnection", "Connection cleanup completed");
     }
     
     public boolean isConnected() {
