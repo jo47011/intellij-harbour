@@ -51,6 +51,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile String lastCommand = "";
     private volatile long lastCommandTime = 0;
     
+    // Conditional breakpoint evaluation fields
+    private String conditionalBreakpointFile = null;
+    private int conditionalBreakpointLine = -1;
+    
     // Enhanced command execution management
     private final Object commandLock = new Object();
     private final BlockingQueue<DebugCommand> commandQueue = new LinkedBlockingQueue<>();
@@ -160,16 +164,30 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         if (parts.length >= 4) {
                             // Format: STOP:reason:file:line
                             try {
-                                handleStop(parts[2], Integer.parseInt(parts[3].trim()));
+                                String reason = parts[1];
+                                String file = parts[2];
+                                int line = Integer.parseInt(parts[3].trim());
+                                
+                                // Check if this is a breakpoint hit that needs condition evaluation
+                                if ("break".equals(reason)) {
+                                    // Store the conditional breakpoint info for later evaluation
+                                    conditionalBreakpointFile = file;
+                                    conditionalBreakpointLine = line;
+                                    // Handle the stop to collect variables first, then evaluate condition
+                                    handleStop(file, line);
+                                } else {
+                                    // Non-breakpoint stop (AltD, step, etc.)
+                                    handleStop(file, line);
+                                }
                             } catch (NumberFormatException e) {
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Invalid line number in STOP command: " + parts[3]);
+                                HarbourLogger.log(project, "HarbourDebuggerRemoteProcess", "Invalid line number in STOP command: " + parts[3]);
                             }
                         } else if (parts.length >= 3) {
                             // Old format: STOP:file:line
                             try {
                                 handleStop(parts[1], Integer.parseInt(parts[2].trim()));
                             } catch (NumberFormatException e) {
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Invalid line number in STOP command: " + parts[2]);
+                                HarbourLogger.log(project, "HarbourDebuggerRemoteProcess", "Invalid line number in STOP command: " + parts[2]);
                             }
                         }
                         break;
@@ -304,6 +322,43 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         final int stopLine = pendingStopLine;
                         final XSourcePosition stopPosition = pendingStopPosition;
                         
+                        // Check if this is a conditional breakpoint that needs evaluation BEFORE notifying
+                        if (conditionalBreakpointFile != null && conditionalBreakpointLine != -1) {
+                            if (stopFile != null && stopFile.equals(conditionalBreakpointFile) && stopLine == conditionalBreakpointLine) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "TIMEOUT DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "TIMEOUT DEBUG: Current variables: " + variables.toString());
+                                
+                                boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "TIMEOUT DEBUG: shouldStopAtConditionalBreakpoint returned: " + shouldStop);
+                                
+                                if (!shouldStop) {
+                                    // Condition not met, continue execution without notifying position
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "TIMEOUT: Breakpoint condition not met at " + stopFile + ":" + stopLine + ", continuing");
+                                    
+                                    // Clear all pending and conditional info
+                                    pendingStopFile = null;
+                                    pendingStopLine = -1;
+                                    pendingStopPosition = null;
+                                    conditionalBreakpointFile = null;
+                                    conditionalBreakpointLine = -1;
+                                    
+                                    // Continue execution
+                                    sendCommand("GO");
+                                    return;
+                                } else {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "TIMEOUT: Breakpoint condition met at " + stopFile + ":" + stopLine + ", stopping");
+                                }
+                            }
+                            // Clear conditional breakpoint info
+                            conditionalBreakpointFile = null;
+                            conditionalBreakpointLine = -1;
+                        }
+                        
                         // Clear pending info BEFORE invokeLater
                         pendingStopFile = null;
                         pendingStopLine = -1;
@@ -414,6 +469,43 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     final String stopFile = pendingStopFile;
                     final int stopLine = pendingStopLine;
                     final XSourcePosition stopPosition = pendingStopPosition;
+                    
+                    // Check if this is a conditional breakpoint that needs evaluation
+                    if (conditionalBreakpointFile != null && conditionalBreakpointLine != -1) {
+                        if (stopFile.equals(conditionalBreakpointFile) && stopLine == conditionalBreakpointLine) {
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "NORMAL DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "NORMAL DEBUG: Current variables: " + variables.toString());
+                            
+                            boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "NORMAL DEBUG: shouldStopAtConditionalBreakpoint returned: " + shouldStop);
+                            
+                            if (!shouldStop) {
+                                // Condition not met, continue execution without notifying position
+                                HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Breakpoint condition not met at " + stopFile + ":" + stopLine + ", continuing");
+                                
+                                // Clear pending and conditional info
+                                pendingStopFile = null;
+                                pendingStopLine = -1;
+                                pendingStopPosition = null;
+                                conditionalBreakpointFile = null;
+                                conditionalBreakpointLine = -1;
+                                
+                                // Continue execution
+                                sendCommand("GO");
+                                return;
+                            } else {
+                                HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Breakpoint condition met at " + stopFile + ":" + stopLine + ", stopping");
+                            }
+                        }
+                        // Clear conditional breakpoint info
+                        conditionalBreakpointFile = null;
+                        conditionalBreakpointLine = -1;
+                    }
                     
                     // Clear pending info BEFORE invokeLater to prevent race conditions
                     pendingStopFile = null;
@@ -693,6 +785,290 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             updateDebuggerState(DebuggerState.SUSPENDED, false); // Reset state on error
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue GO command");
         }
+    }
+    
+    /**
+     * Check if we should stop at a conditional breakpoint by evaluating its condition
+     */
+    private boolean shouldStopAtConditionalBreakpoint(String file, int line) {
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "SHOULD_STOP DEBUG: Checking conditional breakpoint for " + file + ":" + line);
+        
+        // Get the breakpoint for this location
+        String breakpointKey = file + ":" + line;
+        
+        // Find the breakpoint with conditions
+        var registeredBreakpoints = breakpointHandler.getRegisteredBreakpoints();
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "SHOULD_STOP DEBUG: Found " + registeredBreakpoints.size() + " registered breakpoints");
+        
+        for (var breakpoint : registeredBreakpoints) {
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "SHOULD_STOP DEBUG: Checking breakpoint: " + breakpoint);
+            
+            if (breakpoint.getSourcePosition() != null) {
+                String bpFile = breakpoint.getSourcePosition().getFile().getName();
+                int bpLine = breakpoint.getSourcePosition().getLine() + 1; // 0-based to 1-based
+                
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "SHOULD_STOP DEBUG: Breakpoint at " + bpFile + ":" + bpLine + 
+                    " vs target " + file + ":" + line);
+                
+                if (bpFile.equals(file) && bpLine == line) {
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "SHOULD_STOP DEBUG: Found matching breakpoint!");
+                    
+                    HarbourDebuggerBreakpointProperties properties = breakpoint.getProperties();
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "SHOULD_STOP DEBUG: Properties: " + (properties != null ? "not null" : "NULL"));
+                    
+                    // Check custom properties storage if properties is null
+                    if (properties == null) {
+                        properties = HarbourDebuggerBreakpointPropertiesPanel.getCustomProperties(breakpoint);
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "SHOULD_STOP DEBUG: Custom properties: " + (properties != null ? "not null" : "NULL"));
+                    }
+                    
+                    if (properties != null) {
+                        boolean hasCondition = properties.hasCondition();
+                        String condition = properties.getCondition();
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "SHOULD_STOP DEBUG: hasCondition=" + hasCondition + ", condition='" + condition + "'");
+                        
+                        if (hasCondition) {
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "SHOULD_STOP DEBUG: Evaluating breakpoint condition: " + condition);
+                            
+                            // Evaluate the condition using current variables
+                            boolean result = evaluateCondition(condition);
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "SHOULD_STOP DEBUG: Condition '" + condition + "' evaluated to: " + result);
+                            return result;
+                        } else {
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "SHOULD_STOP DEBUG: No condition, returning true");
+                            return true;
+                        }
+                    } else {
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "SHOULD_STOP DEBUG: Properties is null, returning true");
+                        return true;
+                    }
+                }
+            } else {
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "SHOULD_STOP DEBUG: Breakpoint has null source position");
+            }
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "SHOULD_STOP DEBUG: No matching breakpoint found, returning true");
+        return true;
+    }
+    
+    /**
+     * Simple condition evaluator for basic Harbour expressions
+     */
+    private boolean evaluateCondition(String condition) {
+        if (condition == null || condition.trim().isEmpty()) {
+            HarbourLogger.log(project, "HarbourDebugger", "EVAL DEBUG: Empty condition, returning true");
+            return true;
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", "EVAL DEBUG: Original condition: '" + condition + "'");
+        condition = condition.trim().toLowerCase();
+        HarbourLogger.log(project, "HarbourDebugger", "EVAL DEBUG: Normalized condition: '" + condition + "'");
+        
+        try {
+            // Handle simple numeric comparisons: variable == value, variable > value, etc.
+            if (condition.contains("==")) {
+                String[] parts = condition.split("==");
+                HarbourLogger.log(project, "HarbourDebugger", "EVAL DEBUG: Split on '==', got " + parts.length + " parts");
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "EVAL DEBUG: Calling evaluateComparison('" + varName + "', '" + expectedValue + "', '==')");
+                    boolean result = evaluateComparison(varName, expectedValue, "==");
+                    HarbourLogger.log(project, "HarbourDebugger", "EVAL DEBUG: evaluateComparison returned: " + result);
+                    return result;
+                }
+            } else if (condition.contains("!=")) {
+                String[] parts = condition.split("!=");
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    return evaluateComparison(varName, expectedValue, "!=");
+                }
+            } else if (condition.contains(">=")) {
+                String[] parts = condition.split(">=");
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    return evaluateComparison(varName, expectedValue, ">=");
+                }
+            } else if (condition.contains("<=")) {
+                String[] parts = condition.split("<=");
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    return evaluateComparison(varName, expectedValue, "<=");
+                }
+            } else if (condition.contains(">")) {
+                String[] parts = condition.split(">");
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    return evaluateComparison(varName, expectedValue, ">");
+                }
+            } else if (condition.contains("<")) {
+                String[] parts = condition.split("<");
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    return evaluateComparison(varName, expectedValue, "<");
+                }
+            }
+            
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "Unsupported condition format: " + condition + " - defaulting to true");
+            return true;
+            
+        } catch (Exception e) {
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "Error evaluating condition '" + condition + "': " + e.getMessage() + " - defaulting to true");
+            return true;
+        }
+    }
+    
+    /**
+     * Evaluate a comparison between a variable and a value
+     */
+    private boolean evaluateComparison(String varName, String expectedValue, String operator) {
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "COMP DEBUG: Starting evaluateComparison(varName='" + varName + "', expectedValue='" + expectedValue + "', operator='" + operator + "')");
+        
+        // Get current variable value - search through all scopes
+        String upperVarName = varName.toUpperCase();
+        HarbourLogger.log(project, "HarbourDebugger", "COMP DEBUG: upperVarName='" + upperVarName + "'");
+        HarbourDebuggerValue variable = null;
+        
+        // Try direct lookup first
+        variable = variables.get(upperVarName);
+        HarbourLogger.log(project, "HarbourDebugger", "COMP DEBUG: Direct lookup result: " + (variable != null ? "found" : "not found"));
+        
+        // If not found, search through scoped variables (LOCALS.VAR, STATICS.VAR, etc.)
+        if (variable == null) {
+            HarbourLogger.log(project, "HarbourDebugger", "COMP DEBUG: Searching through scoped variables...");
+            for (String key : variables.keySet()) {
+                HarbourLogger.log(project, "HarbourDebugger", "COMP DEBUG: Checking key: '" + key + "'");
+                if (key.endsWith("." + upperVarName)) {
+                    variable = variables.get(key);
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "COMP DEBUG: Found variable '" + varName + "' in scope: " + key);
+                    break;
+                }
+            }
+        }
+        
+        if (variable == null) {
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "Variable '" + varName + "' not found in any scope - condition defaults to false");
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "Available variables: " + variables.keySet().toString());
+            return false;
+        }
+        
+        String actualValue = variable.getValue();
+        String actualType = variable.getType();
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "Comparing " + varName + " (" + actualValue + ", type: " + actualType + ") " + operator + " " + expectedValue);
+        
+        // Handle numeric comparisons
+        if ("N".equals(actualType) || "NUM".equals(actualType) || "NUMBER".equals(actualType)) {
+            HarbourLogger.log(project, "HarbourDebugger", "COMP DEBUG: Handling numeric comparison");
+            try {
+                double actualNum = Double.parseDouble(actualValue);
+                double expectedNum = Double.parseDouble(expectedValue);
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "COMP DEBUG: Parsed numbers - actual: " + actualNum + ", expected: " + expectedNum);
+                
+                boolean result;
+                switch (operator) {
+                    case "==": 
+                        result = actualNum == expectedNum;
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: " + actualNum + " == " + expectedNum + " = " + result);
+                        return result;
+                    case "!=": 
+                        result = actualNum != expectedNum;
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: " + actualNum + " != " + expectedNum + " = " + result);
+                        return result;
+                    case ">": 
+                        result = actualNum > expectedNum;
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: " + actualNum + " > " + expectedNum + " = " + result);
+                        return result;
+                    case "<": 
+                        result = actualNum < expectedNum;
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: " + actualNum + " < " + expectedNum + " = " + result);
+                        return result;
+                    case ">=": 
+                        result = actualNum >= expectedNum;
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: " + actualNum + " >= " + expectedNum + " = " + result);
+                        return result;
+                    case "<=": 
+                        result = actualNum <= expectedNum;
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: " + actualNum + " <= " + expectedNum + " = " + result);
+                        return result;
+                    default:
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "COMP DEBUG: Unknown numeric operator: " + operator);
+                        return false;
+                }
+            } catch (NumberFormatException e) {
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "COMP DEBUG: Error parsing numbers: " + e.getMessage());
+                return false;
+            }
+        }
+        // Handle string comparisons  
+        else if ("C".equals(actualType) || "CHAR".equals(actualType) || "CHARACTER".equals(actualType)) {
+            // Remove quotes from expected value if present
+            String cleanExpectedValue = expectedValue.replaceAll("^\"|\"$", "").replaceAll("^'|'$", "");
+            
+            switch (operator) {
+                case "==": return actualValue.equals(cleanExpectedValue);
+                case "!=": return !actualValue.equals(cleanExpectedValue);
+                default:
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "String comparison operator '" + operator + "' not supported");
+                    return false;
+            }
+        }
+        // Handle logical comparisons
+        else if ("L".equals(actualType) || "LOGICAL".equals(actualType)) {
+            boolean actualBool = ".T.".equals(actualValue) || "true".equalsIgnoreCase(actualValue);
+            boolean expectedBool = ".T.".equals(expectedValue) || "true".equalsIgnoreCase(expectedValue);
+            
+            switch (operator) {
+                case "==": return actualBool == expectedBool;
+                case "!=": return actualBool != expectedBool;
+                default:
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "Logical comparison operator '" + operator + "' not supported");
+                    return false;
+            }
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "Unsupported variable type '" + actualType + "' for comparison");
+        return false;
     }
     
     @Override
