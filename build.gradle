@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.182'
+version = '1.0.184'
 
 repositories {
     mavenCentral()
@@ -15,11 +15,7 @@ repositories {
 }
 
 sourceSets {
-    main {
-        java {
-            srcDirs 'src/main/gen'
-        }
-    }
+    main.java.srcDirs 'src/main/gen'
 }
 
 dependencies {
@@ -44,7 +40,7 @@ intellijPlatform {
     instrumentCode = false
 
     pluginConfiguration {
-        version = project.version
+        version.set(project.version)
     }
 
     pluginVerification {
@@ -60,7 +56,7 @@ intellijPlatform {
 // Configure main JAR only
 jar {
     archiveBaseName = 'harbour-language-plugin'
-    archiveVersion = '1.0.4'
+    archiveVersion = project.version
 }
 
 // Configure tasks properly for the new plugin version
@@ -69,7 +65,7 @@ jar {
 // Task configuration
 task createGenDir {
     doLast {
-        def genDir = new File(projectDir, 'src/main/gen/org/intellij/sdk/language')
+        File genDir = new File(projectDir, 'src/main/gen/org/intellij/sdk/language')
         genDir.mkdirs()
     }
 }
@@ -92,8 +88,8 @@ tasks.withType(org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask) 
         def parentDir = projectDir.parent ?: projectPath
         
         // Create trusted-paths.xml in sandbox config directory
-        def sandboxConfigDir = new File(sandboxDirectory.get().asFile, "config")
-        def trustedPathsFile = new File(sandboxConfigDir, "options/trusted-paths.xml")
+        File sandboxConfigDir = new File(sandboxDirectory.get().asFile, "config")
+        File trustedPathsFile = new File(sandboxConfigDir, "options/trusted-paths.xml")
         trustedPathsFile.parentFile.mkdirs()
         
         trustedPathsFile.text = """<application>
@@ -120,14 +116,14 @@ task ensureGradleDirs {
 
         // Create daemon directory for current gradle version
         def gradleVersion = gradle.gradleVersion
-        def daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
+        File daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
         if (!daemonDir.exists()) {
             daemonDir.mkdirs()
             println "Created gradle daemon directory: ${daemonDir.absolutePath}"
         }
 
         // Also create a generic daemon directory as fallback
-        def genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
+        File genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
         if (!genericDaemonDir.exists()) {
             genericDaemonDir.mkdirs()
         }

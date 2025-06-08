@@ -35,7 +35,7 @@ import java.util.Set;
 
 /**
  * RunProfileState that compiles and runs a Harbour program with debugging enabled.
- * 
+ *
  * BREAKTHROUGH FIX v1.0.141: Uses pre-compiled static library (libharbour_debug.a) 
  * instead of runtime source compilation to receive HB_DBG_MODULENAME events.
  * This enables proper variable name display (nCounter, cMessage vs Local1, Local2).
@@ -118,7 +118,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     private void compileAndRunHarbourProgram(GeneralCommandLine commandLine) throws ExecutionException {
         String hbmk2Path = runConfig.getHbmk2Path();
         if (StringUtil.isEmpty(hbmk2Path)) {
-            throw new ExecutionException("hbmk2 compiler path is not specified");
+            throw new ExecutionException("Hbmk2 compiler path is not specified");
         }
         
         // Use the configured hbmk2 path as-is (user should configure correct path for their OS)
@@ -226,7 +226,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         List<String> parameters = new ArrayList<>();
 
         // Look for .hbp file in working directory
-        File workingDirFile = new File(workingDir);
+        File workingDirFile = new File(workingDir != null ? workingDir : ".");
         // If we instrumented the file, use the instrumented version directly, don't look for .hbp
         String finalBuildTarget;
         if (instrumentedFile != null && instrumentedFile.exists()) {
@@ -378,7 +378,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             File breakpointFile = new File(workingDir, breakpointFileName);
 
             if (!breakpointFile.getParentFile().exists()) {
-                breakpointFile.getParentFile().mkdirs();
+                if (!breakpointFile.getParentFile().mkdirs()) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", "Failed to create breakpoint directory");
+                }
             }
 
             int totalBreakpoints = 0;
@@ -479,13 +481,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Copy harbour_debug_complete.prg
         File debugLibFile = new File(workingDir, "harbour_debug_complete.prg");
         try {
-            copyResourceFile("/debug/harbour_debug_complete.prg", debugLibFile);
+            copyResourceFile(debugLibFile);
         } catch (IOException e) {
             throw new ExecutionException("Failed to copy debug library: " + e.getMessage(), e);
         }
     }
     
-    private void copyResourceFile(String resourcePath, File targetFile) throws IOException, ExecutionException {
+    private void copyResourceFile(File targetFile) throws IOException, ExecutionException {
+        String resourcePath = "/debug/harbour_debug_complete.prg";
         try (InputStream resourceStream = getClass().getResourceAsStream(resourcePath)) {
             if (resourceStream == null) {
                 throw new ExecutionException("Resource not found: " + resourcePath);

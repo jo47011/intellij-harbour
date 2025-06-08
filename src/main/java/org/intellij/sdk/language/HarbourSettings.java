@@ -11,7 +11,6 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.util.xmlb.XmlSerializerUtil;
-import com.intellij.util.xmlb.annotations.Transient;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -128,10 +127,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
         return lineBreakPosition;
     }
 
-    // Getter and setter for the static field
-    public static int getLastUsedRightMargin() {
-        return lastUsedRightMargin;
-    }
 
     public static void setLastUsedRightMargin(int margin) {
         lastUsedRightMargin = margin;
@@ -263,7 +258,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
                 "VAR", "INLINE", "INIT", "NIL", "SELF", "SUPER"
         };
 
-        defaults.addAll(Arrays.asList(commands));
+        defaults = new ArrayList<>(Arrays.asList(commands));
         return defaults;
     }
 

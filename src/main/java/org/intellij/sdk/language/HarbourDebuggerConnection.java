@@ -163,21 +163,15 @@ public class HarbourDebuggerConnection {
         for (String param : params) {
             cmd.append(":").append(param);
         }
-        HarbourLogger.log("HarbourDebuggerConnection", "Sending unified command: " + cmd.toString());
+        HarbourLogger.log("HarbourDebuggerConnection", "Sending unified command: " + cmd);
         sendCommand(cmd.toString());
     }
     
-    /**
-     * Read a message from the debug client (blocking with timeout)
-     */
-    public String readMessage() throws IOException {
-        return readMessage(5000); // 5 second timeout
-    }
     
     /**
      * Read a message with specified timeout
      */
-    public String readMessage(long timeoutMs) throws IOException {
+    public String readMessage(long timeoutMs) {
         try {
             String message = commandQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
             if (message != null) {
@@ -206,7 +200,7 @@ public class HarbourDebuggerConnection {
                     // Check if this is a command start
                     if (isCommand(line)) {
                         // If we have a pending message, process it
-                        if (messageBuilder.length() > 0) {
+                        if (!messageBuilder.isEmpty()) {
                             processMessage(messageBuilder.toString());
                             messageBuilder.setLength(0);
                         }
@@ -220,7 +214,7 @@ public class HarbourDebuggerConnection {
                         }
                     } else {
                         // Continue building message
-                        if (messageBuilder.length() > 0) {
+                        if (!messageBuilder.isEmpty()) {
                             messageBuilder.append(CRLF);
                         }
                         messageBuilder.append(line);
@@ -349,10 +343,8 @@ public class HarbourDebuggerConnection {
             }
             
             // Clear command queue to prevent memory leaks
-            if (commandQueue != null) {
-                commandQueue.clear();
-                HarbourLogger.log("HarbourDebuggerConnection", "Command queue cleared");
-            }
+            commandQueue.clear();
+            HarbourLogger.log("HarbourDebuggerConnection", "Command queue cleared");
             
         } catch (Exception e) {
             HarbourLogger.log("HarbourDebuggerConnection", "Unexpected error during cleanup: " + e.getMessage());
@@ -366,11 +358,4 @@ public class HarbourDebuggerConnection {
         return connected;
     }
     
-    public boolean isWaitingForConnection() {
-        return waitingForConnection;
-    }
-    
-    public int getPort() {
-        return port;
-    }
 }
