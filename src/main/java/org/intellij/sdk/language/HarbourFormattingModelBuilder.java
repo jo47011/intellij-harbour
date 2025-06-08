@@ -17,7 +17,6 @@ import java.util.List;
  * Provides formatting model for Harbour code
  */
 public class HarbourFormattingModelBuilder implements FormattingModelBuilder {
-    private static final Logger LOG = Logger.getInstance(HarbourFormattingModelBuilder.class);
 
     @Override
     public @NotNull FormattingModel createModel(@NotNull FormattingContext formattingContext) {
@@ -42,18 +41,6 @@ public class HarbourFormattingModelBuilder implements FormattingModelBuilder {
             // Reset formatting flag
             HarbourTokenTypeExtension.setFormattingInProgress(false);
         }
-    }
-
-    /**
-     * Gets the indent size from the project settings
-     */
-    private int getIndentSize(Project project) {
-        if (project == null) {
-            return 2; // Default value
-        }
-
-        HarbourSettings settings = HarbourSettings.getInstance(project);
-        return settings != null ? settings.getIndentationSize() : 2;
     }
 
     /**
