@@ -35,8 +35,6 @@ public class HarbourFormattingModelBuilder implements FormattingModelBuilder {
             DummyBlock rootBlock = new DummyBlock(file.getNode());
             FormattingModel model = FormattingModelProvider.createFormattingModelForPsiFile(file, rootBlock, settings);
 
-            // Store the right margin in a static field for the post-processor to access
-            HarbourSettings.setLastUsedRightMargin(settings.getRightMargin(HarbourLanguage.INSTANCE));
 
             HarbourLogger.log("FormattingModelBuilder", "Created formatting model for " + file.getName());
             return model;

@@ -169,22 +169,6 @@ public class HarbourDebuggerConnection {
     
     
     /**
-     * Read a message with specified timeout
-     */
-    public String readMessage(long timeoutMs) {
-        try {
-            String message = commandQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
-            if (message != null) {
-                HarbourLogger.log("HarbourDebuggerConnection", "Read message: " + message);
-            }
-            return message;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
-    }
-    
-    /**
      * Start the message reading thread
      */
     private void startMessageThread() {
@@ -226,7 +210,7 @@ public class HarbourDebuggerConnection {
                 }
             } finally {
                 // Process any remaining message
-                if (messageBuilder.length() > 0) {
+                if (!messageBuilder.isEmpty()) {
                     processMessage(messageBuilder.toString());
                 }
                 HarbourLogger.log("HarbourDebuggerConnection", "Message thread ending");

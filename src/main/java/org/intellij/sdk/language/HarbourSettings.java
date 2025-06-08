@@ -57,8 +57,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Line break position (default 99, 0 or negative means no line breaking)
     private int lineBreakPosition = 99;
 
-    // Static field to store the last used right margin from code style settings
-    private static int lastUsedRightMargin = 99;
 
     // Formatting settings
     private boolean returnStatementsAtLevel0 = true;
@@ -128,9 +126,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     }
 
 
-    public static void setLastUsedRightMargin(int margin) {
-        lastUsedRightMargin = margin;
-    }
 
     // Replace the existing setLineBreakPosition method
     public void setLineBreakPosition(int lineBreakPosition) {
@@ -213,8 +208,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
      * Gets default list of Harbour commands
      */
     public static List<String> getDefaultHarbourCommands() {
-        List<String> defaults = new ArrayList<>();
-
         // Basic commands
         String[] commands = {
                 "ACCEPT", "APPEND", "AVERAGE", "BEGIN SEQUENCE", "BEGIN TRANSACTION", "BOX", "BREAK",
@@ -258,8 +251,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
                 "VAR", "INLINE", "INIT", "NIL", "SELF", "SUPER"
         };
 
-        defaults = new ArrayList<>(Arrays.asList(commands));
-        return defaults;
+        return new ArrayList<>(Arrays.asList(commands));
     }
 
     // Include paths methods

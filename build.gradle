@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.184'
+version = '1.0.185'
 
 repositories {
     mavenCentral()
@@ -65,7 +65,7 @@ jar {
 // Task configuration
 task createGenDir {
     doLast {
-        File genDir = new File(projectDir, 'src/main/gen/org/intellij/sdk/language')
+        def genDir = new File(projectDir, 'src/main/gen/org/intellij/sdk/language')
         genDir.mkdirs()
     }
 }
@@ -88,8 +88,8 @@ tasks.withType(org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask) 
         def parentDir = projectDir.parent ?: projectPath
         
         // Create trusted-paths.xml in sandbox config directory
-        File sandboxConfigDir = new File(sandboxDirectory.get().asFile, "config")
-        File trustedPathsFile = new File(sandboxConfigDir, "options/trusted-paths.xml")
+        def sandboxConfigDir = new File(sandboxDirectory.get().asFile, "config")
+        def trustedPathsFile = new File(sandboxConfigDir, "options/trusted-paths.xml")
         trustedPathsFile.parentFile.mkdirs()
         
         trustedPathsFile.text = """<application>
@@ -116,14 +116,14 @@ task ensureGradleDirs {
 
         // Create daemon directory for current gradle version
         def gradleVersion = gradle.gradleVersion
-        File daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
+        def daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
         if (!daemonDir.exists()) {
             daemonDir.mkdirs()
             println "Created gradle daemon directory: ${daemonDir.absolutePath}"
         }
 
         // Also create a generic daemon directory as fallback
-        File genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
+        def genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
         if (!genericDaemonDir.exists()) {
             genericDaemonDir.mkdirs()
         }
