@@ -61,6 +61,12 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
                         properties = HarbourDebuggerBreakpointPropertiesPanel.getCustomProperties(breakpoint);
                     }
                     
+                    // Also try persistent storage service
+                    if (properties == null && project != null) {
+                        HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
+                        properties = storage.getBreakpointProperties(breakpoint);
+                    }
+                    
                     // Critical debugging - using multiple logging methods
                     System.out.println("=== BREAKPOINT REGISTRATION DEBUG ===");
                     System.out.println("Properties object: " + (properties != null ? "not null" : "NULL"));

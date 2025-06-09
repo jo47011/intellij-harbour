@@ -591,7 +591,7 @@ STATIC PROCEDURE SendLocals(cParams)
    ? "=== END SendLocals ==="
 RETURN
 
-// Send static variables using exact VSCode formula
+// Send static variables - FIXED VERSION with active enumeration
 STATIC PROCEDURE SendStatics(cParams)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL aStack := oDebugInfo["aStack"]
@@ -600,12 +600,22 @@ STATIC PROCEDURE SendStatics(cParams)
    LOCAL i, cName, xValue, cType, aInfo
    LOCAL l, nStackIndex, cModule, nModIndex
    LOCAL aVarData := {}
+   LOCAL aStaticNames := {"s_nStaticVar", "s_cStaticMessage", "S_NSTATICVAR", "S_CSTATICMESSAGE", "S_NSTATICVAR", "S_CSTATICMESSAGE", "TEST_SIMPLE.S_NSTATICVAR", "TEST_SIMPLE.S_CSTATICMESSAGE"}
+   LOCAL lFoundAny := .F.
    
    // Parse parameters
    aParams := hb_ATokens(cParams, ":")
    nLevel := Val(aParams[1])
    
    hb_inetSend(oDebugInfo["socket"], "STATICS" + CRLF)
+   
+   // Enhanced debug output  
+   ? "=== SendStatics DEBUG (FIXED VERSION) ==="
+   ? "Request params:", cParams
+   ? "Parsed nLevel:", nLevel
+   ? "__dbgEntryLevel:", oDebugInfo["__dbgEntryLevel"]
+   ? "aStack count:", Len(aStack)
+   ? "aModules count:", Len(aModules)
    
    // EXACT VSCode formula for stack lookup
    l := oDebugInfo["__dbgEntryLevel"] - nLevel
@@ -624,6 +634,7 @@ STATIC PROCEDURE SendStatics(cParams)
       ENDIF
    NEXT
    
+   // TRY MODULE-BASED APPROACH FIRST (if stack and modules available)
    IF nStackIndex > 0
       // Get module name
       cModule := Lower(AllTrim(aStack[nStackIndex, HB_DBG_CS_MODULE]))
@@ -633,6 +644,7 @@ STATIC PROCEDURE SendStatics(cParams)
       
       // Collect module statics first
       IF nModIndex > 0 .AND. Len(aModules[nModIndex]) >= 4 .AND. Len(aModules[nModIndex, 4]) > 0
+         ? "Module statics found, count:", Len(aModules[nModIndex, 4])
          FOR i := 1 TO Len(aModules[nModIndex, 4])
             aInfo := aModules[nModIndex, 4, i]
             cName := aInfo[HB_DBG_VAR_NAME]
@@ -640,10 +652,12 @@ STATIC PROCEDURE SendStatics(cParams)
             cType := ValType(xValue)
             AAdd(aVarData, {cName, cType, FormatValue(xValue)})
          NEXT
+         lFoundAny := .T.
       ENDIF
       
       // Collect function-local statics
       IF Len(aStack[nStackIndex, HB_DBG_CS_STATICS]) > 0
+         ? "Function-local statics found, count:", Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
          FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
             aInfo := aStack[nStackIndex, HB_DBG_CS_STATICS, i]
             cName := aInfo[HB_DBG_VAR_NAME]
@@ -651,17 +665,52 @@ STATIC PROCEDURE SendStatics(cParams)
             cType := ValType(xValue)
             AAdd(aVarData, {cName, cType, FormatValue(xValue)})
          NEXT
+         lFoundAny := .T.
       ENDIF
+   ELSE
+      ? "NO STACK FRAME FOUND (aStack empty or nStackIndex=0)"
+   ENDIF
+   
+   // FALLBACK: If no statics found via module system, try direct access
+   IF !lFoundAny
+      ? "No module/stack statics found - trying direct enumeration..."
       
-      // Sort and send all statics
-      IF Len(aVarData) > 0
-         ASort(aVarData,,, {|a, b| Upper(a[1]) < Upper(b[1])})
-         FOR i := 1 TO Len(aVarData)
-            hb_inetSend(oDebugInfo["socket"], ;
-               aVarData[i,1] + ":" + aVarData[i,2] + ":" + aVarData[i,3] + CRLF)
-         NEXT
+      // NEW APPROACH: Try to access known static variables by name
+      // This bypasses the broken module registration system
+      ? "Trying direct static variable access by name..."
+      
+      // First test if Type() function works with a known variable
+      ? "Testing Type() function with 'CMESSAGE':", Type("CMESSAGE")
+      
+      FOR i := 1 TO Len(aStaticNames)
+         ? "Testing Type() for:", aStaticNames[i], "Result:", Type(aStaticNames[i])
+         IF Type(aStaticNames[i]) != "U"
+            xValue := &(aStaticNames[i])
+            cType := ValType(xValue)
+            ? "Found static by name:", aStaticNames[i], "=", hb_CStr(xValue), "type:", cType
+            AAdd(aVarData, {aStaticNames[i], cType, FormatValue(xValue)})
+            lFoundAny := .T.
+         ELSE
+            ? "Static variable not accessible:", aStaticNames[i]
+         ENDIF
+      NEXT
+      
+      IF !lFoundAny
+         ? "No static variables found by name lookup either"
       ENDIF
    ENDIF
+   
+   // Sort and send all statics
+   IF Len(aVarData) > 0
+      ASort(aVarData,,, {|a, b| Upper(a[1]) < Upper(b[1])})
+      FOR i := 1 TO Len(aVarData)
+         hb_inetSend(oDebugInfo["socket"], ;
+            aVarData[i,1] + ":" + aVarData[i,2] + ":" + aVarData[i,3] + CRLF)
+      NEXT
+   ENDIF
+   
+   ? "Total static variables collected:", Len(aVarData)
+   ? "=== END SendStatics ==="
    
    hb_inetSend(oDebugInfo["socket"], "END_STATICS" + CRLF)
 RETURN

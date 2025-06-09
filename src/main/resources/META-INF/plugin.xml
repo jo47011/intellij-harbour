@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.199</version>
+    <version>1.0.204</version>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
@@ -63,6 +63,9 @@
 
         <!-- Settings Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourSettings"/>
+        
+        <!-- Breakpoint Properties Storage Service -->
+        <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"

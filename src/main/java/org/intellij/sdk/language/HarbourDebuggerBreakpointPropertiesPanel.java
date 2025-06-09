@@ -131,6 +131,18 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 System.out.println("AFTER SAVE - Properties: " + properties);
                 System.out.println("AFTER SAVE - condition: '" + properties.getCondition() + "'");
                 
+                // ALWAYS store in custom map for persistence
+                if (customProperties == null) {
+                    customProperties = new java.util.HashMap<>();
+                }
+                customProperties.put(breakpoint, properties);
+                System.out.println("PERSISTENCE: Stored properties in custom map for persistence");
+                
+                // ALSO store in persistent storage service
+                HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
+                storage.storeBreakpointProperties(breakpoint, properties);
+                System.out.println("PERSISTENCE: Stored properties in persistent storage service");
+                
                 // Debug logging
                 LOG.info("Saving breakpoint properties: condition='" + condition + 
                         "', hitCondition='" + hitCondition + "', logMessage='" + logMessage + "'");
@@ -156,6 +168,13 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
             if (properties == null && customProperties != null) {
                 properties = customProperties.get(breakpoint);
                 System.out.println("Retrieved properties from custom storage: " + properties);
+            }
+            
+            // Also try persistent storage service
+            if (properties == null) {
+                HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
+                properties = storage.getBreakpointProperties(breakpoint);
+                System.out.println("Retrieved properties from persistent storage: " + properties);
             }
             
             if (properties != null) {

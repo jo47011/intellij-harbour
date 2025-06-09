@@ -84,6 +84,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile int pendingStopLine = -1;
     private volatile XSourcePosition pendingStopPosition = null;
     
+    // Hit count tracking for conditional breakpoints
+    private final Map<String, Integer> breakpointHitCounts = new ConcurrentHashMap<>();
+    
     public HarbourDebuggerRemoteProcess(@NotNull XDebugSession session,
                                        @NotNull ExecutionResult executionResult,
                                        int debugPort) {
@@ -311,11 +314,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             // Set a timeout in case variables don't arrive
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 try {
-                    Thread.sleep(1500); // Wait 1.5 seconds for variables (4 types * 200ms throttle + buffer)
+                    Thread.sleep(3000); // Wait 3 seconds for variables (increased to handle slower responses)
                     if (waitingForVariables && pendingStopPosition != null) {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                             "Variable timeout - notifying position reached anyway");
                         waitingForVariables = false;
+                        variablesReceived = 0; // Reset counter for next stop
                         
                         // Capture values before clearing them
                         final String stopFile = pendingStopFile;
@@ -554,7 +558,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     
     private void requestVariables() {
         sendCommand("LOCALS", "0");
-        sendCommand("STATICS");
+        sendCommand("STATICS", "0");
         sendCommand("PRIVATES", "0");
         sendCommand("PUBLICS");
     }
@@ -829,12 +833,44 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             "SHOULD_STOP DEBUG: Custom properties: " + (properties != null ? "not null" : "NULL"));
                     }
                     
+                    // Also check persistent storage service
+                    if (properties == null) {
+                        HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
+                        properties = storage.getBreakpointProperties(breakpoint);
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "SHOULD_STOP DEBUG: Persistent storage properties: " + (properties != null ? "not null" : "NULL"));
+                    }
+                    
                     if (properties != null) {
+                        // Track hit count for this breakpoint
+                        int currentHitCount = breakpointHitCounts.getOrDefault(breakpointKey, 0) + 1;
+                        breakpointHitCounts.put(breakpointKey, currentHitCount);
+                        
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "SHOULD_STOP DEBUG: Breakpoint hit count: " + currentHitCount);
+                        
                         boolean hasCondition = properties.hasCondition();
+                        boolean hasHitCondition = properties.hasHitCondition();
                         String condition = properties.getCondition();
+                        String hitCondition = properties.getHitCondition();
+                        
                         HarbourLogger.log(project, "HarbourDebugger", 
                             "SHOULD_STOP DEBUG: hasCondition=" + hasCondition + ", condition='" + condition + "'");
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "SHOULD_STOP DEBUG: hasHitCondition=" + hasHitCondition + ", hitCondition='" + hitCondition + "'");
                         
+                        // Check hit condition first (if present)
+                        if (hasHitCondition) {
+                            boolean hitConditionMet = evaluateHitCondition(hitCondition, currentHitCount);
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                "SHOULD_STOP DEBUG: Hit condition '" + hitCondition + "' with count " + currentHitCount + " evaluated to: " + hitConditionMet);
+                            
+                            if (!hitConditionMet) {
+                                return false; // Hit condition not met, don't stop
+                            }
+                        }
+                        
+                        // Check regular condition (if present)
                         if (hasCondition) {
                             HarbourLogger.log(project, "HarbourDebugger", 
                                 "SHOULD_STOP DEBUG: Evaluating breakpoint condition: " + condition);
@@ -937,6 +973,94 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         } catch (Exception e) {
             HarbourLogger.log(project, "HarbourDebugger", 
                 "Error evaluating condition '" + condition + "': " + e.getMessage() + " - defaulting to true");
+            return true;
+        }
+    }
+    
+    /**
+     * Evaluates hit condition for conditional breakpoints.
+     * Supports formats like: "=5", ">3", ">=10", "%3", "==2"
+     */
+    private boolean evaluateHitCondition(String hitCondition, int currentHitCount) {
+        if (hitCondition == null || hitCondition.trim().isEmpty()) {
+            HarbourLogger.log(project, "HarbourDebugger", "HIT_EVAL DEBUG: Empty hit condition, returning true");
+            return true;
+        }
+        
+        String condition = hitCondition.trim();
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "HIT_EVAL DEBUG: Evaluating hit condition '" + condition + "' with count " + currentHitCount);
+        
+        try {
+            // Handle modulo (every N hits): %N
+            if (condition.startsWith("%")) {
+                int modValue = Integer.parseInt(condition.substring(1));
+                boolean result = (currentHitCount % modValue) == 0;
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "HIT_EVAL DEBUG: Modulo condition %" + modValue + " with count " + currentHitCount + " = " + result);
+                return result;
+            }
+            
+            // Handle equality: =N or ==N
+            if (condition.startsWith("==") || condition.startsWith("=")) {
+                String numStr = condition.startsWith("==") ? condition.substring(2) : condition.substring(1);
+                int targetCount = Integer.parseInt(numStr);
+                boolean result = currentHitCount == targetCount;
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "HIT_EVAL DEBUG: Equality condition " + condition + " with count " + currentHitCount + " = " + result);
+                return result;
+            }
+            
+            // Handle greater than or equal: >=N
+            if (condition.startsWith(">=")) {
+                int targetCount = Integer.parseInt(condition.substring(2));
+                boolean result = currentHitCount >= targetCount;
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "HIT_EVAL DEBUG: Greater-equal condition " + condition + " with count " + currentHitCount + " = " + result);
+                return result;
+            }
+            
+            // Handle less than or equal: <=N
+            if (condition.startsWith("<=")) {
+                int targetCount = Integer.parseInt(condition.substring(2));
+                boolean result = currentHitCount <= targetCount;
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "HIT_EVAL DEBUG: Less-equal condition " + condition + " with count " + currentHitCount + " = " + result);
+                return result;
+            }
+            
+            // Handle greater than: >N
+            if (condition.startsWith(">")) {
+                int targetCount = Integer.parseInt(condition.substring(1));
+                boolean result = currentHitCount > targetCount;
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "HIT_EVAL DEBUG: Greater-than condition " + condition + " with count " + currentHitCount + " = " + result);
+                return result;
+            }
+            
+            // Handle less than: <N
+            if (condition.startsWith("<")) {
+                int targetCount = Integer.parseInt(condition.substring(1));
+                boolean result = currentHitCount < targetCount;
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "HIT_EVAL DEBUG: Less-than condition " + condition + " with count " + currentHitCount + " = " + result);
+                return result;
+            }
+            
+            // If just a number, treat as equality
+            int targetCount = Integer.parseInt(condition);
+            boolean result = currentHitCount == targetCount;
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "HIT_EVAL DEBUG: Number-only condition " + condition + " with count " + currentHitCount + " = " + result);
+            return result;
+            
+        } catch (NumberFormatException e) {
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "HIT_EVAL DEBUG: Invalid hit condition format '" + condition + "', defaulting to true");
+            return true;
+        } catch (Exception e) {
+            HarbourLogger.log(project, "HarbourDebugger", 
+                "HIT_EVAL DEBUG: Error evaluating hit condition '" + condition + "': " + e.getMessage() + ", defaulting to true");
             return true;
         }
     }
