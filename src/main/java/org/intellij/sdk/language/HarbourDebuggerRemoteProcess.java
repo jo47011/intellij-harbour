@@ -332,7 +332,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                 HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                     "TIMEOUT DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
                                 HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                    "TIMEOUT DEBUG: Current variables: " + variables.toString());
+                                    "TIMEOUT DEBUG: Current variables: " + variables);
                                 
                                 boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
                                 HarbourLogger.log("HarbourDebuggerRemoteProcess", 
@@ -480,7 +480,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             HarbourLogger.log(project, "HarbourDebugger", 
                                 "NORMAL DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
                             HarbourLogger.log(project, "HarbourDebugger", 
-                                "NORMAL DEBUG: Current variables: " + variables.toString());
+                                "NORMAL DEBUG: Current variables: " + variables);
                             
                             boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
                             HarbourLogger.log(project, "HarbourDebugger", 
@@ -1099,7 +1099,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log(project, "HarbourDebugger", 
                 "Variable '" + varName + "' not found in any scope - condition defaults to false");
             HarbourLogger.log(project, "HarbourDebugger", 
-                "Available variables: " + variables.keySet().toString());
+                "Available variables: " + variables.keySet());
             return false;
         }
         

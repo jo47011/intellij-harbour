@@ -1,6 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.LabeledComponent;
@@ -151,8 +150,7 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 System.out.println("ERROR: Properties object is still null after force creation!");
             }
         } catch (Exception e) {
-            System.out.println("ERROR in saveTo: " + e.getMessage());
-            e.printStackTrace();
+            LOG.error("Error in saveTo: " + e.getMessage(), e);
         }
     }
 
@@ -209,8 +207,7 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 logMessageTextField.setText("");
             }
         } catch (Exception e) {
-            System.out.println("ERROR in loadFrom: " + e.getMessage());
-            e.printStackTrace();
+            LOG.error("Error in loadFrom: " + e.getMessage(), e);
         }
     }
 }

@@ -28,7 +28,7 @@ public class HarbourDebuggerLineBreakpointType extends XLineBreakpointType<Harbo
         System.out.println("createBreakpointProperties() called for " + file.getName() + ":" + line);
         HarbourDebuggerBreakpointProperties props = new HarbourDebuggerBreakpointProperties();
         System.out.println("Created properties object: " + props);
-        System.out.println("Properties toString: " + props.toString());
+        System.out.println("Properties toString: " + props);
         System.out.println("=== END CREATE BREAKPOINT PROPERTIES ===");
         return props;
     }

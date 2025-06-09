@@ -1,8 +1,10 @@
 package org.intellij.sdk.language;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.*;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.ArrayList;
@@ -67,4 +69,7 @@ public class HarbourDebuggerValue extends XValue {
             super.computeChildren(node);
         }
     }
+
+    // TODO: Find a way to disable "Jump to Source" functionality
+    // Currently not possible through XValue API
 }
