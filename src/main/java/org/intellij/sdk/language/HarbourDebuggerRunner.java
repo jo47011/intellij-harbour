@@ -5,24 +5,16 @@ import com.intellij.execution.ExecutionResult;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.executors.DefaultDebugExecutor;
-import com.intellij.execution.process.ProcessAdapter;
-import com.intellij.execution.process.ProcessEvent;
-import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.process.ProcessListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.GenericProgramRunner;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.project.Project;
-import com.intellij.util.ReflectionUtil;
 import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugProcessStarter;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Debug runner for Harbour applications.
@@ -80,34 +72,12 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
             }
         });
 
-        // Remove ALL process listeners AFTER the debug session is fully created
-        // This prevents IntelliJ from adding listeners after our removal
-        ProcessHandler processHandler = executionResult.getProcessHandler();
-        
-        // Use ReflectionUtil to access private myListeners field
-        List<ProcessListener> listeners = ReflectionUtil.getField(
-            ProcessHandler.class, 
-            processHandler, 
-            List.class, 
-            "myListeners"
-        );
-        
-        if (listeners != null) {
-            // Create a copy to avoid ConcurrentModificationException
-            List<ProcessListener> listenersCopy = new ArrayList<>(listeners);
-            
-            HarbourLogger.log(project, "HarbourDebugger", 
-                "AFTER session creation: Removing " + listenersCopy.size() + " process listeners to prevent auto-termination");
-            
-            for (ProcessListener listener : listenersCopy) {
-                processHandler.removeProcessListener(listener);
-                HarbourLogger.log(project, "HarbourDebugger", 
-                    "AFTER session creation: Removed process listener: " + listener.getClass().getSimpleName());
-            }
-        } else {
-            HarbourLogger.log(project, "HarbourDebugger", 
-                "Could not access process listeners via reflection - auto-termination may still occur");
-        }
+        // PROPER FIX (v1.0.230): No longer need to remove ProcessListeners
+        // The real solution is in HarbourDebuggerRemoteProcess.doGetProcessHandler() returning null
+        // This causes IntelliJ to use DefaultDebugProcessHandler instead of the actual process handler
+        // which prevents XDebugSessionImpl from attaching problematic ProcessListeners
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "Using proper remote debugging pattern - doGetProcessHandler() returns null");
 
         return debugSession.getRunContentDescriptor();
     }

@@ -679,7 +679,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     @NotNull
     @Override
     protected ProcessHandler doGetProcessHandler() {
-        return processHandler;
+        // CRITICAL FIX: Return null to prevent XDebugSessionImpl from attaching ProcessListeners
+        // This allows IntelliJ to create a DefaultDebugProcessHandler instead of using the actual
+        // process handler, preventing premature session termination when the process ends.
+        // This is the standard pattern used by other successful remote debuggers (Java, Python, etc.)
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "Returning null from doGetProcessHandler() - using DefaultDebugProcessHandler for remote debugging");
+        return null;
     }
     
     @NotNull
@@ -1508,6 +1514,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Command executor thread stopped");
     }
+    
     
     /**
      * Helper method to clean up all resources - can be called from shutdown hook
