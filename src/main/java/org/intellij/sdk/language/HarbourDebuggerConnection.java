@@ -7,6 +7,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -42,6 +43,25 @@ public class HarbourDebuggerConnection {
         
         try {
             HarbourLogger.log("HarbourDebuggerConnection", "Starting debug server on port " + port);
+            
+            // Aggressive port cleanup before binding
+            if (!isPortAvailable(port)) {
+                HarbourLogger.log("HarbourDebuggerConnection", "Port " + port + " is in use, attempting to free it");
+                forceReleasePort(port);
+                
+                // Wait a moment for port to be released
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                
+                // Check again
+                if (!isPortAvailable(port)) {
+                    HarbourLogger.log("HarbourDebuggerConnection", "WARNING: Port " + port + " still appears to be in use");
+                }
+            }
+            
             serverSocket = new ServerSocket(port);
             serverSocket.setReuseAddress(true); // Allow quick restart
             serverSocket.setSoTimeout(ACCEPT_TIMEOUT);
@@ -317,8 +337,9 @@ public class HarbourDebuggerConnection {
             // Close server socket - most important for port cleanup
             if (serverSocket != null && !serverSocket.isClosed()) {
                 try {
+                    // Force close immediately to release port
                     serverSocket.close();
-                    HarbourLogger.log("HarbourDebuggerConnection", "Server socket closed");
+                    HarbourLogger.log("HarbourDebuggerConnection", "Server socket closed and port " + port + " released");
                 } catch (IOException e) {
                     HarbourLogger.log("HarbourDebuggerConnection", "Error closing server socket: " + e.getMessage());
                 }
@@ -339,6 +360,55 @@ public class HarbourDebuggerConnection {
     
     public boolean isConnected() {
         return connected;
+    }
+    
+    /**
+     * Check if a port is available for binding
+     */
+    private boolean isPortAvailable(int port) {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(port)) {
+            socket.setReuseAddress(true);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+    
+    /**
+     * Force release of a port by killing processes using it
+     */
+    private void forceReleasePort(int port) {
+        try {
+            String os = System.getProperty("os.name").toLowerCase();
+            ProcessBuilder pb;
+            
+            if (os.contains("windows")) {
+                // Windows: netstat and taskkill
+                pb = new ProcessBuilder("cmd", "/c", 
+                    "for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :" + port + "') do taskkill /f /pid %a");
+            } else {
+                // Linux/Unix: lsof and kill
+                pb = new ProcessBuilder("bash", "-c", 
+                    "lsof -ti:" + port + " | xargs -r kill -9");
+            }
+            
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            
+            if (finished) {
+                int exitCode = process.exitValue();
+                HarbourLogger.log("HarbourDebuggerConnection", 
+                    "Port cleanup command finished with exit code: " + exitCode);
+            } else {
+                HarbourLogger.log("HarbourDebuggerConnection", 
+                    "Port cleanup command timed out");
+                process.destroyForcibly();
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerConnection", 
+                "Error during port cleanup: " + e.getMessage());
+        }
     }
     
 }

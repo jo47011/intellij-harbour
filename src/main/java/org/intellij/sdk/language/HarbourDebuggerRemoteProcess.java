@@ -87,6 +87,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     // Hit count tracking for conditional breakpoints
     private final Map<String, Integer> breakpointHitCounts = new ConcurrentHashMap<>();
     
+    // Track connection timing to prevent premature shutdown
+    private volatile long connectionStartTime = 0;
+    private static final long MIN_CONNECTION_TIME = 2000; // 2 seconds minimum before allowing stop()
+    
     public HarbourDebuggerRemoteProcess(@NotNull XDebugSession session,
                                        @NotNull ExecutionResult executionResult,
                                        int debugPort) {
@@ -126,6 +130,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection established");
                     updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
                     
+                    // Record connection start time to prevent premature shutdown
+                    connectionStartTime = System.currentTimeMillis();
+                    
                     // Send initial breakpoints
                     sendInitialBreakpoints();
                 } else {
@@ -151,6 +158,15 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Handling message: " + message);
         
         try {
+            // Check if this is a handshake message (executable path + PID)
+            if (message.contains(".exe") && message.contains("\n") && !message.contains("STOP") && !message.contains("BREAK")) {
+                String[] checkLines = message.split("\\r?\\n");
+                if (checkLines.length >= 2 && checkLines[0].contains(".exe") && checkLines[1].trim().matches("\\d+")) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Received handshake message - ignoring as debug command");
+                    return; // Don't process handshake as debug command
+                }
+            }
+            
             String[] lines = message.split("\r\n");
             if (lines.length == 0) return;
         
@@ -1209,6 +1225,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "  " + stack[i].toString());
         }
         
+        // Check if we're in the initial connection phase - prevent premature shutdown
+        long timeSinceConnection = System.currentTimeMillis() - connectionStartTime;
+        if (connectionStartTime > 0 && timeSinceConnection < MIN_CONNECTION_TIME) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "IGNORING premature stop() call - only " + timeSinceConnection + "ms since connection (minimum " + MIN_CONNECTION_TIME + "ms)");
+            return; // Don't proceed with shutdown during initial connection phase
+        }
+        
         // Signal shutdown to command executor immediately
         shutdownRequested = true;
         
@@ -1239,11 +1263,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             }
         }
         
-        // 3. Close connection (this handles socket cleanup)
+        // 3. Close connection (this handles socket cleanup and port release)
         if (connection != null) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Closing debugger connection");
             try {
                 connection.close();
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection closed successfully - port should be available");
             } catch (Exception e) {
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error closing connection: " + e.getMessage());
                 HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);

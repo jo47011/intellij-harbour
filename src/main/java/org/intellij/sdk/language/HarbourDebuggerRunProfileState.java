@@ -66,6 +66,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         commandLine.setRedirectErrorStream(true);
         
+        // Windows-specific console handling to prevent popup windows
+        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+            // Try to prevent creation of new console window on Windows
+            // Keep debugging functionality intact - only modify process creation
+            commandLine.withEnvironment("HIDE_CONSOLE", "1");
+            commandLine.withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE);
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Applied Windows console inheritance settings");
+        }
+        
         // Log full command details before starting
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Starting process with command: " + commandLine.getCommandLineString());
@@ -77,7 +88,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         OSProcessHandler handler;
         try {
             handler = new OSProcessHandler(commandLine);
-            ProcessTerminatedListener.attach(handler);
+            
+            // For remote debugging, don't auto-terminate the debug session when process ends
+            // The debug connection can outlive the process, especially on Windows
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Skipping ProcessTerminatedListener to allow debug connection to outlive process");
+            // ProcessTerminatedListener.attach(handler); // DISABLED for remote debugging
+            
             handler.startNotify();
             
             // Log process start status
@@ -255,8 +272,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         parameters.add("-D__HARBOUR_DEBUG__");
         parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
         
-        // Force standard GT driver to prevent ANSI escape sequences
+        // Force standard GT driver to prevent console windows and redirect output to IntelliJ
         parameters.add("-gtSTD");
+        
+        // Additional Windows-specific console redirection
+        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+            // Prevent new console window creation on Windows
+            parameters.add("-D__INTELLIJ_DEBUG__");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Added Windows-specific console redirection flags");
+        }
 
         // Don't set ALTD environment variable for remote debugging
         // commandLine.withEnvironment("ALTD", "BREAK");
