@@ -166,10 +166,20 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     "Converted WSL working directory to Linux path: " + workingDir);
         }
         
-        // Copy debug library from plugin resources to working directory
-        copyDebugLibrary(workingDir);
+        // Get build directory setting
+        HarbourSettings settings = HarbourSettings.getInstance(env.getProject());
+        String buildDir = ".hbmk"; // Default
+        if (settings != null) {
+            String settingsBuildDir = settings.getBuildOutputDirectory();
+            if (!StringUtil.isEmpty(settingsBuildDir)) {
+                buildDir = settingsBuildDir;
+            }
+        }
+        
+        // Copy debug library from plugin resources to build directory (not project root)
+        copyDebugLibrary(workingDir, buildDir);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Copied debug library from plugin resources to working directory");
+                "Copied debug library from plugin resources to build directory");
         
         // Instrument source file if needed
         String buildTarget = runConfig.getSourceFile();
@@ -218,16 +228,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
 
-        // Get build directory setting
-        HarbourSettings settings = HarbourSettings.getInstance(env.getProject());
-        String buildDir = ".hbmk"; // Default
-        if (settings != null) {
-            String settingsBuildDir = settings.getBuildOutputDirectory();
-            if (!StringUtil.isEmpty(settingsBuildDir)) {
-                buildDir = settingsBuildDir;
-            }
-        }
-
         // Create build directory if it doesn't exist
         File buildDirFile = new File(workingDir, buildDir);
         if (!buildDirFile.exists()) {
@@ -242,6 +242,15 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         List<String> parameters = new ArrayList<>();
 
+        // Add compile and run flags first
+        parameters.add("-b");
+        parameters.add("-run");
+        
+        // Debug output to console
+        System.err.println("=== DEBUG: Building parameter list ===");
+        System.err.println("Working Directory: " + workingDir);
+        System.err.println("Build Directory: " + buildDir);
+
         // Look for .hbp file in working directory
         File workingDirFile = new File(workingDir != null ? workingDir : ".");
         // If we instrumented the file, use the instrumented version directly, don't look for .hbp
@@ -253,19 +262,44 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         } else {
             finalBuildTarget = findHbpFileOrUseSource(workingDirFile, buildTarget);
         }
-        parameters.add(finalBuildTarget);
         
-        // Add COMPLETE debug source for IntelliJ debugging (Variable names + breakpoint support)
-        if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
-            // Use debug source copied to working directory
-            String debugSourcePath = "harbour_debug_complete.prg";
-            parameters.add(debugSourcePath);
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Added COMPLETE debug source with variable names AND breakpoint support: " + debugSourcePath);
+        // Verify main program file exists first
+        File mainProgramFile = new File(finalBuildTarget);
+        if (!mainProgramFile.isAbsolute()) {
+            mainProgramFile = new File(workingDir, finalBuildTarget);
         }
         
-        parameters.add("-b");
-        parameters.add("-run");
+        if (!mainProgramFile.exists()) {
+            throw new ExecutionException("Main program file not found: " + mainProgramFile.getAbsolutePath());
+        }
+        
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Main program file verified: " + mainProgramFile.getAbsolutePath());
+        
+        // Add main program file FIRST (this becomes the main entry point)
+        parameters.add(finalBuildTarget);
+        System.err.println("Main build target: " + finalBuildTarget);
+        
+        // Add COMPLETE debug source for IntelliJ debugging (Variable names + breakpoint support) as additional source
+        if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
+            // Use debug source copied to build directory
+            String debugSourcePath = buildDir + "/harbour_debug_complete.prg";
+            File debugFile = new File(workingDir, debugSourcePath);
+            
+            System.err.println("Debug source path: " + debugSourcePath);
+            System.err.println("Debug file exists: " + debugFile.exists());
+            
+            if (debugFile.exists()) {
+                parameters.add(debugSourcePath);
+                System.err.println("Added debug source to parameters");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Added COMPLETE debug source as library: " + debugSourcePath);
+            } else {
+                System.err.println("WARNING: Debug source file not found: " + debugFile.getAbsolutePath());
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "WARNING: Debug source file not found: " + debugFile.getAbsolutePath());
+            }
+        }
 
         // Use only -workdir like earlier working versions
         parameters.add("-workdir=" + buildDir);
@@ -303,12 +337,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         }
 
         String fullCommand = cmdLog.toString();
-        System.out.println("=== HBMK2 COMMAND ===");
-        System.out.println(fullCommand);
-        System.out.println("Working Directory: " + workingDir);
-        System.out.println("Build Target: " + finalBuildTarget);
-        System.out.println("Instrumented: " + shouldInstrument);
-        System.out.println("=====================");
+        System.err.println("=== HBMK2 COMMAND ===");
+        System.err.println(fullCommand);
+        System.err.println("Working Directory: " + workingDir);
+        System.err.println("Build Target: " + finalBuildTarget);
+        System.err.println("Instrumented: " + shouldInstrument);
+        System.err.println("Parameters count: " + parameters.size());
+        for (int i = 0; i < parameters.size(); i++) {
+            System.err.println("  [" + i + "] " + parameters.get(i));
+        }
+        System.err.println("=====================");
 
         commandLine.addParameters(parameters);
         commandLine.setWorkDirectory(workingDir);
@@ -486,25 +524,25 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     }
     
     /**
-     * Copy the remote debug library from resources to working directory
+     * Copy the remote debug library from resources to build directory (not project root)
      */
-    private void copyDebugLibrary(String workingDir) throws ExecutionException {
+    private void copyDebugLibrary(String workingDir, String buildDir) throws ExecutionException {
         // Copy the debug library to enable debugging
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Copying IntelliJ debug library to working directory");
+                "Copying IntelliJ debug library to build directory: " + buildDir);
         
-        // Ensure working directory exists
-        File workingDirFile = new File(workingDir);
-        if (!workingDirFile.exists()) {
+        // Ensure build directory exists
+        File buildDirFile = new File(workingDir, buildDir);
+        if (!buildDirFile.exists()) {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Working directory does not exist, creating: " + workingDir);
-            if (!workingDirFile.mkdirs()) {
-                throw new ExecutionException("Failed to create working directory: " + workingDir);
+                    "Build directory does not exist, creating: " + buildDirFile.getPath());
+            if (!buildDirFile.mkdirs()) {
+                throw new ExecutionException("Failed to create build directory: " + buildDirFile.getPath());
             }
         }
         
-        // Copy harbour_debug_complete.prg
-        File debugLibFile = new File(workingDir, "harbour_debug_complete.prg");
+        // Copy harbour_debug_complete.prg to build directory
+        File debugLibFile = new File(buildDirFile, "harbour_debug_complete.prg");
         try {
             copyResourceFile(debugLibFile);
         } catch (IOException e) {
