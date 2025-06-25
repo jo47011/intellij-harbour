@@ -24,17 +24,149 @@ public class HarbourSourceInstrumenter {
     private final File sourceFile;
     private final File instrumentedFile;
     private final String debugFunctionName;
+    private final String originalFileName;
+    private final File buildDir;
     
-    public HarbourSourceInstrumenter(File sourceFile) {
+    public HarbourSourceInstrumenter(File sourceFile, File buildDir) {
         this.sourceFile = sourceFile;
+        this.buildDir = buildDir;
+        this.originalFileName = sourceFile.getName();
         String baseName = sourceFile.getName();
         if (baseName.endsWith(".prg")) {
             baseName = baseName.substring(0, baseName.length() - 4);
         }
-        this.instrumentedFile = new File(sourceFile.getParentFile(), baseName + "_instrumented.prg");
+        // Place instrumented file in build directory
+        this.instrumentedFile = new File(buildDir, baseName + "_instrumented.prg");
         this.debugFunctionName = "debug_check";
     }
     
+    /**
+     * Instruments the source file for GUI programs by injecting minimal breakpoint loader
+     */
+    public File instrumentForGui() throws IOException {
+        // First check if source file exists
+        if (!sourceFile.exists()) {
+            throw new IOException("Source file does not exist: " + sourceFile.getAbsolutePath());
+        }
+        
+        List<String> lines = Files.readAllLines(sourceFile.toPath());
+        List<String> instrumentedLines = new ArrayList<>();
+        
+        boolean injectingBreakpointLoader = false;
+        boolean foundMainProcedure = false;
+        
+        // First, add the minimal breakpoint loader function at the top
+        instrumentedLines.add("// Auto-injected minimal breakpoint loader for GUI debugging");
+        instrumentedLines.add("#ifdef __HARBOUR_DEBUG__");
+        instrumentedLines.add("");
+        instrumentedLines.add("STATIC PROCEDURE LoadInitCld()");
+        instrumentedLines.add("   LOCAL cContent, aLines, cLine, aTokens, nLine, cFile, i, cKey");
+        instrumentedLines.add("   LOCAL aBreakpoints := {}");
+        instrumentedLines.add("   ");
+        instrumentedLines.add("   // Check if init.cld exists");
+        instrumentedLines.add("   IF !File(\"init.cld\")");
+        instrumentedLines.add("      RETURN");
+        instrumentedLines.add("   ENDIF");
+        instrumentedLines.add("   ");
+        instrumentedLines.add("   // Read init.cld file");
+        instrumentedLines.add("   cContent := hb_MemoRead(\"init.cld\")");
+        instrumentedLines.add("   IF Empty(cContent)");
+        instrumentedLines.add("      RETURN");
+        instrumentedLines.add("   ENDIF");
+        instrumentedLines.add("   ");
+        instrumentedLines.add("   // Parse breakpoint lines");
+        instrumentedLines.add("   aLines := hb_ATokens(cContent, Chr(10))");
+        instrumentedLines.add("   FOR i := 1 TO Len(aLines)");
+        instrumentedLines.add("      cLine := AllTrim(StrTran(aLines[i], Chr(13), \"\"))");
+        instrumentedLines.add("      IF !Empty(cLine) .AND. Left(cLine, 2) == \"BP\"");
+        instrumentedLines.add("         // Parse: BP line_number filename");
+        instrumentedLines.add("         aTokens := hb_ATokens(cLine, \" \")");
+        instrumentedLines.add("         IF Len(aTokens) >= 3");
+        instrumentedLines.add("            nLine := Val(aTokens[2])");
+        instrumentedLines.add("            cFile := AllTrim(aTokens[3])");
+        instrumentedLines.add("            ");
+        instrumentedLines.add("            // Extract filename without path for key");
+        instrumentedLines.add("            cKey := cFile");
+        instrumentedLines.add("            IF \"/\" $ cKey .OR. \"\\\\\" $ cKey");
+        instrumentedLines.add("               cKey := SubStr(cKey, Max(RAt(\"/\", cKey), RAt(\"\\\\\", cKey)) + 1)");
+        instrumentedLines.add("            ENDIF");
+        instrumentedLines.add("            ");
+        instrumentedLines.add("            // Fix for instrumented files - strip _instrumented suffix");
+        instrumentedLines.add("            IF \"_instrumented.prg\" $ Lower(cKey)");
+        instrumentedLines.add("               cKey := StrTran(Lower(cKey), \"_instrumented.prg\", \".prg\")");
+        instrumentedLines.add("            ENDIF");
+        instrumentedLines.add("            ");
+        instrumentedLines.add("            // Store breakpoint info for manual loading");
+        instrumentedLines.add("            AAdd(aBreakpoints, {cKey, nLine, cFile})");
+        instrumentedLines.add("         ENDIF");
+        instrumentedLines.add("      ENDIF");
+        instrumentedLines.add("   NEXT");
+        instrumentedLines.add("   ");
+        instrumentedLines.add("   // Display loaded breakpoints for user information");
+        instrumentedLines.add("   IF Len(aBreakpoints) > 0");
+        instrumentedLines.add("      ? \"=== Breakpoints loaded from init.cld ===\"");
+        instrumentedLines.add("      FOR i := 1 TO Len(aBreakpoints)");
+        instrumentedLines.add("         ? \"Breakpoint:\", aBreakpoints[i,1] + \":\" + AllTrim(Str(aBreakpoints[i,2]))");
+        instrumentedLines.add("      NEXT");
+        instrumentedLines.add("      ? \"Use standard Harbour debugger (Alt+D) to activate debugging\"");
+        instrumentedLines.add("      ? \"========================================\"");
+        instrumentedLines.add("   ENDIF");
+        instrumentedLines.add("   ");
+        instrumentedLines.add("RETURN");
+        instrumentedLines.add("");
+        instrumentedLines.add("#endif");
+        instrumentedLines.add("");
+        
+        // Now process the original source file
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            
+            // Check if this is a main procedure/function
+            if (!foundMainProcedure && PROCEDURE_PATTERN.matcher(line).matches()) {
+                String upperLine = line.toUpperCase();
+                if (upperLine.contains("MAIN") || upperLine.contains("PROCEDURE MAIN") || upperLine.contains("FUNCTION MAIN")) {
+                    foundMainProcedure = true;
+                    instrumentedLines.add(line);
+                    
+                    // Add local variable declarations if they exist, then inject our call
+                    int nextLineIndex = i + 1;
+                    while (nextLineIndex < lines.size()) {
+                        String nextLine = lines.get(nextLineIndex).trim();
+                        if (nextLine.toUpperCase().startsWith("LOCAL ") || 
+                            nextLine.toUpperCase().startsWith("PRIVATE ") ||
+                            nextLine.toUpperCase().startsWith("PUBLIC ") ||
+                            nextLine.toUpperCase().startsWith("STATIC ") ||
+                            EMPTY_LINE_PATTERN.matcher(nextLine).matches() ||
+                            COMMENT_PATTERN.matcher(nextLine).matches()) {
+                            instrumentedLines.add(lines.get(nextLineIndex));
+                            nextLineIndex++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // Inject the breakpoint loader call
+                    instrumentedLines.add("");
+                    instrumentedLines.add("#ifdef __HARBOUR_DEBUG__");
+                    instrumentedLines.add("   // Auto-load breakpoints from init.cld for GUI debugging");
+                    instrumentedLines.add("   LoadInitCld()");
+                    instrumentedLines.add("#endif");
+                    instrumentedLines.add("");
+                    
+                    // Continue with the rest of the procedure
+                    i = nextLineIndex - 1; // -1 because the for loop will increment
+                    continue;
+                }
+            }
+            
+            instrumentedLines.add(line);
+        }
+        
+        // Write the instrumented file
+        Files.write(instrumentedFile.toPath(), instrumentedLines);
+        return instrumentedFile;
+    }
+
     /**
      * Instruments the source file and returns the path to the instrumented file
      */
@@ -44,8 +176,8 @@ public class HarbourSourceInstrumenter {
             throw new IOException("Source file does not exist: " + sourceFile.getAbsolutePath());
         }
         
-        // First, create a backup of the original file
-        File backupFile = new File(sourceFile.getParentFile(), sourceFile.getName() + ".backup");
+        // First, create a backup of the original file in the build directory
+        File backupFile = new File(buildDir, sourceFile.getName() + ".backup");
         Files.copy(sourceFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
         
         List<String> lines = new ArrayList<>();
@@ -242,6 +374,69 @@ public class HarbourSourceInstrumenter {
             i++;
         }
         return line.substring(0, i);
+    }
+    
+    /**
+     * Instruments GUI programs for early debugger activation to solve timing issues.
+     * Injects altd() call at the very beginning of the main procedure to force
+     * debugger initialization and init.cld reading before any user code executes.
+     */
+    public File instrumentForEarlyDebugActivation() throws IOException {
+        // First check if source file exists
+        if (!sourceFile.exists()) {
+            throw new IOException("Source file does not exist: " + sourceFile.getAbsolutePath());
+        }
+        
+        List<String> lines = Files.readAllLines(sourceFile.toPath());
+        List<String> instrumentedLines = new ArrayList<>();
+        
+        boolean foundMainProcedure = false;
+        boolean injectedEarlyActivation = false;
+        
+        for (String line : lines) {
+            String trimmedLine = line.trim();
+            
+            // Look for the main procedure (PROCEDURE Main, FUNCTION Main, etc.)
+            if (!foundMainProcedure && PROCEDURE_PATTERN.matcher(trimmedLine).matches()) {
+                if (trimmedLine.toUpperCase().contains("MAIN")) {
+                    foundMainProcedure = true;
+                    instrumentedLines.add(line);
+                    continue;
+                }
+            }
+            
+            // If we're in main procedure and found first non-comment, non-empty, non-declaration line
+            if (foundMainProcedure && !injectedEarlyActivation) {
+                // Skip comments, empty lines, and LOCAL declarations
+                if (!EMPTY_LINE_PATTERN.matcher(line).matches() &&
+                    !COMMENT_PATTERN.matcher(trimmedLine).matches() &&
+                    !trimmedLine.toUpperCase().startsWith("LOCAL") &&
+                    !trimmedLine.toUpperCase().startsWith("STATIC") &&
+                    !trimmedLine.toUpperCase().startsWith("PRIVATE") &&
+                    !trimmedLine.toUpperCase().startsWith("PUBLIC") &&
+                    !trimmedLine.toUpperCase().startsWith("PARAMETERS") &&
+                    !PREPROCESSOR_PATTERN.matcher(trimmedLine).matches()) {
+                    
+                    // This is the first executable line - inject early debugger activation before it
+                    String indent = getIndentation(line);
+                    instrumentedLines.add(indent + "// INJECTED: Early debugger activation to solve timing issue");
+                    instrumentedLines.add(indent + "altd()  // Force debugger init and init.cld reading BEFORE user code");
+                    instrumentedLines.add("");
+                    injectedEarlyActivation = true;
+                }
+            }
+            
+            instrumentedLines.add(line);
+        }
+        
+        // Write instrumented file
+        try (PrintWriter writer = new PrintWriter(new FileWriter(instrumentedFile))) {
+            for (String line : instrumentedLines) {
+                writer.println(line);
+            }
+        }
+        
+        return instrumentedFile;
     }
     
     /**

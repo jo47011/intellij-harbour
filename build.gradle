@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.249'
+version = '1.0.298'
 
 repositories {
     mavenCentral()
@@ -49,8 +49,13 @@ intellijPlatform {
         }
     }
 
-    // Configure sandbox to auto-open mytest project
+    // Configure sandbox to auto-open hbmiki-test project
     sandboxContainer = file("$buildDir/idea-sandbox")
+    
+    // Configure runIde to automatically open hbmiki-test project
+    runIde {
+        args = ["/home/developer/workspace/hbmiki-test"]
+    }
 }
 
 // Configure main JAR only

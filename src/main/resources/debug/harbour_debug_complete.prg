@@ -70,7 +70,9 @@ RETURN t_oDebugInfo
 // Main debug entry point - exact VSCode pattern with socket integration
 PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    LOCAL i, tmp, j, vv, oDebugInfo, lAltDInvoked
-   
+
+   altd()
+
    DO CASE
    CASE nMode == HB_DBG_GETENTRY
       // Register with VM - this works
@@ -1037,6 +1039,8 @@ RETURN
 // Initialize the debugger when the library is loaded
 INIT PROCEDURE __InitIntelliJDebugger()
    LOCAL oDebugInfo
+
+   altd()
    
    // Force standard console output
    Set( _SET_CONSOLE, .T. )

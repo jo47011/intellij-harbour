@@ -120,6 +120,29 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         commandExecutor.setDaemon(true);
         commandExecutor.start();
         
+        // Monitor process termination for GUI programs to automatically stop debug session
+        if (processHandler != null) {
+            processHandler.addProcessListener(new com.intellij.execution.process.ProcessAdapter() {
+                @Override
+                public void processTerminated(@NotNull com.intellij.execution.process.ProcessEvent event) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Target process terminated with exit code: " + event.getExitCode() + " - stopping debug session");
+                    
+                    // Stop the debug session when the GUI program terminates
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            getSession().stop();
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session stopped due to process termination");
+                        } catch (Exception e) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Error stopping debug session: " + e.getMessage());
+                        }
+                    });
+                }
+            });
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Added process termination listener for automatic debug session cleanup");
+        }
+        
         // Start debug server in background
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
