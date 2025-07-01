@@ -39,13 +39,13 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
 
     public HarbourDebuggerBreakpointPropertiesPanel(Project project) {
         this.project = project;
-        System.out.println("DEBUG: HarbourDebuggerBreakpointPropertiesPanel constructor called for project: " + project.getName());
+        HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "DEBUG: HarbourDebuggerBreakpointPropertiesPanel constructor called for project: " + project.getName());
     }
 
     @NotNull
     @Override
     public JComponent getComponent() {
-        System.out.println("DEBUG: getComponent() called - creating UI panel");
+        HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "DEBUG: getComponent() called - creating UI panel");
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         
@@ -85,17 +85,17 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
     public void saveTo(@NotNull XLineBreakpoint<HarbourDebuggerBreakpointProperties> breakpoint) {
         try {
             HarbourDebuggerBreakpointProperties properties = breakpoint.getProperties();
-            System.out.println("=== SAVE TO DEBUG ===");
-            System.out.println("Properties object: " + properties);
-            System.out.println("Breakpoint type: " + breakpoint.getType());
-            System.out.println("Breakpoint class: " + breakpoint.getClass());
-            System.out.println("Condition field text: '" + conditionTextField.getText() + "'");
-            System.out.println("Hit condition field text: '" + hitConditionTextField.getText() + "'");
-            System.out.println("Log message field text: '" + logMessageTextField.getText() + "'");
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "=== SAVE TO DEBUG ===");
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Properties object: " + properties);
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Breakpoint type: " + breakpoint.getType());
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Breakpoint class: " + breakpoint.getClass());
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Condition field text: '" + conditionTextField.getText() + "'");
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Hit condition field text: '" + hitConditionTextField.getText() + "'");
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Log message field text: '" + logMessageTextField.getText() + "'");
             
             if (properties == null) {
                 // FORCE CREATE properties if null
-                System.out.println("FORCING creation of properties object!");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "FORCING creation of properties object!");
                 properties = new HarbourDebuggerBreakpointProperties();
                 
                 // Try to force-set the properties via reflection or alternative method
@@ -104,16 +104,16 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                     java.lang.reflect.Field field = breakpoint.getClass().getDeclaredField("myProperties");
                     field.setAccessible(true);
                     field.set(breakpoint, properties);
-                    System.out.println("Successfully forced properties via reflection!");
+                    HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Successfully forced properties via reflection!");
                 } catch (Exception reflectionEx) {
-                    System.out.println("Reflection failed: " + reflectionEx.getMessage());
+                    HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Reflection failed: " + reflectionEx.getMessage());
                     
                     // Alternative: Store in our own map
                     if (customProperties == null) {
                         customProperties = new java.util.HashMap<>();
                     }
                     customProperties.put(breakpoint, properties);
-                    System.out.println("Stored properties in custom map as fallback");
+                    HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Stored properties in custom map as fallback");
                 }
             }
             
@@ -127,27 +127,27 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 properties.setHitCondition(hitCondition);
                 properties.setLogMessage(logMessage);
                 
-                System.out.println("AFTER SAVE - Properties: " + properties);
-                System.out.println("AFTER SAVE - condition: '" + properties.getCondition() + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "AFTER SAVE - Properties: " + properties);
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "AFTER SAVE - condition: '" + properties.getCondition() + "'");
                 
                 // ALWAYS store in custom map for persistence
                 if (customProperties == null) {
                     customProperties = new java.util.HashMap<>();
                 }
                 customProperties.put(breakpoint, properties);
-                System.out.println("PERSISTENCE: Stored properties in custom map for persistence");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "PERSISTENCE: Stored properties in custom map for persistence");
                 
                 // ALSO store in persistent storage service
                 HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
                 storage.storeBreakpointProperties(breakpoint, properties);
-                System.out.println("PERSISTENCE: Stored properties in persistent storage service");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "PERSISTENCE: Stored properties in persistent storage service");
                 
                 // Debug logging
                 LOG.info("Saving breakpoint properties: condition='" + condition + 
                         "', hitCondition='" + hitCondition + "', logMessage='" + logMessage + "'");
             } else {
                 LOG.warn("Properties object is still null after force creation!");
-                System.out.println("ERROR: Properties object is still null after force creation!");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "ERROR: Properties object is still null after force creation!");
             }
         } catch (Exception e) {
             LOG.error("Error in saveTo: " + e.getMessage(), e);
@@ -158,21 +158,21 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
     public void loadFrom(@NotNull XLineBreakpoint<HarbourDebuggerBreakpointProperties> breakpoint) {
         try {
             HarbourDebuggerBreakpointProperties properties = breakpoint.getProperties();
-            System.out.println("=== LOAD FROM DEBUG ===");
-            System.out.println("Properties object: " + properties);
-            System.out.println("Breakpoint type: " + breakpoint.getType());
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "=== LOAD FROM DEBUG ===");
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Properties object: " + properties);
+            HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Breakpoint type: " + breakpoint.getType());
             
             // If properties is null, try to get from our custom storage
             if (properties == null && customProperties != null) {
                 properties = customProperties.get(breakpoint);
-                System.out.println("Retrieved properties from custom storage: " + properties);
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Retrieved properties from custom storage: " + properties);
             }
             
             // Also try persistent storage service
             if (properties == null) {
                 HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
                 properties = storage.getBreakpointProperties(breakpoint);
-                System.out.println("Retrieved properties from persistent storage: " + properties);
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "Retrieved properties from persistent storage: " + properties);
             }
             
             if (properties != null) {
@@ -180,26 +180,26 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 String hitCondition = properties.getHitCondition();
                 String logMessage = properties.getLogMessage();
                 
-                System.out.println("BEFORE LOAD - Properties values:");
-                System.out.println("  condition: '" + condition + "'");
-                System.out.println("  hitCondition: '" + hitCondition + "'");
-                System.out.println("  logMessage: '" + logMessage + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "BEFORE LOAD - Properties values:");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  condition: '" + condition + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  hitCondition: '" + hitCondition + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  logMessage: '" + logMessage + "'");
                 
                 conditionTextField.setText(condition);
                 hitConditionTextField.setText(hitCondition);
                 logMessageTextField.setText(logMessage);
                 
-                System.out.println("AFTER LOAD - UI field values:");
-                System.out.println("  condition field: '" + conditionTextField.getText() + "'");
-                System.out.println("  hitCondition field: '" + hitConditionTextField.getText() + "'");
-                System.out.println("  logMessage field: '" + logMessageTextField.getText() + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "AFTER LOAD - UI field values:");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  condition field: '" + conditionTextField.getText() + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  hitCondition field: '" + hitConditionTextField.getText() + "'");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  logMessage field: '" + logMessageTextField.getText() + "'");
                 
                 // Debug logging
                 LOG.info("Loading breakpoint properties: condition='" + condition + 
                         "', hitCondition='" + hitCondition + "', logMessage='" + logMessage + "'");
             } else {
                 LOG.warn("Properties object is null during load!");
-                System.out.println("ERROR: Properties object is null during load - no custom storage either!");
+                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "ERROR: Properties object is null during load - no custom storage either!");
                 
                 // Initialize empty fields
                 conditionTextField.setText("");

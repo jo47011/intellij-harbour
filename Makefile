@@ -3,7 +3,7 @@
 IDEA=/home/gruhn/.local/share/JetBrains/IdeaIC2024.3
 KIT=$(IDEA)/Grammar-Kit/lib
 IDEA_LIB=/opt/idea-IC-243.25659.39/lib/
-PRJ = /home/gruhn/myprog-linux/harbour-language-plugin
+PRJ = /home/developer/workspace/intellij-harbour
 TOOLS = $(PRJ)/tools
 
 all: flex bnf plugin

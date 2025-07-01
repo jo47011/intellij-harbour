@@ -21,13 +21,13 @@ public class HarbourFunctionCallIdElement extends ASTWrapperPsiElement {
     public HarbourFunctionCallIdElement(@NotNull ASTNode node) {
         super(node);
         LOG.info("Created function call ID element: " + node.getText());
-        System.out.println("Created function call ID element: " + node.getText());
+        HarbourLogger.log("HarbourFunctionCallIdElement", "Created function call ID element: " + node.getText());
     }
 
     @Override
     public PsiReference getReference() {
         LOG.info("getReference called for function call: " + getText());
-        System.out.println("getReference called for function call: " + getText());
+        HarbourLogger.log("HarbourFunctionCallIdElement", "getReference called for function call: " + getText());
         return new DirectFunctionReference(this);
     }
 
@@ -40,7 +40,7 @@ public class HarbourFunctionCallIdElement extends ASTWrapperPsiElement {
         public DirectFunctionReference(HarbourFunctionCallIdElement element) {
             myElement = element;
             LOG.info("Created DirectFunctionReference for: " + element.getText());
-            System.out.println("Created DirectFunctionReference for: " + element.getText());
+            HarbourLogger.log("HarbourFunctionCallIdElement", "Created DirectFunctionReference for: " + element.getText());
         }
 
         @Override
@@ -56,7 +56,7 @@ public class HarbourFunctionCallIdElement extends ASTWrapperPsiElement {
         @Override
         public @Nullable PsiElement resolve() {
             LOG.info("Resolving function call: " + myElement.getText());
-            System.out.println("Resolving function call: " + myElement.getText());
+            HarbourLogger.log("HarbourFunctionCallIdElement", "Resolving function call: " + myElement.getText());
 
             HarbourFile file = (HarbourFile) myElement.getContainingFile();
             String funcName = myElement.getText();
@@ -68,14 +68,14 @@ public class HarbourFunctionCallIdElement extends ASTWrapperPsiElement {
                         child.getText().equalsIgnoreCase(funcName)) {
 
                         LOG.info("Resolved to: " + func.getText());
-                        System.out.println("Resolved to: " + func.getText());
+                        HarbourLogger.log("HarbourFunctionCallIdElement", "Resolved to: " + func.getText());
                         return func;
                     }
                 }
             }
 
             LOG.info("Could not resolve: " + funcName);
-            System.out.println("Could not resolve: " + funcName);
+            HarbourLogger.log("HarbourFunctionCallIdElement", "Could not resolve: " + funcName);
             return null;
         }
 

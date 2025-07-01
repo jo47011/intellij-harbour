@@ -75,7 +75,7 @@ public class HarbourBreakpointPropertiesStorage implements PersistentStateCompon
                 breakpoint.getSourcePosition().getLine()
             );
             myState.breakpointProperties.put(key, stored);
-            System.out.println("STORAGE: Stored breakpoint properties for " + key + ": " + stored.condition);
+            HarbourLogger.log("HarbourBreakpointPropertiesStorage", "STORAGE: Stored breakpoint properties for " + key + ": " + stored.condition);
         }
     }
     
@@ -92,7 +92,7 @@ public class HarbourBreakpointPropertiesStorage implements PersistentStateCompon
                 properties.setCondition(stored.condition);
                 properties.setHitCondition(stored.hitCondition);
                 properties.setLogMessage(stored.logMessage);
-                System.out.println("STORAGE: Retrieved breakpoint properties for " + key + ": " + stored.condition);
+                HarbourLogger.log("HarbourBreakpointPropertiesStorage", "STORAGE: Retrieved breakpoint properties for " + key + ": " + stored.condition);
                 return properties;
             }
         }
@@ -106,7 +106,7 @@ public class HarbourBreakpointPropertiesStorage implements PersistentStateCompon
         if (breakpoint.getSourcePosition() != null) {
             String key = generateKey(breakpoint);
             myState.breakpointProperties.remove(key);
-            System.out.println("STORAGE: Removed breakpoint properties for " + key);
+            HarbourLogger.log("HarbourBreakpointPropertiesStorage", "STORAGE: Removed breakpoint properties for " + key);
         }
     }
     

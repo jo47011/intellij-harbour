@@ -18,18 +18,18 @@ public class HarbourDebuggerLineBreakpointType extends XLineBreakpointType<Harbo
 
     public HarbourDebuggerLineBreakpointType() {
         super("harbour-line", "Harbour Line Breakpoints");
-        System.out.println("DEBUG: HarbourDebuggerLineBreakpointType constructor called");
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "DEBUG: HarbourDebuggerLineBreakpointType constructor called");
     }
 
     @NotNull
     @Override
     public HarbourDebuggerBreakpointProperties createBreakpointProperties(@NotNull VirtualFile file, int line) {
-        System.out.println("=== CREATE BREAKPOINT PROPERTIES ===");
-        System.out.println("createBreakpointProperties() called for " + file.getName() + ":" + line);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "=== CREATE BREAKPOINT PROPERTIES ===");
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "createBreakpointProperties() called for " + file.getName() + ":" + line);
         HarbourDebuggerBreakpointProperties props = new HarbourDebuggerBreakpointProperties();
-        System.out.println("Created properties object: " + props);
-        System.out.println("Properties toString: " + props);
-        System.out.println("=== END CREATE BREAKPOINT PROPERTIES ===");
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "Created properties object: " + props);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "Properties toString: " + props);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "=== END CREATE BREAKPOINT PROPERTIES ===");
         return props;
     }
 
@@ -45,20 +45,20 @@ public class HarbourDebuggerLineBreakpointType extends XLineBreakpointType<Harbo
         
         boolean canPut = isHarbourFile || hasHarbourExtension;
         
-        System.out.println("=== HARBOUR BREAKPOINT TYPE DEBUG ===");
-        System.out.println("canPutAt() called for " + file.getName() + 
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "=== HARBOUR BREAKPOINT TYPE DEBUG ===");
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "canPutAt() called for " + file.getName() + 
                           " line " + line + " - result: " + canPut);
-        System.out.println("File type: " + file.getFileType());
-        System.out.println("HarbourFileType.INSTANCE: " + HarbourFileType.INSTANCE);
-        System.out.println("Is Harbour file type: " + isHarbourFile);
-        System.out.println("File extension: " + fileExtension);
-        System.out.println("Has Harbour extension: " + hasHarbourExtension);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "File type: " + file.getFileType());
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "HarbourFileType.INSTANCE: " + HarbourFileType.INSTANCE);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "Is Harbour file type: " + isHarbourFile);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "File extension: " + fileExtension);
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "Has Harbour extension: " + hasHarbourExtension);
         
         // If this is a Harbour file, we MUST return true to claim ownership
         if (canPut) {
-            System.out.println("CLAIMING OWNERSHIP of breakpoint for Harbour file!");
+            HarbourLogger.log("HarbourDebuggerLineBreakpointType", "CLAIMING OWNERSHIP of breakpoint for Harbour file!");
         }
-        System.out.println("=== END HARBOUR BREAKPOINT TYPE DEBUG ===");
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "=== END HARBOUR BREAKPOINT TYPE DEBUG ===");
         
         return canPut;
     }
@@ -66,7 +66,7 @@ public class HarbourDebuggerLineBreakpointType extends XLineBreakpointType<Harbo
     @Nullable
     @Override
     public XBreakpointCustomPropertiesPanel<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> createCustomPropertiesPanel(@NotNull Project project) {
-        System.out.println("DEBUG: createCustomPropertiesPanel() called for project: " + project.getName());
+        HarbourLogger.log("HarbourDebuggerLineBreakpointType", "DEBUG: createCustomPropertiesPanel() called for project: " + project.getName());
         return new HarbourDebuggerBreakpointPropertiesPanel(project);
     }
 

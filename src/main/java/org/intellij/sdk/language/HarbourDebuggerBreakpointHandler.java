@@ -68,9 +68,9 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
                     }
                     
                     // Critical debugging - using multiple logging methods
-                    System.out.println("=== BREAKPOINT REGISTRATION DEBUG ===");
-                    System.out.println("Properties object: " + (properties != null ? "not null" : "NULL"));
-                    System.out.println("Properties from custom storage: " + (properties != null && breakpoint.getProperties() == null));
+                    HarbourLogger.log("HarbourDebuggerBreakpointHandler", "=== BREAKPOINT REGISTRATION DEBUG ===");
+                    HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Properties object: " + (properties != null ? "not null" : "NULL"));
+                    HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Properties from custom storage: " + (properties != null && breakpoint.getProperties() == null));
                     
                     HarbourLogger.log(project, "HarbourDebugger", 
                             "=== BREAKPOINT REGISTRATION: " + fileName + ":" + line);
@@ -78,12 +78,12 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
                             "Breakpoint properties object: " + (properties != null ? "not null" : "NULL"));
                     
                     if (properties != null) {
-                        System.out.println("Condition: '" + properties.getCondition() + "'");
-                        System.out.println("Hit Condition: '" + properties.getHitCondition() + "'");
-                        System.out.println("Log Message: '" + properties.getLogMessage() + "'");
-                        System.out.println("Has Condition: " + properties.hasCondition());
-                        System.out.println("Has Hit Condition: " + properties.hasHitCondition());
-                        System.out.println("Has Log Message: " + properties.hasLogMessage());
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Condition: '" + properties.getCondition() + "'");
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Hit Condition: '" + properties.getHitCondition() + "'");
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Log Message: '" + properties.getLogMessage() + "'");
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Has Condition: " + properties.hasCondition());
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Has Hit Condition: " + properties.hasHitCondition());
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Has Log Message: " + properties.hasLogMessage());
                         
                         HarbourLogger.log(project, "HarbourDebugger", 
                                 "Property values - Condition: '" + properties.getCondition() + 

@@ -159,9 +159,9 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
                             .notifyCodeStyleSettingsChanged();
 
                     // Add logging
-                    System.out.println("Updated right margin to: " + lineBreakPosition);
+                    HarbourLogger.log("HarbourSettings", "Updated right margin to: " + lineBreakPosition);
                 } catch (Exception e) {
-                    System.err.println("Error updating margin: " + e.getMessage());
+                    HarbourLogger.log("HarbourSettings", "Error updating margin: " + e.getMessage());
                 }
             }
         });
