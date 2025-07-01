@@ -41,6 +41,10 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
                                              @NotNull ExecutionEnvironment env) throws ExecutionException {
         Project project = env.getProject();
 
+        System.out.println("========= RUNNER DEBUG =========");
+        System.out.println("HarbourDebuggerRunner.doExecute() called");
+        HarbourLogger.log(project, "HarbourDebugger", "========= RUNNER DEBUG =========");
+        HarbourLogger.log(project, "HarbourDebugger", "HarbourDebuggerRunner.doExecute() called");
         HarbourLogger.log(project, "HarbourDebugger", "Starting debug session...");
 
         // Get debug configuration

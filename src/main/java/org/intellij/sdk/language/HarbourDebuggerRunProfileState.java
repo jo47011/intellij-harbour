@@ -58,7 +58,18 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     @NotNull
     @Override
     protected ProcessHandler startProcess() throws ExecutionException {
+        System.out.println("========= START PROCESS DEBUG =========");
+        System.out.println("startProcess() method called");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "========= START PROCESS DEBUG =========");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "startProcess() method called");
+        
+        System.out.println("About to call exportBreakpointsToFile()");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call exportBreakpointsToFile()");
+        
         exportBreakpointsToFile();
+        
+        System.out.println("exportBreakpointsToFile() call completed");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "exportBreakpointsToFile() call completed");
 
         GeneralCommandLine commandLine = new GeneralCommandLine();
 
@@ -334,7 +345,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     "GUI program: Will use Harbour internal debugger with init.cld");
         }
         
-        parameters.add(finalBuildTarget);
+        // CRITICAL FIX: Use relative filename, not absolute path for hbmk2
+        // Absolute paths break debugging - user confirmed this is the root cause
+        File targetFile = new File(finalBuildTarget);
+        String relativeTarget = targetFile.getName();
+        parameters.add(relativeTarget);
+        
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Using relative target: " + relativeTarget + " (was: " + finalBuildTarget + ")");
         
         // Add debug source based on program type per CLAUDE.md rules
         if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
@@ -350,8 +368,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         parameters.add("-b");
         parameters.add("-run");
-        // NOTE: -clean flag prevents execution entirely, so removed
         
+        // FORCE debug activation by adding preprocessor define to trigger AltD(1)
+        parameters.add("-DFORCE_DEBUG_MODE=1");
+        
+        // CRITICAL: Add debug flags for F9 breakpoint support
+        parameters.add("-debug");  // Add C-level debug information 
+        // NOTE: Removed -lhbdebug as hbmk2 warns it's a core library automatically included with -b
+        
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Added debug flag: -debug for C-level debug support");
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Using incremental build (removed -clean as it prevented execution)");
 
@@ -453,26 +479,66 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "GUI Program: " + isGui);
 
         commandLine.addParameters(parameters);
-        commandLine.setWorkDirectory(workingDir);
+        
+        // CRITICAL FIX: Ensure working directory uses Windows format on Windows for init.cld loading
+        String finalWorkingDir = workingDir;
+        if (System.getProperty("os.name").toLowerCase().contains("windows") && workingDir != null) {
+            // Convert to Windows path format for proper init.cld loading
+            finalWorkingDir = workingDir.replace("/", "\\");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Converted working directory to Windows format: " + finalWorkingDir);
+        }
+        
+        commandLine.setWorkDirectory(finalWorkingDir);
         
         // Set debug environment based on program type per CLAUDE.md rules
         if (isGui) {
             // GUI programs: Use Harbour internal debugger environment
-            String debugPath = workingDir != null ? workingDir : ".";
+            String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
             commandLine.withEnvironment("HB_DBG_PATH", debugPath);
+            
+            // CRITICAL: Set ALTD=BREAK to trigger AltD(1) in menu.prg line 90
+            commandLine.withEnvironment("ALTD", "BREAK");
             
             // Also set working directory as fallback for init.cld lookup
             File initCldFile = new File(debugPath, "init.cld");
             
             System.out.println("=== GUI DEBUG SETUP ===");
             System.out.println("Working directory: " + workingDir);
+            System.out.println("Final working directory: " + finalWorkingDir);
             System.out.println("HB_DBG_PATH set to: " + debugPath);
+            System.out.println("ALTD set to: BREAK (triggers AltD(1) in code)");
             System.out.println("Expected init.cld location: " + initCldFile.getAbsolutePath());
             System.out.println("init.cld exists: " + initCldFile.exists());
+            
+            // ULTRA DEBUG: Check current working directory vs set working directory
+            System.out.println("--- ULTRA DEBUG OUTPUT ---");
+            System.out.println("Current Java working dir: " + System.getProperty("user.dir"));
+            System.out.println("Absolute path exists check: " + new File(debugPath + "/init.cld").exists());
+            System.out.println("Relative path exists check: " + new File("init.cld").exists());
+            System.out.println("Windows path exists check: " + new File(debugPath + "\\init.cld").exists());
+            
+            // Check if working directory contains expected files
+            File workDir = new File(finalWorkingDir);
+            if (workDir.exists() && workDir.isDirectory()) {
+                System.out.println("Files in working directory:");
+                String[] files = workDir.list();
+                if (files != null) {
+                    for (String file : files) {
+                        System.out.println("  - " + file);
+                        if (file.equals("init.cld")) {
+                            System.out.println("    >>> FOUND init.cld in working directory!");
+                        }
+                    }
+                }
+            }
+            System.out.println("=========================");
             System.out.println("=====================");
             
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "GUI program: Set HB_DBG_PATH=" + debugPath);
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "GUI program: Set ALTD=BREAK to trigger AltD(1) in program");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "GUI program: init.cld will be loaded automatically by Harbour internal debugger");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
@@ -611,8 +677,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         List<String> parameters = new ArrayList<>();
 
-        // Don't set ALTD environment variable for remote debugging
-        // commandLine.withEnvironment("ALTD", "BREAK");
+        // For pre-compiled executables: Need to detect if GUI program to set ALTD
+        // TODO: Add GUI detection logic for direct execution mode
+        // For now, assuming console programs use remote debugging
+        // commandLine.withEnvironment("ALTD", "BREAK");  // Enable for GUI programs only
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
             parameters.addAll(StringUtil.split(runConfig.getProgramArguments(), " "));
@@ -622,126 +690,454 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         commandLine.setWorkDirectory(workingDir);
         commandLine.withEnvironment("HB_DBG_PATH", ".");
         commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+        
+        // Log the complete executable command for debugging - make it very visible
+        StringBuilder cmdLog = new StringBuilder();
+        cmdLog.append(exePath).append(" ");
+        for (String param : parameters) {
+            cmdLog.append(param).append(" ");
+        }
+        
+        String fullCommand = cmdLog.toString();
+        lastExecutedCommand = fullCommand; // Store for console output
+        
+        System.out.println("=== EXECUTABLE COMMAND ===");
+        System.out.println(fullCommand);
+        System.out.println("Working Directory: " + workingDir);
+        System.out.println("Environment: HB_DBG_PATH=., HB_REMOTE_DEBUG=1");
+        System.out.println("===========================");
+        
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "=== EXECUTABLE COMMAND ===");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Command: " + fullCommand);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Working Directory: " + workingDir);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Environment: HB_DBG_PATH=., HB_REMOTE_DEBUG=1");
     }
 
     private void exportBreakpointsToFile() {
-        try {
-            Project project = env.getProject();
-            XBreakpointManager breakpointManager = XDebuggerManager.getInstance(project).getBreakpointManager();
+        Project project = env.getProject();
+        XBreakpointManager breakpointManager = XDebuggerManager.getInstance(project).getBreakpointManager();
 
-            String breakpointFileName = StringUtil.isEmpty(runConfig.getBreakpointFile())
-                    ? "init.cld" : runConfig.getBreakpointFile();
-
-            String workingDir = runConfig.getWorkingDirectory();
-            if (StringUtil.isEmpty(workingDir)) {
-                if (runConfig.isUseDirectExecution() && !StringUtil.isEmpty(runConfig.getExecutablePath())) {
-                    File exeFile = new File(runConfig.getExecutablePath());
-                    workingDir = exeFile.getParent();
-                } else if (!StringUtil.isEmpty(runConfig.getSourceFile())) {
-                    File sourceFile = new File(runConfig.getSourceFile());
-                    workingDir = sourceFile.getParent();
-                } else {
-                    workingDir = project.getBasePath();
+        // COMPREHENSIVE DEBUG LOGGING
+        System.out.println("========= EXPORT BREAKPOINTS DEBUG START =========");
+        HarbourLogger.log(project, "HarbourDebugger", "========= EXPORT BREAKPOINTS DEBUG START =========");
+        
+        // Check if this method is actually being called
+        HarbourLogger.log(project, "HarbourDebugger", "exportBreakpointsToFile() method called");
+        System.out.println("exportBreakpointsToFile() method called");
+        
+        // Check total breakpoints available
+        XBreakpoint<?>[] allBreakpoints = breakpointManager.getAllBreakpoints();
+        HarbourLogger.log(project, "HarbourDebugger", "Total breakpoints in manager: " + allBreakpoints.length);
+        System.out.println("Total breakpoints in manager: " + allBreakpoints.length);
+        
+        for (XBreakpoint<?> bp : allBreakpoints) {
+            HarbourLogger.log(project, "HarbourDebugger", "Breakpoint: " + bp.toString());
+            System.out.println("Breakpoint: " + bp.toString());
+            if (bp instanceof XLineBreakpoint) {
+                XLineBreakpoint<?> lineBp = (XLineBreakpoint<?>) bp;
+                if (lineBp.getSourcePosition() != null) {
+                    HarbourLogger.log(project, "HarbourDebugger", "  - File: " + lineBp.getSourcePosition().getFile().getName());
+                    HarbourLogger.log(project, "HarbourDebugger", "  - Line: " + (lineBp.getSourcePosition().getLine() + 1));
+                    HarbourLogger.log(project, "HarbourDebugger", "  - Type: " + lineBp.getType().getClass().getSimpleName());
+                    System.out.println("  - File: " + lineBp.getSourcePosition().getFile().getName());
+                    System.out.println("  - Line: " + (lineBp.getSourcePosition().getLine() + 1));
+                    System.out.println("  - Type: " + lineBp.getType().getClass().getSimpleName());
                 }
             }
+        }
 
-            File breakpointFile = new File(workingDir, breakpointFileName);
+        String breakpointFileName = StringUtil.isEmpty(runConfig.getBreakpointFile())
+                ? "init.cld" : runConfig.getBreakpointFile();
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Breakpoint filename: " + breakpointFileName);
+        System.out.println("Breakpoint filename: " + breakpointFileName);
 
-            if (!breakpointFile.getParentFile().exists()) {
-                if (!breakpointFile.getParentFile().mkdirs()) {
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", "Failed to create breakpoint directory");
+        String workingDir = runConfig.getWorkingDirectory();
+        if (StringUtil.isEmpty(workingDir)) {
+            if (runConfig.isUseDirectExecution() && !StringUtil.isEmpty(runConfig.getExecutablePath())) {
+                File exeFile = new File(runConfig.getExecutablePath());
+                workingDir = exeFile.getParent();
+            } else if (!StringUtil.isEmpty(runConfig.getSourceFile())) {
+                File sourceFile = new File(runConfig.getSourceFile());
+                workingDir = sourceFile.getParent();
+            } else {
+                workingDir = project.getBasePath();
+            }
+        }
+
+        File breakpointFile = new File(workingDir, breakpointFileName);
+
+        // Add diagnostic logging for Windows debugging
+        HarbourLogger.log(project, "HarbourDebugger", "=== INIT.CLD CREATION DIAGNOSTICS ===");
+        HarbourLogger.log(project, "HarbourDebugger", "Working directory from config: " + runConfig.getWorkingDirectory());
+        HarbourLogger.log(project, "HarbourDebugger", "Computed working directory: " + workingDir);
+        HarbourLogger.log(project, "HarbourDebugger", "Breakpoint file path: " + breakpointFile.getAbsolutePath());
+        HarbourLogger.log(project, "HarbourDebugger", "Parent directory exists: " + breakpointFile.getParentFile().exists());
+        HarbourLogger.log(project, "HarbourDebugger", "Is direct execution: " + runConfig.isUseDirectExecution());
+        HarbourLogger.log(project, "HarbourDebugger", "Source file: " + runConfig.getSourceFile());
+        
+        // For Windows with .hbp files, we need to write init.cld to multiple locations
+        // because hbmk2 may change the working directory when running
+        List<File> breakpointFiles = new ArrayList<>();
+        breakpointFiles.add(breakpointFile);
+        
+        if (System.getProperty("os.name").toLowerCase().contains("windows") && 
+            runConfig.getSourceFile().endsWith(".hbp")) {
+            // When using hbmk2 with .hbp, the executable is typically created 
+            // in the same directory as the .hbp file, and that's where it runs from
+            File hbpDir = new File(runConfig.getSourceFile()).getParentFile();
+            File altBreakpointFile = new File(hbpDir, breakpointFileName);
+            if (!altBreakpointFile.equals(breakpointFile)) {
+                breakpointFiles.add(altBreakpointFile);
+                HarbourLogger.log(project, "HarbourDebugger", "Windows .hbp detected - also writing init.cld to: " + 
+                    altBreakpointFile.getAbsolutePath());
+            }
+        }
+        HarbourLogger.log(project, "HarbourDebugger", "=====================================");
+
+        if (!breakpointFile.getParentFile().exists()) {
+            if (!breakpointFile.getParentFile().mkdirs()) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", "Failed to create breakpoint directory");
+            }
+        }
+
+        int totalBreakpoints = 0;
+        Set<String> breakpointFileNames = new HashSet<>();
+        String sourceFileName = new File(runConfig.getSourceFile()).getName();
+
+        // Get the actual .prg file to debug
+        String targetPrgFile = getMainPrgFileFromSource(runConfig.getSourceFile());
+        HarbourLogger.log(project, "HarbourDebugger", "Target .prg file for debugging: " + targetPrgFile);
+        System.out.println("Target .prg file for debugging: " + targetPrgFile);
+        
+        // Check if we're debugging an instrumented file
+        boolean isInstrumented = targetPrgFile.endsWith("_instrumented.prg");
+        String originalFileName = isInstrumented ? 
+            targetPrgFile.replace("_instrumented.prg", ".prg") : targetPrgFile;
+        // Count total breakpoints for logging
+        for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
+            if (bp instanceof XLineBreakpoint &&
+                    bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
+                    bp.getSourcePosition() != null) {
+
+                VirtualFile file = bp.getSourcePosition().getFile();
+                String fileName = file.getName();
+
+                // Only count breakpoints for the file we're actually debugging
+                if (fileName.equals(originalFileName) || 
+                    (isInstrumented && fileName.equals(targetPrgFile))) {
+                    totalBreakpoints++;
+                    breakpointFileNames.add(fileName);
                 }
             }
-
-            int totalBreakpoints = 0;
-            Set<String> breakpointFiles = new HashSet<>();
-            String sourceFileName = new File(runConfig.getSourceFile()).getName();
-
-            // Check if we're debugging an instrumented file
-            boolean isInstrumented = sourceFileName.endsWith("_instrumented.prg");
-            String originalFileName = isInstrumented ? 
-                sourceFileName.replace("_instrumented.prg", ".prg") : sourceFileName;
+        }
+        
+        // Write breakpoints to all init.cld file locations, preserving existing content
+        HarbourLogger.log(project, "HarbourDebugger", "About to write to " + breakpointFiles.size() + " locations");
+        System.out.println("About to write to " + breakpointFiles.size() + " locations");
+        
+        for (File bpFile : breakpointFiles) {
+            HarbourLogger.log(project, "HarbourDebugger", "Processing init.cld at: " + bpFile.getAbsolutePath());
+            System.out.println("Processing init.cld at: " + bpFile.getAbsolutePath());
             
-            try (FileWriter writer = new FileWriter(breakpointFile)) {
-                // SOLUTION: Use FILE OPEN first to initialize source browser, then set breakpoints
-                // This avoids the REFRESHALL error by ensuring oBrwText is initialized before BP commands
-                writer.write("// Load source file first to initialize browser, then set breakpoints\n");
-                writer.write("FILE OPEN " + originalFileName + "\n");
-                writer.write("\n");
+            try {
+                updateInitCldFile(bpFile, originalFileName, totalBreakpoints, breakpointManager, project);
+                HarbourLogger.log(project, "HarbourDebugger", "Successfully updated init.cld at: " + bpFile.getAbsolutePath());
+                System.out.println("Successfully updated init.cld at: " + bpFile.getAbsolutePath());
+            } catch (IOException e) {
+                HarbourLogger.log(project, "HarbourDebugger", "Failed to update init.cld at " + 
+                    bpFile.getAbsolutePath() + ": " + e.getMessage());
+                System.out.println("Failed to update init.cld at " + bpFile.getAbsolutePath() + ": " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+            
+        // Check for breakpoint file mismatch
+        if (totalBreakpoints > 0 && !breakpointFileNames.isEmpty()) {
+            boolean hasMatchingBreakpoint = false;
+            for (String bpFile : breakpointFileNames) {
+                if (bpFile.equals(targetPrgFile) || 
+                    bpFile.equals(targetPrgFile.replace(".prg", "_instrumented.prg")) ||
+                    targetPrgFile.equals(bpFile.replace("_instrumented.prg", ".prg"))) {
+                    hasMatchingBreakpoint = true;
+                    break;
+                }
+            }
+            
+            if (!hasMatchingBreakpoint) {
+                String message = String.format(
+                    "Warning: Breakpoints are set in %s but debugging %s. " +
+                    "The debugger will not stop at these breakpoints.",
+                    breakpointFileNames, targetPrgFile
+                );
+                HarbourLogger.log(project, "HarbourDebugger", message);
+                HarbourDebuggerNotification.notifyEvent(project, "Breakpoint File Mismatch", message);
+            }
+        }
+
+        HarbourLogger.log(project, "HarbourDebugger", "Exported " + totalBreakpoints +
+                " breakpoints using FILE OPEN + BP approach");
+        System.out.println("=== INIT.CLD LOCATIONS ===");
+        for (File bpFile : breakpointFiles) {
+            System.out.println("init.cld written to: " + bpFile.getAbsolutePath());
+            System.out.println("  File exists: " + bpFile.exists());
+            System.out.println("  File size: " + (bpFile.exists() ? bpFile.length() + " bytes" : "N/A"));
+        }
+        System.out.println("Working directory: " + workingDir);
+        System.out.println("Target .prg file: " + targetPrgFile);
+        System.out.println("Total breakpoints: " + totalBreakpoints);
+        System.out.println("========= EXPORT BREAKPOINTS DEBUG END =========");
+        
+        HarbourLogger.log(project, "HarbourDebugger", "========= EXPORT BREAKPOINTS DEBUG END =========");
+
+    }
+
+    /**
+     * Extracts the main .prg file from the source file (either direct .prg or from .hbp)
+     */
+    private String getMainPrgFileFromSource(String sourceFile) {
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "getMainPrgFileFromSource() called with: " + sourceFile);
+        System.out.println("getMainPrgFileFromSource() called with: " + sourceFile);
+        
+        if (sourceFile.endsWith(".hbp")) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", "Detected .hbp file, parsing...");
+            System.out.println("Detected .hbp file, parsing...");
+            
+            // Parse .hbp file to find the main .prg file
+            try {
+                File hbpFile = new File(sourceFile);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", "HBP file exists: " + hbpFile.exists());
+                System.out.println("HBP file exists: " + hbpFile.exists());
                 
-                // Now write breakpoints after FILE OPEN
-                for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
-                    if (bp instanceof XLineBreakpoint &&
-                            bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
-                            bp.getSourcePosition() != null) {
-
-                        VirtualFile file = bp.getSourcePosition().getFile();
-                        String fileName = file.getName();
-                        int line = bp.getSourcePosition().getLine() + 1;
-
-                        // Only export breakpoints for the file we're actually debugging
-                        if (fileName.equals(originalFileName) || 
-                            (isInstrumented && fileName.equals(sourceFileName))) {
-                            // Write breakpoint with original filename
-                            writer.write("BP " + line + " " + originalFileName + "\n");
-                            totalBreakpoints++;
-                            breakpointFiles.add(fileName);
+                if (hbpFile.exists()) {
+                    String content = new String(java.nio.file.Files.readAllBytes(hbpFile.toPath()));
+                    String[] lines = content.split("\\r?\\n");
+                    
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", "HBP file has " + lines.length + " lines");
+                    System.out.println("HBP file has " + lines.length + " lines");
+                    
+                    for (String line : lines) {
+                        line = line.trim();
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Processing line: " + line);
+                        
+                        // Look for .prg files (first one is typically the main)
+                        if (line.endsWith(".prg") && !line.startsWith("#") && !line.startsWith("//")) {
+                            // Handle relative paths
+                            if (line.startsWith("./")) {
+                                line = line.substring(2);
+                            }
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                "Found main .prg file in .hbp: " + line);
+                            System.out.println("Found main .prg file in .hbp: " + line);
+                            return line;
                         }
                     }
                 }
+            } catch (Exception e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Error parsing .hbp file: " + e.getMessage());
+                System.out.println("Error parsing .hbp file: " + e.getMessage());
+                e.printStackTrace();
             }
-            
-            // Check for breakpoint file mismatch
-            if (totalBreakpoints > 0 && !breakpointFiles.isEmpty()) {
-                boolean hasMatchingBreakpoint = false;
-                for (String bpFile : breakpointFiles) {
-                    if (bpFile.equals(sourceFileName) || 
-                        bpFile.equals(sourceFileName.replace(".prg", "_instrumented.prg")) ||
-                        sourceFileName.equals(bpFile.replace("_instrumented.prg", ".prg"))) {
-                        hasMatchingBreakpoint = true;
-                        break;
-                    }
-                }
-                
-                if (!hasMatchingBreakpoint) {
-                    String message = String.format(
-                        "Warning: Breakpoints are set in %s but debugging %s. " +
-                        "The debugger will not stop at these breakpoints.",
-                        breakpointFiles, sourceFileName
-                    );
-                    HarbourLogger.log(project, "HarbourDebugger", message);
-                    HarbourDebuggerNotification.notifyEvent(project, "Breakpoint File Mismatch", message);
-                }
-            }
-
-            HarbourLogger.log(project, "HarbourDebugger", "Exported " + totalBreakpoints +
-                    " breakpoints to " + breakpointFile.getPath() + " using FILE OPEN + BP approach");
-            System.out.println("=== INIT.CLD LOCATION ===");
-            System.out.println("Created init.cld at: " + breakpointFile.getAbsolutePath());
-            System.out.println("Working directory used: " + workingDir);
-            System.out.println("File exists: " + breakpointFile.exists());
-            System.out.println("File size: " + (breakpointFile.exists() ? breakpointFile.length() + " bytes" : "N/A"));
-            System.out.println("File content preview:");
-            if (breakpointFile.exists()) {
-                try {
-                    String content = new String(java.nio.file.Files.readAllBytes(breakpointFile.toPath()));
-                    System.out.println(content.length() > 200 ? content.substring(0, 200) + "..." : content);
-                } catch (Exception e) {
-                    System.out.println("Error reading file: " + e.getMessage());
-                }
-            }
-            System.out.println("========================");
-
-        } catch (IOException e) {
-            HarbourLogger.logStackTrace("HarbourDebugger", e);
+            // Fallback: use .hbp filename if no .prg found
+            String fallback = new File(sourceFile).getName();
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", "No .prg found, using fallback: " + fallback);
+            System.out.println("No .prg found, using fallback: " + fallback);
+            return fallback;
+        } else {
+            // Direct .prg file
+            String result = new File(sourceFile).getName();
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", "Direct .prg file: " + result);
+            System.out.println("Direct .prg file: " + result);
+            return result;
         }
+    }
+
+    /**
+     * Updates init.cld file by preserving existing content and only modifying BP entries
+     */
+    private void updateInitCldFile(File initCldFile, String targetPrgFile, int totalBreakpoints, 
+                                   XBreakpointManager breakpointManager, Project project) throws IOException {
+        HarbourLogger.log(project, "HarbourDebugger", "updateInitCldFile() called for: " + initCldFile.getAbsolutePath());
+        System.out.println("updateInitCldFile() called for: " + initCldFile.getAbsolutePath());
+        System.out.println("Target PRG file: " + targetPrgFile);
+        
+        List<String> existingLines = new ArrayList<>();
+        
+        // Read existing content if file exists
+        HarbourLogger.log(project, "HarbourDebugger", "File exists: " + initCldFile.exists());
+        System.out.println("File exists: " + initCldFile.exists());
+        
+        if (initCldFile.exists()) {
+            try {
+                existingLines = java.nio.file.Files.readAllLines(initCldFile.toPath());
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "Read " + existingLines.size() + " existing lines from init.cld");
+                System.out.println("Read " + existingLines.size() + " existing lines from init.cld");
+                
+                for (int i = 0; i < existingLines.size(); i++) {
+                    HarbourLogger.log(project, "HarbourDebugger", "Line " + i + ": " + existingLines.get(i));
+                }
+            } catch (IOException e) {
+                HarbourLogger.log(project, "HarbourDebugger", 
+                    "Could not read existing init.cld, creating new: " + e.getMessage());
+                System.out.println("Could not read existing init.cld, creating new: " + e.getMessage());
+            }
+        } else {
+            HarbourLogger.log(project, "HarbourDebugger", "File does not exist, will create new");
+            System.out.println("File does not exist, will create new");
+        }
+        
+        // Filter out old BP entries, FILE OPEN commands for our target file, and Options Path
+        List<String> filteredLines = new ArrayList<>();
+        for (String line : existingLines) {
+            String trimmedLine = line.trim();
+            if (trimmedLine.startsWith("BP ") && trimmedLine.contains(targetPrgFile)) {
+                // Remove old breakpoint entries for our target file only
+                HarbourLogger.log(project, "HarbourDebugger", "Removing old BP entry for target file: " + line);
+                continue;
+            }
+            if (trimmedLine.startsWith("FILE OPEN ") && trimmedLine.contains(targetPrgFile)) {
+                // Remove old FILE OPEN commands for our target file only
+                HarbourLogger.log(project, "HarbourDebugger", "Removing old FILE OPEN entry for target file: " + line);
+                continue;
+            }
+            // NOTE: We now preserve Options Path as it's needed for source file lookup
+            // The user manually added the correct path, so we should keep it
+            // Keep other lines (Options Colors, Window settings, etc.)
+            filteredLines.add(line);
+        }
+        
+        // NOTE: FILE OPEN command removed - causes "Command Error" in Harbour debugger
+        // The debugger will work with just breakpoint entries
+        HarbourLogger.log(project, "HarbourDebugger", "Skipping FILE OPEN command (causes Command Error)");
+        System.out.println("Skipping FILE OPEN command (causes Command Error)");
+        
+        // Add new breakpoints
+        HarbourLogger.log(project, "HarbourDebugger", "Adding new breakpoints...");
+        System.out.println("Adding new breakpoints...");
+        
+        int addedBreakpoints = 0;
+        for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
+            HarbourLogger.log(project, "HarbourDebugger", "Processing breakpoint: " + bp.toString());
+            System.out.println("Processing breakpoint: " + bp.toString());
+            
+            if (bp instanceof XLineBreakpoint &&
+                    bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
+                    bp.getSourcePosition() != null) {
+
+                VirtualFile file = bp.getSourcePosition().getFile();
+                String fileName = file.getName();
+                int line = bp.getSourcePosition().getLine() + 1;
+                
+                HarbourLogger.log(project, "HarbourDebugger", "  Breakpoint file: " + fileName + ", line: " + line);
+                System.out.println("  Breakpoint file: " + fileName + ", line: " + line);
+                HarbourLogger.log(project, "HarbourDebugger", "  Target file: " + targetPrgFile);
+                System.out.println("  Target file: " + targetPrgFile);
+
+                // Only add breakpoints for the target .prg file
+                if (fileName.equals(targetPrgFile) || 
+                    (targetPrgFile.endsWith("_instrumented.prg") && fileName.equals(targetPrgFile.replace("_instrumented.prg", ".prg")))) {
+                    
+                    // Create absolute path for the target file (based on init.cld location)
+                    File absoluteTargetFile = new File(initCldFile.getParentFile(), targetPrgFile);
+                    String targetPath = absoluteTargetFile.getAbsolutePath();
+                    
+                    // On Windows, keep Windows path separators for Harbour debugger
+                    // On Unix, use Unix path separators
+                    if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+                        targetPath = targetPath.replace("/", "\\");
+                    } else {
+                        targetPath = targetPath.replace("\\", "/");
+                    }
+                    
+                    // Use just filename for BP command, not full path
+                    String justFileName = new File(targetPath).getName();
+                    String bpLine = "BP " + line + " " + justFileName;
+                    filteredLines.add(bpLine);
+                    addedBreakpoints++;
+                    HarbourLogger.log(project, "HarbourDebugger", "Added BP entry: " + bpLine);
+                    System.out.println("Added BP entry: " + bpLine);
+                } else {
+                    HarbourLogger.log(project, "HarbourDebugger", "  Skipping breakpoint (file mismatch)");
+                    System.out.println("  Skipping breakpoint (file mismatch)");
+                }
+            } else {
+                HarbourLogger.log(project, "HarbourDebugger", "  Skipping breakpoint (wrong type or no position)");
+                System.out.println("  Skipping breakpoint (wrong type or no position)");
+            }
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Added " + addedBreakpoints + " breakpoints total");
+        System.out.println("Added " + addedBreakpoints + " breakpoints total");
+        
+        // Write updated content
+        HarbourLogger.log(project, "HarbourDebugger", "Writing " + filteredLines.size() + " lines to init.cld");
+        System.out.println("Writing " + filteredLines.size() + " lines to init.cld");
+        
+        for (int i = 0; i < filteredLines.size(); i++) {
+            HarbourLogger.log(project, "HarbourDebugger", "Writing line " + i + ": " + filteredLines.get(i));
+            System.out.println("Writing line " + i + ": " + filteredLines.get(i));
+        }
+        
+        try (FileWriter writer = new FileWriter(initCldFile)) {
+            String lineEnding = System.getProperty("line.separator");
+            HarbourLogger.log(project, "HarbourDebugger", "Using line ending: " + lineEnding.replace("\r", "\\r").replace("\n", "\\n"));
+            System.out.println("Using line ending: " + lineEnding.replace("\r", "\\r").replace("\n", "\\n"));
+            
+            for (String line : filteredLines) {
+                writer.write(line + lineEnding);
+            }
+            writer.flush();
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Successfully wrote init.cld file");
+        System.out.println("Successfully wrote init.cld file");
+        
+        // Verify the file was written
+        if (initCldFile.exists()) {
+            long fileSize = initCldFile.length();
+            HarbourLogger.log(project, "HarbourDebugger", "File verification: exists=" + true + ", size=" + fileSize);
+            System.out.println("File verification: exists=" + true + ", size=" + fileSize);
+            
+            // Read back and verify content
+            try {
+                List<String> writtenLines = java.nio.file.Files.readAllLines(initCldFile.toPath());
+                HarbourLogger.log(project, "HarbourDebugger", "Verification: Read back " + writtenLines.size() + " lines");
+                System.out.println("Verification: Read back " + writtenLines.size() + " lines");
+                for (int i = 0; i < writtenLines.size(); i++) {
+                    HarbourLogger.log(project, "HarbourDebugger", "Verified line " + i + ": " + writtenLines.get(i));
+                    System.out.println("Verified line " + i + ": " + writtenLines.get(i));
+                }
+            } catch (IOException e) {
+                HarbourLogger.log(project, "HarbourDebugger", "Could not read back file for verification: " + e.getMessage());
+                System.out.println("Could not read back file for verification: " + e.getMessage());
+            }
+        } else {
+            HarbourLogger.log(project, "HarbourDebugger", "WARNING: File does not exist after writing!");
+            System.out.println("WARNING: File does not exist after writing!");
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "Updated init.cld with " + addedBreakpoints + " breakpoints for " + targetPrgFile);
     }
 
     @NotNull
     @Override
     public ExecutionResult execute(@NotNull Executor executor, @NotNull com.intellij.execution.runners.ProgramRunner<?> runner)
             throws ExecutionException {
+        System.out.println("========= EXECUTE DEBUG =========");
+        System.out.println("execute() method called");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "========= EXECUTE DEBUG =========");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "execute() method called");
+        
+        System.out.println("About to call startProcess()");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call startProcess()");
+        
         ProcessHandler processHandler = startProcess();
+        
+        System.out.println("startProcess() completed");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "startProcess() completed");
 
         TextConsoleBuilder consoleBuilder = TextConsoleBuilderFactory.getInstance()
                 .createBuilder(env.getProject());
