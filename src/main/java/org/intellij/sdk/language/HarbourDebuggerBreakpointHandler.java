@@ -18,13 +18,15 @@ import java.util.Map;
  * Breakpoint handler for Harbour debugger using file-based approach.
  */
 public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> {
-    private final HarbourDebuggerProcess debugProcess;
+    private final HarbourDebuggerBaseProcess debugProcess;
     private final List<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> registeredBreakpoints = new ArrayList<>();
     private final Map<XBreakpoint<?>, String> breakpointIds = new HashMap<>();
+    private final boolean isRemoteDebugger;
 
-    public HarbourDebuggerBreakpointHandler(HarbourDebuggerProcess debugProcess) {
+    public HarbourDebuggerBreakpointHandler(HarbourDebuggerBaseProcess debugProcess) {
         super(HarbourDebuggerLineBreakpointType.class);
         this.debugProcess = debugProcess;
+        this.isRemoteDebugger = debugProcess instanceof HarbourDebuggerRemoteProcess;
     }
 
     @Override
@@ -42,7 +44,84 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             registeredBreakpoints.add(breakpoint);
             breakpointIds.put(breakpoint, breakpointId);
 
-            // Note: Breakpoints are handled via init.cld file export, not direct commands
+            // Send breakpoint to remote debugger if using remote debugging
+            if (isRemoteDebugger) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                    String fileName = breakpoint.getSourcePosition().getFile().getName();
+                    
+                    // Build breakpoint command with conditional support following harbourCodeExtension protocol
+                    StringBuilder breakpointCommand = new StringBuilder();
+                    breakpointCommand.append("+:").append(fileName).append(":").append(line);
+                    
+                    HarbourDebuggerBreakpointProperties properties = breakpoint.getProperties();
+                    
+                    // If properties is null, try to get from custom properties storage
+                    if (properties == null) {
+                        properties = HarbourDebuggerBreakpointPropertiesPanel.getCustomProperties(breakpoint);
+                    }
+                    
+                    // Also try persistent storage service
+                    if (properties == null && project != null) {
+                        HarbourBreakpointPropertiesStorage storage = HarbourBreakpointPropertiesStorage.getInstance(project);
+                        properties = storage.getBreakpointProperties(breakpoint);
+                    }
+                    
+                    // Critical debugging - using multiple logging methods
+                    HarbourLogger.log("HarbourDebuggerBreakpointHandler", "=== BREAKPOINT REGISTRATION DEBUG ===");
+                    HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Properties object: " + (properties != null ? "not null" : "NULL"));
+                    HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Properties from custom storage: " + (properties != null && breakpoint.getProperties() == null));
+                    
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "=== BREAKPOINT REGISTRATION: " + fileName + ":" + line);
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Breakpoint properties object: " + (properties != null ? "not null" : "NULL"));
+                    
+                    if (properties != null) {
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Condition: '" + properties.getCondition() + "'");
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Hit Condition: '" + properties.getHitCondition() + "'");
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Log Message: '" + properties.getLogMessage() + "'");
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Has Condition: " + properties.hasCondition());
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Has Hit Condition: " + properties.hasHitCondition());
+                        HarbourLogger.log("HarbourDebuggerBreakpointHandler", "Has Log Message: " + properties.hasLogMessage());
+                        
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                                "Property values - Condition: '" + properties.getCondition() + 
+                                "', Hit: '" + properties.getHitCondition() + 
+                                "', Log: '" + properties.getLogMessage() + "'");
+                        
+                        // Add condition if present
+                        if (properties.hasCondition()) {
+                            String condition = properties.getCondition().replace(":", ";");
+                            breakpointCommand.append(":?:").append(condition);
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Added condition: " + properties.getCondition());
+                        }
+                        
+                        // Add hit condition if present
+                        if (properties.hasHitCondition()) {
+                            breakpointCommand.append(":C:").append(properties.getHitCondition());
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Added hit condition: " + properties.getHitCondition());
+                        }
+                        
+                        // Add log message if present
+                        if (properties.hasLogMessage()) {
+                            String logMessage = properties.getLogMessage().replace(":", ";");
+                            breakpointCommand.append(":L:").append(logMessage);
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Added log message: " + properties.getLogMessage());
+                        }
+                    }
+                    
+                    // Use harbourCodeExtension protocol
+                    debugProcess.sendCommand("BREAKPOINT");
+                    debugProcess.sendCommand(breakpointCommand.toString());
+                    
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Sent breakpoint command: " + breakpointCommand.toString());
+                }
+            }
         }
     }
 
@@ -61,7 +140,16 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             registeredBreakpoints.remove(breakpoint);
             breakpointIds.remove(breakpoint);
 
-            // Note: Breakpoints are handled via init.cld file export, not direct commands
+            // Remove breakpoint from remote debugger if using remote debugging
+            if (isRemoteDebugger) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                    String fileName = breakpoint.getSourcePosition().getFile().getName();
+                    // Use harbourCodeExtension protocol
+                    debugProcess.sendCommand("BREAKPOINT");
+                    debugProcess.sendCommand("-:" + fileName + ":" + line);
+                }
+            }
         }
     }
 
@@ -86,7 +174,29 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
                     String fileName = file2.getName();
                     int line = bp.getSourcePosition().getLine() + 1;
 
-                    writer.println("BP " + line + " " + fileName);
+                    // Build breakpoint line with conditional support
+                    StringBuilder breakpointLine = new StringBuilder();
+                    breakpointLine.append("BP ").append(line).append(" ").append(fileName);
+                    
+                    // Add conditional information if available
+                    if (bp.getProperties() instanceof HarbourDebuggerBreakpointProperties) {
+                        HarbourDebuggerBreakpointProperties properties = 
+                            (HarbourDebuggerBreakpointProperties) bp.getProperties();
+                        
+                        if (properties.hasCondition()) {
+                            breakpointLine.append(" COND:").append(properties.getCondition());
+                        }
+                        
+                        if (properties.hasHitCondition()) {
+                            breakpointLine.append(" HIT:").append(properties.getHitCondition());
+                        }
+                        
+                        if (properties.hasLogMessage()) {
+                            breakpointLine.append(" LOG:").append(properties.getLogMessage());
+                        }
+                    }
+
+                    writer.println(breakpointLine.toString());
                     count++;
                 }
             }
@@ -102,5 +212,57 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
 
     public List<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> getRegisteredBreakpoints() {
         return registeredBreakpoints;
+    }
+    
+    /**
+     * Send all registered breakpoints to the remote debugger
+     */
+    public void sendAllBreakpoints() {
+        if (isRemoteDebugger) {
+            Project project = debugProcess.getSession().getProject();
+            
+            for (XLineBreakpoint<HarbourDebuggerBreakpointProperties> breakpoint : registeredBreakpoints) {
+                if (breakpoint.getSourcePosition() != null) {
+                    String fileName = breakpoint.getSourcePosition().getFile().getName();
+                    int line = breakpoint.getSourcePosition().getLine() + 1;
+                    
+                    // Build breakpoint command with conditional support following harbourCodeExtension protocol
+                    StringBuilder breakpointCommand = new StringBuilder();
+                    breakpointCommand.append("+:").append(fileName).append(":").append(line);
+                    
+                    HarbourDebuggerBreakpointProperties properties = breakpoint.getProperties();
+                    
+                    // If properties is null, try to get from custom properties storage
+                    if (properties == null) {
+                        properties = HarbourDebuggerBreakpointPropertiesPanel.getCustomProperties(breakpoint);
+                    }
+                    
+                    if (properties != null) {
+                        // Add condition if present
+                        if (properties.hasCondition()) {
+                            String condition = properties.getCondition().replace(":", ";");
+                            breakpointCommand.append(":?:").append(condition);
+                        }
+                        
+                        // Add hit condition if present
+                        if (properties.hasHitCondition()) {
+                            breakpointCommand.append(":C:").append(properties.getHitCondition());
+                        }
+                        
+                        // Add log message if present
+                        if (properties.hasLogMessage()) {
+                            String logMessage = properties.getLogMessage().replace(":", ";");
+                            breakpointCommand.append(":L:").append(logMessage);
+                        }
+                    }
+                    
+                    debugProcess.sendCommand("BREAKPOINT");
+                    debugProcess.sendCommand(breakpointCommand.toString());
+                    
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Sent breakpoint (all): " + breakpointCommand.toString());
+                }
+            }
+        }
     }
 }

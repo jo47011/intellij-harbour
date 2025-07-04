@@ -21,7 +21,7 @@ public class HarbourPluginComponent implements ProjectComponent {
     @Override
     public void projectOpened() {
         LOG.info("Harbour plugin component initialized");
-        System.out.println("DEBUG: Harbour plugin component initialized");
+        HarbourLogger.log("HarbourPluginComponent", "DEBUG: Harbour plugin component initialized");
 
         // Register structure view listeners for proper disposal
         HarbourStructureViewFactory.registerDisposableListeners(project);
@@ -38,10 +38,10 @@ public class HarbourPluginComponent implements ProjectComponent {
                     NotificationType.INFORMATION);
 
             Notifications.Bus.notify(notification);
-            System.out.println("Notification sent: Harbour Plugin Loaded");
+            HarbourLogger.log("HarbourPluginComponent", "Notification sent: Harbour Plugin Loaded");
         } catch (Exception e) {
             LOG.error("Failed to show notification: " + e.getMessage(), e);
-            System.out.println("Failed to show notification: " + e.getMessage());
+            HarbourLogger.log("HarbourPluginComponent", "Failed to show notification: " + e.getMessage());
         }
     }
 }

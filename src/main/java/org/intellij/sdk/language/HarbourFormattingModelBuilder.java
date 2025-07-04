@@ -17,7 +17,6 @@ import java.util.List;
  * Provides formatting model for Harbour code
  */
 public class HarbourFormattingModelBuilder implements FormattingModelBuilder {
-    private static final Logger LOG = Logger.getInstance(HarbourFormattingModelBuilder.class);
 
     @Override
     public @NotNull FormattingModel createModel(@NotNull FormattingContext formattingContext) {
@@ -35,8 +34,6 @@ public class HarbourFormattingModelBuilder implements FormattingModelBuilder {
             DummyBlock rootBlock = new DummyBlock(file.getNode());
             FormattingModel model = FormattingModelProvider.createFormattingModelForPsiFile(file, rootBlock, settings);
 
-            // Store the right margin in a static field for the post-processor to access
-            HarbourSettings.setLastUsedRightMargin(settings.getRightMargin(HarbourLanguage.INSTANCE));
 
             HarbourLogger.log("FormattingModelBuilder", "Created formatting model for " + file.getName());
             return model;
@@ -44,18 +41,6 @@ public class HarbourFormattingModelBuilder implements FormattingModelBuilder {
             // Reset formatting flag
             HarbourTokenTypeExtension.setFormattingInProgress(false);
         }
-    }
-
-    /**
-     * Gets the indent size from the project settings
-     */
-    private int getIndentSize(Project project) {
-        if (project == null) {
-            return 2; // Default value
-        }
-
-        HarbourSettings settings = HarbourSettings.getInstance(project);
-        return settings != null ? settings.getIndentationSize() : 2;
     }
 
     /**

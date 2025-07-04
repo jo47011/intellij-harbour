@@ -3,7 +3,11 @@
 /.gradle/
 /.idea/
 /src/main/gen/
-/src/main/gen/
 /Compilation
 /.intellijPlatform/localPlatformArtifacts/
 /.intellijPlatform/
+CLAUDE.md
+FEEDBACK.txt
+SUMMARY.md
+VERSION_HISTORY.md
+/.claude/

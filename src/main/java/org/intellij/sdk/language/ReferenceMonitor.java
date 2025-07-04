@@ -18,7 +18,7 @@ public class ReferenceMonitor implements ProjectActivity {
     @Override
     public Object execute(@NotNull Project project, @NotNull Continuation<? super Unit> continuation) {
         LOG.info("ReferenceMonitor: Initialized for project " + project.getName());
-        System.out.println("ReferenceMonitor: Initialized for project " + project.getName());
+        HarbourLogger.log("ReferenceMonitor", "ReferenceMonitor: Initialized for project " + project.getName());
         return Unit.INSTANCE;
     }
 }

@@ -1,5 +1,6 @@
 package org.intellij.sdk.language;
 
+import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XExecutionStack;
 import com.intellij.xdebugger.frame.XStackFrame;
 import org.jetbrains.annotations.NotNull;
@@ -13,15 +14,16 @@ import java.util.Collections;
  * Displays the current execution context and stack frames.
  */
 public class HarbourDebuggerExecutionStack extends XExecutionStack {
-    private final HarbourDebuggerProcess debugProcess;
+    private final HarbourDebuggerBaseProcess debugProcess;
     private final HarbourDebuggerStackFrame topFrame;
 
-    public HarbourDebuggerExecutionStack(HarbourDebuggerProcess debugProcess,
+    public HarbourDebuggerExecutionStack(HarbourDebuggerBaseProcess debugProcess,
                                          String file,
-                                         int line) {
+                                         int line,
+                                         XSourcePosition sourcePosition) {
         super("Harbour Stack");
         this.debugProcess = debugProcess;
-        this.topFrame = new HarbourDebuggerStackFrame(debugProcess, getFunctionNameFromFile(file), file, line);
+        this.topFrame = new HarbourDebuggerStackFrame(debugProcess, getFunctionNameFromFile(file), file, line, sourcePosition);
     }
 
     @Nullable
@@ -40,9 +42,18 @@ public class HarbourDebuggerExecutionStack extends XExecutionStack {
     }
 
     private String getFunctionNameFromFile(String filePath) {
+        // Handle null filePath
+        if (filePath == null) {
+            return "Unknown";
+        }
+        
         // Extract the function name from the file path
-        String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-        fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
+        int lastSlash = filePath.lastIndexOf('/');
+        int lastBackslash = filePath.lastIndexOf('\\');
+        int lastSeparator = Math.max(lastSlash, lastBackslash);
+        
+        String fileName = (lastSeparator >= 0) ? filePath.substring(lastSeparator + 1) : filePath;
+        
         if (fileName.toLowerCase().endsWith(".prg")) {
             fileName = fileName.substring(0, fileName.length() - 4);
         }

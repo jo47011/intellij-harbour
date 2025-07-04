@@ -11,12 +11,10 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.util.xmlb.XmlSerializerUtil;
-import com.intellij.util.xmlb.annotations.Transient;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,8 +57,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Line break position (default 99, 0 or negative means no line breaking)
     private int lineBreakPosition = 99;
 
-    // Static field to store the last used right margin from code style settings
-    private static int lastUsedRightMargin = 99;
 
     // Formatting settings
     private boolean returnStatementsAtLevel0 = true;
@@ -69,20 +65,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Auto-completion setting
     private boolean autoCompletionEnabled = false; // Default to false (only show on Ctrl+Space)
 
-    // Note: Function colors are now handled by the color scheme, these fields remain for backward compatibility
-    @Deprecated
-    private int localFunctionColorValue = new Color(0, 102, 204).getRGB(); // Standard blue
-    @Deprecated
-    private int externalFunctionColorValue = new Color(0xD0, 0xD6, 0xE1).getRGB(); // D0D6E1 default
-
-    // Transient color objects not serialized directly
-    @Transient
-    @Deprecated
-    private Color localFunctionColor;
-
-    @Transient
-    @Deprecated
-    private Color externalFunctionColor;
 
     public HarbourSettings() {
         // Empty constructor
@@ -143,14 +125,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
         return lineBreakPosition;
     }
 
-    // Getter and setter for the static field
-    public static int getLastUsedRightMargin() {
-        return lastUsedRightMargin;
-    }
 
-    public static void setLastUsedRightMargin(int margin) {
-        lastUsedRightMargin = margin;
-    }
 
     // Replace the existing setLineBreakPosition method
     public void setLineBreakPosition(int lineBreakPosition) {
@@ -165,17 +140,29 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
                     // Force UI refresh for each editor
                     for (com.intellij.openapi.editor.Editor editor : EditorFactory.getInstance().getAllEditors()) {
-                        PsiFile psiFile = PsiDocumentManager.getInstance(openProject).getPsiFile(editor.getDocument());
-                        if (psiFile instanceof HarbourFile) {
-                            // Update the editor specific settings
-                            CodeStyle.getSettings(psiFile).setRightMargin(psiFile.getLanguage(), lineBreakPosition);
+                        try {
+                            // Check if this editor belongs to the current project
+                            Project editorProject = editor.getProject();
+                            if (editorProject == null || editorProject != openProject) {
+                                continue; // Skip editors from other projects or without project
+                            }
+                            
+                            PsiFile psiFile = PsiDocumentManager.getInstance(openProject).getPsiFile(editor.getDocument());
+                            if (psiFile instanceof HarbourFile) {
+                                // Update the editor specific settings
+                                CodeStyle.getSettings(psiFile).setRightMargin(psiFile.getLanguage(), lineBreakPosition);
 
-                            // Force margin renderer to update
-                            editor.getSettings().setRightMargin(lineBreakPosition);
+                                // Force margin renderer to update
+                                editor.getSettings().setRightMargin(lineBreakPosition);
 
-                            // Force component repaint
-                            editor.getComponent().repaint();
-                            editor.getContentComponent().repaint();
+                                // Force component repaint
+                                editor.getComponent().repaint();
+                                editor.getContentComponent().repaint();
+                            }
+                        } catch (Exception e) {
+                            // Log but don't fail if there's an issue with a specific editor
+                            HarbourLogger.log("HarbourSettings", 
+                                "Error updating editor settings: " + e.getMessage());
                         }
                     }
 
@@ -184,9 +171,9 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
                             .notifyCodeStyleSettingsChanged();
 
                     // Add logging
-                    System.out.println("Updated right margin to: " + lineBreakPosition);
+                    HarbourLogger.log("HarbourSettings", "Updated right margin to: " + lineBreakPosition);
                 } catch (Exception e) {
-                    System.err.println("Error updating margin: " + e.getMessage());
+                    HarbourLogger.log("HarbourSettings", "Error updating margin: " + e.getMessage());
                 }
             }
         });
@@ -233,8 +220,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
      * Gets default list of Harbour commands
      */
     public static List<String> getDefaultHarbourCommands() {
-        List<String> defaults = new ArrayList<>();
-
         // Basic commands
         String[] commands = {
                 "ACCEPT", "APPEND", "AVERAGE", "BEGIN SEQUENCE", "BEGIN TRANSACTION", "BOX", "BREAK",
@@ -278,8 +263,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
                 "VAR", "INLINE", "INIT", "NIL", "SELF", "SUPER"
         };
 
-        defaults.addAll(Arrays.asList(commands));
-        return defaults;
+        return new ArrayList<>(Arrays.asList(commands));
     }
 
     // Include paths methods
@@ -326,65 +310,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
         this.localStatementsAtLevel0 = localStatementsAtLevel0;
     }
 
-    // Deprecated function color methods - kept for backward compatibility
-    @Deprecated
-    public int getLocalFunctionColorValue() {
-        return localFunctionColorValue;
-    }
-
-    @Deprecated
-    public void setLocalFunctionColorValue(int localFunctionColorValue) {
-        this.localFunctionColorValue = localFunctionColorValue;
-        this.localFunctionColor = null; // Reset cached color
-    }
-
-    @Deprecated
-    public int getExternalFunctionColorValue() {
-        return externalFunctionColorValue;
-    }
-
-    @Deprecated
-    public void setExternalFunctionColorValue(int externalFunctionColorValue) {
-        this.externalFunctionColorValue = externalFunctionColorValue;
-        this.externalFunctionColor = null; // Reset cached color
-    }
-
-    // Transient color getters that lazy-load from the RGB values - kept for backward compatibility
-    @Transient
-    @Deprecated
-    public Color getLocalFunctionColor() {
-        if (localFunctionColor == null) {
-            localFunctionColor = new Color(localFunctionColorValue);
-        }
-        return localFunctionColor;
-    }
-
-    @Transient
-    @Deprecated
-    public void setLocalFunctionColor(Color localFunctionColor) {
-        this.localFunctionColor = localFunctionColor;
-        if (localFunctionColor != null) {
-            this.localFunctionColorValue = localFunctionColor.getRGB();
-        }
-    }
-
-    @Transient
-    @Deprecated
-    public Color getExternalFunctionColor() {
-        if (externalFunctionColor == null) {
-            externalFunctionColor = new Color(externalFunctionColorValue);
-        }
-        return externalFunctionColor;
-    }
-
-    @Transient
-    @Deprecated
-    public void setExternalFunctionColor(Color externalFunctionColor) {
-        this.externalFunctionColor = externalFunctionColor;
-        if (externalFunctionColor != null) {
-            this.externalFunctionColorValue = externalFunctionColor.getRGB();
-        }
-    }
 
     /**
      * Resolves a path that might be relative to the project

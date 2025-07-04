@@ -5,8 +5,6 @@ import com.intellij.execution.ExecutionResult;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.executors.DefaultDebugExecutor;
-import com.intellij.execution.process.ProcessAdapter;
-import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.GenericProgramRunner;
 import com.intellij.execution.ui.RunContentDescriptor;
@@ -43,7 +41,16 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
                                              @NotNull ExecutionEnvironment env) throws ExecutionException {
         Project project = env.getProject();
 
+        HarbourLogger.log("HarbourDebuggerRunner", "========= RUNNER DEBUG =========");
+        HarbourLogger.log("HarbourDebuggerRunner", "HarbourDebuggerRunner.doExecute() called");
+        HarbourLogger.log(project, "HarbourDebugger", "========= RUNNER DEBUG =========");
+        HarbourLogger.log(project, "HarbourDebugger", "HarbourDebuggerRunner.doExecute() called");
         HarbourLogger.log(project, "HarbourDebugger", "Starting debug session...");
+
+        // Get debug configuration
+        HarbourDebuggerRunConfig config = (HarbourDebuggerRunConfig) env.getRunProfile();
+        int debugPort = config.getDebugPortAsInt();
+        HarbourLogger.log(project, "HarbourDebugger", "Debug port configured: " + debugPort);
 
         // Start debug session
         XDebuggerManager debuggerManager = XDebuggerManager.getInstance(project);
@@ -58,21 +65,23 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
             @Override
             @NotNull
             public XDebugProcess start(@NotNull XDebugSession session) throws ExecutionException {
-                HarbourDebuggerProcess process = new HarbourDebuggerProcess(session, executionResult);
-
-                // Listen for process termination
-                executionResult.getProcessHandler().addProcessListener(new ProcessAdapter() {
-                    @Override
-                    public void processTerminated(@NotNull ProcessEvent event) {
-                        HarbourLogger.log(project, "HarbourDebugger",
-                                "Debug process terminated with exit code: " + event.getExitCode());
-                        session.stop();
-                    }
-                });
+                // Get debug configuration
+                HarbourDebuggerRunConfig config = (HarbourDebuggerRunConfig) env.getRunProfile();
+                int debugPort = config.getDebugPortAsInt();
+                
+                // Create remote debug process
+                HarbourDebuggerRemoteProcess process = new HarbourDebuggerRemoteProcess(session, executionResult, debugPort);
 
                 return process;
             }
         });
+
+        // PROPER FIX (v1.0.230): No longer need to remove ProcessListeners
+        // The real solution is in HarbourDebuggerRemoteProcess.doGetProcessHandler() returning null
+        // This causes IntelliJ to use DefaultDebugProcessHandler instead of the actual process handler
+        // which prevents XDebugSessionImpl from attaching problematic ProcessListeners
+        HarbourLogger.log(project, "HarbourDebugger", 
+            "Using proper remote debugging pattern - doGetProcessHandler() returns null");
 
         return debugSession.getRunContentDescriptor();
     }
