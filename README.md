@@ -22,29 +22,11 @@ orchestration and provided some help here and there.  If you are interested in m
 
 ## Debugging Features
 
-The plugin provides **dual debugging support** for Harbour applications, automatically choosing the appropriate debugging method based on your program type:
+The plugin provides **dual debugging support**, automatically choosing the appropriate method:
 
-### 🖥️ **Console Applications** (Full IntelliJ Integration)
-- **Full PyCharm Debugger**: Complete integration with IntelliJ's XDebugger framework
-- **Conditional Breakpoints**: Set breakpoints with conditions (e.g., `nCounter > 5`)
-- **Hit Count Breakpoints**: Set breakpoints that trigger after a specific number of hits  
-- **Variable Inspection**: View and modify variable values in the Variables pane
-- **Step Debugging**: Step over, step into, and step out of code execution
-- **Call Stack**: View the current call stack and navigate between stack frames
-- **Watches**: Add expressions to watch during debugging
-- **Remote Debugging**: Socket-based communication with Harbour runtime
-
-### 🪟 **GUI Applications** (Harbour Internal Debugger)
-- **Breakpoint Management**: Set breakpoints in IntelliJ that are written to `init.cld`
-- **Harbour Debugger**: Uses Harbour's built-in debugger for GUI programs
-- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`, etc.) in .hbp files
-- **init.cld Integration**: Breakpoints set in IntelliJ are automatically exported to init.cld
-- **Native Harbour Debugging**: Full access to Harbour's debugging capabilities
-
-### Program Type Detection
-The plugin automatically detects your program type:
-- **Console Programs**: No GUI flags → Uses PyCharm remote debugging
-- **GUI Programs**: Contains `-gui`, `-gtwvt`, or similar flags → Uses Harbour internal debugger
+- **Console Applications**: Full PyCharm debugger integration with conditional breakpoints, variable inspection, step debugging, and watches
+- **GUI Applications**: Uses Harbour's internal debugger with breakpoints written to `init.cld`
+- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`) in .hbp files to choose debugging method
 
 ### Variable Types Supported
 
@@ -148,16 +130,8 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 
 ## Debugging Improvements
 
-- **GUI Debugging Integration**: Currently GUI applications use Harbour's internal debugger. Future enhancement would integrate GUI debugging directly into IntelliJ/PyCharm interface:
-  - Show GUI program variables in IntelliJ Variables pane
-  - Enable conditional breakpoints within IntelliJ for GUI programs  
-  - Integrate Harbour's GUI debugger output into IntelliJ console
-  - Support step debugging for GUI applications within IDE
-  
-- **Enhanced Breakpoint Sync**: Improve synchronization between IntelliJ breakpoints and init.cld file:
-  - Real-time breakpoint updates during debugging session
-  - Better handling of breakpoint conditions for GUI programs
-  - Support for temporary/one-time breakpoints in init.cld
+- **GUI Debugging Integration**: Integrate GUI debugging directly into IntelliJ (currently uses Harbour's internal debugger)
+- **Enhanced Breakpoint Sync**: Real-time updates between IntelliJ breakpoints and init.cld file
 
 ## Language Features
 
