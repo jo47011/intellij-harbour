@@ -22,16 +22,29 @@ orchestration and provided some help here and there.  If you are interested in m
 
 ## Debugging Features
 
-The plugin provides comprehensive debugging support for Harbour applications through integration with IntelliJ's XDebugger framework.
+The plugin provides **dual debugging support** for Harbour applications, automatically choosing the appropriate debugging method based on your program type:
 
-### Supported Debug Features
-
-- **Breakpoint Management**: Set, remove, and manage breakpoints in `.prg` files
+### 🖥️ **Console Applications** (Full IntelliJ Integration)
+- **Full PyCharm Debugger**: Complete integration with IntelliJ's XDebugger framework
 - **Conditional Breakpoints**: Set breakpoints with conditions (e.g., `nCounter > 5`)
-- **Hit Count Breakpoints**: Set breakpoints that trigger after a specific number of hits
-- **Variable Inspection**: View variable values in the Variables pane during debugging
+- **Hit Count Breakpoints**: Set breakpoints that trigger after a specific number of hits  
+- **Variable Inspection**: View and modify variable values in the Variables pane
 - **Step Debugging**: Step over, step into, and step out of code execution
 - **Call Stack**: View the current call stack and navigate between stack frames
+- **Watches**: Add expressions to watch during debugging
+- **Remote Debugging**: Socket-based communication with Harbour runtime
+
+### 🪟 **GUI Applications** (Harbour Internal Debugger)
+- **Breakpoint Management**: Set breakpoints in IntelliJ that are written to `init.cld`
+- **Harbour Debugger**: Uses Harbour's built-in debugger for GUI programs
+- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`, etc.) in .hbp files
+- **init.cld Integration**: Breakpoints set in IntelliJ are automatically exported to init.cld
+- **Native Harbour Debugging**: Full access to Harbour's debugging capabilities
+
+### Program Type Detection
+The plugin automatically detects your program type:
+- **Console Programs**: No GUI flags → Uses PyCharm remote debugging
+- **GUI Programs**: Contains `-gui`, `-gtwvt`, or similar flags → Uses Harbour internal debugger
 
 ### Variable Types Supported
 
@@ -133,6 +146,21 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 
 # TODOs
 
+## Debugging Improvements
+
+- **GUI Debugging Integration**: Currently GUI applications use Harbour's internal debugger. Future enhancement would integrate GUI debugging directly into IntelliJ/PyCharm interface:
+  - Show GUI program variables in IntelliJ Variables pane
+  - Enable conditional breakpoints within IntelliJ for GUI programs  
+  - Integrate Harbour's GUI debugger output into IntelliJ console
+  - Support step debugging for GUI applications within IDE
+  
+- **Enhanced Breakpoint Sync**: Improve synchronization between IntelliJ breakpoints and init.cld file:
+  - Real-time breakpoint updates during debugging session
+  - Better handling of breakpoint conditions for GUI programs
+  - Support for temporary/one-time breakpoints in init.cld
+
+## Language Features
+
 - navigation
   - should be correct while you type / after return
   - LOCAL oB := BClass():New(oA) clicking on new should go to the correct new() method / show popup
@@ -171,54 +199,3 @@ RETURN
   - Erfahrung O1 Pro vs claude, evtl. als Tabelle
   - mein prompt Vorgaben etc.
 
-# Bugs
-java.lang.Throwable: Light files should have PSI only in one project, existing=com.intellij.psi.SingleRootFileViewProvider{vFile=LightVirtualFile: \Dummy.txt, content=VirtualFileContent{size=0}, eventSystemEnabled=true} in Project(name=hbmiki-test-windows, containerState=COMPONENT_CREATED, componentStore=C:\myprog\hbmiki-test-windows), requested in Project(name=hbmiki, containerState=COMPONENT_CREATED, componentStore=C:\myprog\hbmiki); psiFiles: class com.intellij.psi.impl.source.PsiPlainTextFileImpl [Language: TEXT]
-at com.intellij.openapi.diagnostic.Logger.error(Logger.java:375)
-at com.intellij.psi.impl.file.impl.FileManagerImpl.checkLightFileHasNoOtherPsi(FileManagerImpl.java:242)
-at com.intellij.psi.impl.file.impl.FileManagerImpl.findViewProvider(FileManagerImpl.java:222)
-at com.intellij.psi.impl.file.impl.FileManagerImpl.findFile(FileManagerImpl.java:512)
-at com.intellij.psi.impl.PsiDocumentManagerBase.getPsiFile(PsiDocumentManagerBase.java:118)
-at com.intellij.psi.impl.PsiDocumentManagerBase.getPsiFile(PsiDocumentManagerBase.java:100)
-at com.intellij.psi.impl.PsiDocumentManagerImpl.getPsiFile(PsiDocumentManagerImpl.java:66)
-at org.intellij.sdk.language.HarbourSettings.lambda$setLineBreakPosition$0(HarbourSettings.java:143)
-at com.intellij.openapi.application.TransactionGuardImpl.runWithWritingAllowed(TransactionGuardImpl.java:240)
-at com.intellij.openapi.application.TransactionGuardImpl.access$100(TransactionGuardImpl.java:25)
-at com.intellij.openapi.application.TransactionGuardImpl$1.run(TransactionGuardImpl.java:202)
-at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.runIntendedWriteActionOnCurrentThread$lambda$7(AnyThreadWriteThreadingSupport.kt:319)
-at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.runWriteIntentReadAction$lambda$6(AnyThreadWriteThreadingSupport.kt:274)
-at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.runWithTemporaryThreadLocal(AnyThreadWriteThreadingSupport.kt:204)
-at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.runWriteIntentReadAction(AnyThreadWriteThreadingSupport.kt:274)
-at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.runWriteIntentReadAction(AnyThreadWriteThreadingSupport.kt:222)
-at com.intellij.openapi.application.impl.AnyThreadWriteThreadingSupport.runIntendedWriteActionOnCurrentThread(AnyThreadWriteThreadingSupport.kt:318)
-at com.intellij.openapi.application.impl.ApplicationImpl.runIntendedWriteActionOnCurrentThread(ApplicationImpl.java:928)
-at com.intellij.openapi.application.impl.ApplicationImpl$4.run(ApplicationImpl.java:501)
-at com.intellij.util.concurrency.ChildContext$runInChildContext$1.invoke(propagation.kt:102)
-at com.intellij.util.concurrency.ChildContext$runInChildContext$1.invoke(propagation.kt:102)
-at com.intellij.util.concurrency.ChildContext.runInChildContext(propagation.kt:108)
-at com.intellij.util.concurrency.ChildContext.runInChildContext(propagation.kt:102)
-at com.intellij.util.concurrency.ContextRunnable.run(ContextRunnable.java:27)
-at com.intellij.openapi.application.impl.FlushQueue.runNextEvent(FlushQueue.java:117)
-at com.intellij.openapi.application.impl.FlushQueue.flushNow(FlushQueue.java:43)
-at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:318)
-at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:781)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:728)
-at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:722)
-at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
-at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
-at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:750)
-at com.intellij.ide.IdeEventQueue.defaultDispatchEvent(IdeEventQueue.kt:585)
-at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:482)
-at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$12$lambda$11$lambda$10$lambda$9(IdeEventQueue.kt:307)
-at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:864)
-at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$12$lambda$11$lambda$10(IdeEventQueue.kt:306)
-at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$3(IdeEventQueue.kt:958)
-at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:109)
-at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:958)
-at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$12(IdeEventQueue.kt:301)
-at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:341)
-at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
-at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
-at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
-at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)

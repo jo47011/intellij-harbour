@@ -140,17 +140,29 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
                     // Force UI refresh for each editor
                     for (com.intellij.openapi.editor.Editor editor : EditorFactory.getInstance().getAllEditors()) {
-                        PsiFile psiFile = PsiDocumentManager.getInstance(openProject).getPsiFile(editor.getDocument());
-                        if (psiFile instanceof HarbourFile) {
-                            // Update the editor specific settings
-                            CodeStyle.getSettings(psiFile).setRightMargin(psiFile.getLanguage(), lineBreakPosition);
+                        try {
+                            // Check if this editor belongs to the current project
+                            Project editorProject = editor.getProject();
+                            if (editorProject == null || editorProject != openProject) {
+                                continue; // Skip editors from other projects or without project
+                            }
+                            
+                            PsiFile psiFile = PsiDocumentManager.getInstance(openProject).getPsiFile(editor.getDocument());
+                            if (psiFile instanceof HarbourFile) {
+                                // Update the editor specific settings
+                                CodeStyle.getSettings(psiFile).setRightMargin(psiFile.getLanguage(), lineBreakPosition);
 
-                            // Force margin renderer to update
-                            editor.getSettings().setRightMargin(lineBreakPosition);
+                                // Force margin renderer to update
+                                editor.getSettings().setRightMargin(lineBreakPosition);
 
-                            // Force component repaint
-                            editor.getComponent().repaint();
-                            editor.getContentComponent().repaint();
+                                // Force component repaint
+                                editor.getComponent().repaint();
+                                editor.getContentComponent().repaint();
+                            }
+                        } catch (Exception e) {
+                            // Log but don't fail if there's an issue with a specific editor
+                            HarbourLogger.log("HarbourSettings", 
+                                "Error updating editor settings: " + e.getMessage());
                         }
                     }
 
