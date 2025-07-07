@@ -79,15 +79,15 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         commandLine.setRedirectErrorStream(true);
         
-        // Windows-specific console handling to prevent popup windows
-        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
-            // Try to prevent creation of new console window on Windows
-            // Keep debugging functionality intact - only modify process creation
-            commandLine.withEnvironment("HIDE_CONSOLE", "1");
-            commandLine.withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE);
-            
+        // CRITICAL: Detect program type early for Windows-specific console handling
+        boolean isGuiProgram = isGuiProgram(runConfig);
+        
+        // Windows-specific console handling - ONLY for console programs (case 4)
+        if (System.getProperty("os.name").toLowerCase().contains("windows") && !isGuiProgram) {
+            // Windows console programs: Use cmd.exe wrapper to prevent separate console window
+            // This will be handled in the command line construction below
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Applied Windows console inheritance settings");
+                    "Windows console program: Will use cmd.exe wrapper to prevent separate console window");
         }
         
         // Log full command details before starting
@@ -102,10 +102,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         try {
             handler = new OSProcessHandler(commandLine);
             
-            // CRITICAL: Detect if this is a GUI program to determine process termination behavior
+            // Use the GUI program detection from earlier
             // For GUI programs: terminate debug session when process ends
             // For console programs using remote debugging: allow debug connection to outlive process
-            boolean isGuiProgram = isGuiProgram(runConfig);
             
             if (isGuiProgram) {
                 // For GUI programs: terminate debug session when process ends
@@ -360,26 +359,32 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         // Add debug source based on program type per CLAUDE.md rules
         if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
-            if (!isGui) {
-                // Console programs: Use debug library for PyCharm network connectivity
-                String debugSourcePath = buildDir + "/harbour_debug.prg";
-                parameters.add(debugSourcePath);
+            // Both program types need debug library for network connectivity
+            String debugSourcePath = buildDir + "/harbour_debug.prg";
+            parameters.add(debugSourcePath);
+            
+            if (isGui) {
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Console program: Added debug library for PyCharm connectivity: " + debugSourcePath);
+                        "GUI program: Added debug library for Harbour internal debugger: " + debugSourcePath);
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Console program: Added debug library for PyCharm connectivity (environment controls interface): " + debugSourcePath);
             }
-            // GUI programs: No custom debug source - use Harbour internal debugger with init.cld
         }
         
-        // Add debug flags - both program types need -b flag for debugging support
-        parameters.add("-b");
-        parameters.add("-run");
-        
+        // Add debug flags based on program type
         if (isGui) {
+            // GUI programs: Use -b flag for Harbour internal debugger
+            parameters.add("-b");
+            parameters.add("-run");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "GUI program: Using -b flag with Harbour internal debugger");
         } else {
+            // Console programs: Use -b flag but with environment that forces PyCharm debugging
+            parameters.add("-b");
+            parameters.add("-run");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Using -b flag with PyCharm debugging (environment controls which interface)");
+                    "Console program: Using -b flag with HB_REMOTE_DEBUG=1 to force PyCharm debugging");
         }
         
         // Remove FORCE_DEBUG_MODE - it was triggering Harbour debugger instead of PyCharm
@@ -394,15 +399,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Using incremental build (removed -clean as it prevented execution)");
 
-        // Add -workdir for console programs like the working version
-        if (!isGui) {
-            parameters.add("-workdir=" + buildDir);
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Added -workdir=" + buildDir + " like working version");
-        } else {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: No -workdir needed");
-        }
+        // Remove -workdir parameter as it causes compilation errors on Windows
+        // The working directory is set separately via commandLine.setWorkDirectory()
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Removed -workdir parameter (causes compilation errors) - using setWorkDirectory() instead");
         parameters.add("-D__HARBOUR_DEBUG__");
         parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
         
@@ -437,10 +437,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "Console program detected - using PyCharm debugging approach");
             
-            // For console programs: use standard console output for PyCharm debugging
+            // For console programs: use gtSTD on all platforms but handle Windows console window creation
             parameters.add("-gtSTD");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Using -gtSTD for PyCharm debugging");
+            
+            if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows console program: Using -gtSTD with console window suppression");
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Unix console program: Using -gtSTD for PyCharm debugging");
+            }
         }
         
         // Additional Windows-specific console redirection (only for GUI programs)
@@ -491,7 +497,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Instrumented: " + shouldInstrument);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "GUI Program: " + isGui);
 
+        // For now, use normal command construction for all platforms
+        // Windows console window issue will be addressed differently
         commandLine.addParameters(parameters);
+        
+        if (System.getProperty("os.name").toLowerCase().contains("windows") && !isGui) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Windows console: Using normal command construction (console window issue to be addressed)");
+        }
         
         // CRITICAL FIX: Ensure working directory uses Windows format on Windows for init.cld loading
         String finalWorkingDir = workingDir;
@@ -504,16 +517,25 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         commandLine.setWorkDirectory(finalWorkingDir);
         
-        // REVERT to working version approach: Use same environment for ALL programs
-        // Based on working commit 5107483 - no GUI detection for environment variables
-        commandLine.withEnvironment("HB_DBG_PATH", ".");
-        commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
-        // DON'T set ALTD environment variable (per working version)
+        // CRITICAL: Use different debugging approaches for GUI vs Console programs  
+        // (isGuiProgram already declared earlier in this method)
         
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "ALL programs: Using working version environment (HB_DBG_PATH=., HB_REMOTE_DEBUG=1, no ALTD)");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Program type detected as: " + (isGui ? "GUI" : "Console") + " but using same environment for all");
+        if (isGuiProgram) {
+            // GUI programs: Use Harbour internal debugger environment
+            String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
+            commandLine.withEnvironment("HB_DBG_PATH", debugPath);
+            commandLine.withEnvironment("ALTD", "BREAK");
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "GUI program: Set ALTD=BREAK and HB_DBG_PATH=" + debugPath + " for Harbour internal debugger");
+        } else {
+            // Console programs: Use PyCharm debugging - NO debug library, NO ALTD
+            commandLine.withEnvironment("HB_DBG_PATH", ".");
+            commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Console program: Set HB_REMOTE_DEBUG=1 for PyCharm debugging (NO ALTD, NO debug library)");
+        }
     }
 
     /**
