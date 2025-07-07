@@ -71,13 +71,13 @@ RETURN t_oDebugInfo
 PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    LOCAL i, tmp, j, vv, oDebugInfo, lAltDInvoked
 
-   altd()
+   // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
 
    DO CASE
    CASE nMode == HB_DBG_GETENTRY
       // Register with VM - this works
       __dbgSetEntry()
-      ? "IntelliJ Debug Handler registered with breakpoint support"
+//       ? "IntelliJ Debug Handler registered with breakpoint support"
       
    CASE nMode == HB_DBG_MODULENAME
       // New module/function entered - build stack with variable names
@@ -140,10 +140,10 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
       
       // Enhanced AltD() detection with debugging
-      ? "=== HB_DBG_SHOWLINE DEBUG - Line", uParam1, "==="
-      ? "Checking AltD() status..."
+//       ? "=== HB_DBG_SHOWLINE DEBUG - Line", uParam1, "==="
+//       ? "Checking AltD() status..."
       lAltDInvoked := __dbgInvokeDebug()  // Check without clearing
-      ? "AltD() result:", lAltDInvoked
+//       ? "AltD() result:", lAltDInvoked
       IF lAltDInvoked
          __dbgInvokeDebug(.T.)  // Clear the flag after detecting
       ENDIF
@@ -157,7 +157,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       // Also check if AltD() was invoked to force a stop
       IF s_lSocketEnabled
          IF lAltDInvoked
-            ? "=== HB_DBG_SHOWLINE: AltD() DETECTED! ==="
+//             ? "=== HB_DBG_SHOWLINE: AltD() DETECTED! ==="
             // Force a stop by setting running to false
             oDebugInfo["lRunning"] := .F.
          ENDIF
@@ -180,20 +180,20 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       ENDIF
       
       // Show variables like the working version
-      ? "=== HB_DBG_ACTIVATE - IntelliJ Variable Display ==="
-      ? "Level:", __dbgProcLevel()
+//       ? "=== HB_DBG_ACTIVATE - IntelliJ Variable Display ==="
+//       ? "Level:", __dbgProcLevel()
       
       IF uParam3 != NIL .AND. ValType(uParam3) == "A"
          FOR i := 1 TO Len(uParam3)
-            ? "Stack " + AllTrim(Str(i)) + ":" + uParam3[i,HB_DBG_CS_MODULE] + "-" + uParam3[i,HB_DBG_CS_FUNCTION] + ;
-              "(" + AllTrim(Str(uParam3[i,HB_DBG_CS_LINE])) + ")*" + AllTrim(Str(uParam3[i,HB_DBG_CS_LEVEL])) + ;
-              " " + AllTrim(Str(Len(uParam3[i,HB_DBG_CS_LOCALS]))) + " locals"
+//             ? "Stack " + AllTrim(Str(i)) + ":" + uParam3[i,HB_DBG_CS_MODULE] + "-" + uParam3[i,HB_DBG_CS_FUNCTION] + ;
+//               "(" + AllTrim(Str(uParam3[i,HB_DBG_CS_LINE])) + ")*" + AllTrim(Str(uParam3[i,HB_DBG_CS_LEVEL])) + ;
+//               " " + AllTrim(Str(Len(uParam3[i,HB_DBG_CS_LOCALS]))) + " locals"
               
             // Show local variables with actual names
             FOR j := 1 TO Len(uParam3[i,HB_DBG_CS_LOCALS])
                tmp := uParam3[i,HB_DBG_CS_LOCALS,j]
                vv := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
-               ? "  Local " + AllTrim(Str(j)) + ": " + tmp[HB_DBG_VAR_NAME] + " (" + tmp[HB_DBG_VAR_TYPE] + ") = " + hb_CStr(vv)
+//                ? "  Local " + AllTrim(Str(j)) + ": " + tmp[HB_DBG_VAR_NAME] + " (" + tmp[HB_DBG_VAR_TYPE] + ") = " + hb_CStr(vv)
             NEXT
          NEXT
       ENDIF
@@ -208,7 +208,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    CASE nMode == HB_DBG_VMQUIT
       // VM is quitting
       oDebugInfo := __DEBUGITEM()
-      ? "DEBUG: VM Quitting"
+//       ? "DEBUG: VM Quitting"
       IF !Empty(oDebugInfo["socket"])
          hb_inetSend(oDebugInfo["socket"], "VMQUIT" + CRLF)
          hb_inetClose(oDebugInfo["socket"])
@@ -249,7 +249,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
-         ? "Debugger connected on port", DBG_PORT
+//          ? "Debugger connected on port", DBG_PORT
       ENDIF
    ENDIF
    
@@ -275,7 +275,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDIF
          
          IF !Empty(tmp)
-            ? "DEBUG: Received command:", tmp
+//             ? "DEBUG: Received command:", tmp
             DO CASE
                CASE tmp == "GO"
                   oDebugInfo["lRunning"] := .T.
@@ -313,12 +313,12 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   SendStack()
                   
                CASE Left(tmp, 6) == "LOCALS"
-                  ? "DEBUG: Processing LOCALS command:", tmp
+//                   ? "DEBUG: Processing LOCALS command:", tmp
                   IF ":" $ tmp
-                     ? "DEBUG: Has colon, calling SendLocals with:", SubStr(tmp, 8)
+//                      ? "DEBUG: Has colon, calling SendLocals with:", SubStr(tmp, 8)
                      SendLocals(SubStr(tmp, 8))  // LOCALS: = 7 chars, so 8 gets after colon
                   ELSE
-                     ? "DEBUG: No colon, calling SendLocals with: 0"
+//                      ? "DEBUG: No colon, calling SendLocals with: 0"
                      SendLocals("0")
                   ENDIF
                   
@@ -402,7 +402,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
             
          // Check for breakpoints
          ELSEIF InBreakpoint()
-            ? "DEBUG: Breakpoint detected, stopping"
+//             ? "DEBUG: Breakpoint detected, stopping"
             oDebugInfo["lRunning"] := .F.
             IF !lStopSent
                // Get current file and line
@@ -503,15 +503,15 @@ STATIC PROCEDURE SendLocals(cParams)
    nCount := IF(Len(aParams) >= 3, Val(aParams[3]), 9999)
    
    // Debug logging
-   ? "=== SendLocals DEBUG ==="
-   ? "Request params:", cParams
-   ? "Parsed - nLevel:", nLevel, "nStart:", nStart, "nCount:", nCount
-   ? "__dbgEntryLevel:", oDebugInfo["__dbgEntryLevel"]
-   ? "VM Stack frames count:", IF(vmStack == NIL, 0, Len(vmStack))
+//    ? "=== SendLocals DEBUG ==="
+//    ? "Request params:", cParams
+//    ? "Parsed - nLevel:", nLevel, "nStart:", nStart, "nCount:", nCount
+//    ? "__dbgEntryLevel:", oDebugInfo["__dbgEntryLevel"]
+//    ? "VM Stack frames count:", IF(vmStack == NIL, 0, Len(vmStack))
    
    IF vmStack != NIL
       FOR i := 1 TO Len(vmStack)
-         ? "  VM Stack[" + Str(i) + "] level:", vmStack[i, HB_DBG_CS_LEVEL], "locals:", Len(vmStack[i, HB_DBG_CS_LOCALS])
+//          ? "  VM Stack[" + Str(i) + "] level:", vmStack[i, HB_DBG_CS_LEVEL], "locals:", Len(vmStack[i, HB_DBG_CS_LOCALS])
       NEXT
    ENDIF
    
@@ -519,7 +519,7 @@ STATIC PROCEDURE SendLocals(cParams)
    
    // Check if we have VM stack data
    IF vmStack == NIL .OR. Len(vmStack) == 0
-      ? "NO VM STACK DATA AVAILABLE"
+//       ? "NO VM STACK DATA AVAILABLE"
       hb_inetSend(oDebugInfo["socket"], "END_LOCALS" + CRLF)
       RETURN
    ENDIF
@@ -527,42 +527,42 @@ STATIC PROCEDURE SendLocals(cParams)
    // For level 0, use the first (top) stack frame
    IF nLevel == 0 .AND. Len(vmStack) > 0
       nStackIndex := 1  // Use first frame for level 0
-      ? "Using stack frame 1 for level 0 request"
+//       ? "Using stack frame 1 for level 0 request"
    ELSE
       // EXACT VSCode formula for stack lookup
       l := oDebugInfo["__dbgEntryLevel"] - nLevel
-      ? "Calculated l value:", l, "(from", oDebugInfo["__dbgEntryLevel"], "-", nLevel, ")"
+//       ? "Calculated l value:", l, "(from", oDebugInfo["__dbgEntryLevel"], "-", nLevel, ")"
       
       // Find stack frame with exact matching level
       nStackIndex := 0
       FOR i := Len(vmStack) TO 1 STEP -1
-         ? "Checking VM stack[" + Str(i) + "] level:", vmStack[i, HB_DBG_CS_LEVEL], "vs target l:", l
+//          ? "Checking VM stack[" + Str(i) + "] level:", vmStack[i, HB_DBG_CS_LEVEL], "vs target l:", l
          IF vmStack[i, HB_DBG_CS_LEVEL] == l
             nStackIndex := i
-            ? "FOUND matching VM stack frame at index:", nStackIndex
+//             ? "FOUND matching VM stack frame at index:", nStackIndex
             EXIT
          ENDIF
       NEXT
    ENDIF
    
-   ? "Final nStackIndex:", nStackIndex
+//    ? "Final nStackIndex:", nStackIndex
    
    // Send locals if stack frame found
    IF nStackIndex > 0 .AND. nStackIndex <= Len(vmStack)
-      ? "VM Stack frame found - locals count:", Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
+//       ? "VM Stack frame found - locals count:", Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
       IF Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
          // Collect all variables first
          FOR i := 1 TO Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
             aInfo := vmStack[nStackIndex, HB_DBG_CS_LOCALS, i]
             cName := aInfo[HB_DBG_VAR_NAME]
             
-            ? "Processing local[" + Str(i) + "]:", cName, "frame:", aInfo[HB_DBG_VAR_FRAME], "index:", aInfo[HB_DBG_VAR_INDEX]
+//             ? "Processing local[" + Str(i) + "]:", cName, "frame:", aInfo[HB_DBG_VAR_FRAME], "index:", aInfo[HB_DBG_VAR_INDEX]
             
             // Get variable value using stored frame level
             xValue := __dbgVMVarLGet(__dbgProcLevel() - aInfo[HB_DBG_VAR_FRAME], aInfo[HB_DBG_VAR_INDEX])
             cType := ValType(xValue)
             
-            ? "Got value:", cName, "=", xValue, "type:", cType
+//             ? "Got value:", cName, "=", xValue, "type:", cType
             
             AAdd(aVarData, {cName, cType, FormatValue(xValue)})
          NEXT
@@ -574,23 +574,23 @@ STATIC PROCEDURE SendLocals(cParams)
          n := 0
          FOR i := 1 TO Len(aVarData)
             IF n >= nStart .AND. n < nStart + nCount
-               ? "SENDING:", aVarData[i,1] + ":" + aVarData[i,2] + ":" + aVarData[i,3]
+//                ? "SENDING:", aVarData[i,1] + ":" + aVarData[i,2] + ":" + aVarData[i,3]
                hb_inetSend(oDebugInfo["socket"], ;
                   aVarData[i,1] + ":" + aVarData[i,2] + ":" + aVarData[i,3] + CRLF)
             ELSE
-               ? "SKIPPING (out of range):", aVarData[i,1], "n=" + Str(n)
+//                ? "SKIPPING (out of range):", aVarData[i,1], "n=" + Str(n)
             ENDIF
             n++
          NEXT
       ELSE
-         ? "No locals in VM stack frame"
+//          ? "No locals in VM stack frame"
       ENDIF
    ELSE
-      ? "NO VM STACK FRAME FOUND for index:", nStackIndex
+//       ? "NO VM STACK FRAME FOUND for index:", nStackIndex
    ENDIF
    
    hb_inetSend(oDebugInfo["socket"], "END_LOCALS" + CRLF)
-   ? "=== END SendLocals ==="
+//    ? "=== END SendLocals ==="
 RETURN
 
 // Send static variables - FIXED VERSION with active enumeration
@@ -612,12 +612,12 @@ STATIC PROCEDURE SendStatics(cParams)
    hb_inetSend(oDebugInfo["socket"], "STATICS" + CRLF)
    
    // Enhanced debug output  
-   ? "=== SendStatics DEBUG (FIXED VERSION) ==="
-   ? "Request params:", cParams
-   ? "Parsed nLevel:", nLevel
-   ? "__dbgEntryLevel:", oDebugInfo["__dbgEntryLevel"]
-   ? "aStack count:", Len(aStack)
-   ? "aModules count:", Len(aModules)
+//    ? "=== SendStatics DEBUG (FIXED VERSION) ==="
+//    ? "Request params:", cParams
+//    ? "Parsed nLevel:", nLevel
+//    ? "__dbgEntryLevel:", oDebugInfo["__dbgEntryLevel"]
+//    ? "aStack count:", Len(aStack)
+//    ? "aModules count:", Len(aModules)
    
    // EXACT VSCode formula for stack lookup
    l := oDebugInfo["__dbgEntryLevel"] - nLevel
@@ -646,7 +646,7 @@ STATIC PROCEDURE SendStatics(cParams)
       
       // Collect module statics first
       IF nModIndex > 0 .AND. Len(aModules[nModIndex]) >= 4 .AND. Len(aModules[nModIndex, 4]) > 0
-         ? "Module statics found, count:", Len(aModules[nModIndex, 4])
+//          ? "Module statics found, count:", Len(aModules[nModIndex, 4])
          FOR i := 1 TO Len(aModules[nModIndex, 4])
             aInfo := aModules[nModIndex, 4, i]
             cName := aInfo[HB_DBG_VAR_NAME]
@@ -659,7 +659,7 @@ STATIC PROCEDURE SendStatics(cParams)
       
       // Collect function-local statics
       IF Len(aStack[nStackIndex, HB_DBG_CS_STATICS]) > 0
-         ? "Function-local statics found, count:", Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
+//          ? "Function-local statics found, count:", Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
          FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
             aInfo := aStack[nStackIndex, HB_DBG_CS_STATICS, i]
             cName := aInfo[HB_DBG_VAR_NAME]
@@ -670,35 +670,35 @@ STATIC PROCEDURE SendStatics(cParams)
          lFoundAny := .T.
       ENDIF
    ELSE
-      ? "NO STACK FRAME FOUND (aStack empty or nStackIndex=0)"
+//       ? "NO STACK FRAME FOUND (aStack empty or nStackIndex=0)"
    ENDIF
    
    // FALLBACK: If no statics found via module system, try direct access
    IF !lFoundAny
-      ? "No module/stack statics found - trying direct enumeration..."
+//       ? "No module/stack statics found - trying direct enumeration..."
       
       // NEW APPROACH: Try to access known static variables by name
       // This bypasses the broken module registration system
-      ? "Trying direct static variable access by name..."
+//       ? "Trying direct static variable access by name..."
       
       // First test if Type() function works with a known variable
-      ? "Testing Type() function with 'CMESSAGE':", Type("CMESSAGE")
+//       ? "Testing Type() function with 'CMESSAGE':", Type("CMESSAGE")
       
       FOR i := 1 TO Len(aStaticNames)
-         ? "Testing Type() for:", aStaticNames[i], "Result:", Type(aStaticNames[i])
+//          ? "Testing Type() for:", aStaticNames[i], "Result:", Type(aStaticNames[i])
          IF Type(aStaticNames[i]) != "U"
             xValue := &(aStaticNames[i])
             cType := ValType(xValue)
-            ? "Found static by name:", aStaticNames[i], "=", hb_CStr(xValue), "type:", cType
+//             ? "Found static by name:", aStaticNames[i], "=", hb_CStr(xValue), "type:", cType
             AAdd(aVarData, {aStaticNames[i], cType, FormatValue(xValue)})
             lFoundAny := .T.
          ELSE
-            ? "Static variable not accessible:", aStaticNames[i]
+//             ? "Static variable not accessible:", aStaticNames[i]
          ENDIF
       NEXT
       
       IF !lFoundAny
-         ? "No static variables found by name lookup either"
+//          ? "No static variables found by name lookup either"
       ENDIF
    ENDIF
    
@@ -711,8 +711,8 @@ STATIC PROCEDURE SendStatics(cParams)
       NEXT
    ENDIF
    
-   ? "Total static variables collected:", Len(aVarData)
-   ? "=== END SendStatics ==="
+//    ? "Total static variables collected:", Len(aVarData)
+//    ? "=== END SendStatics ==="
    
    hb_inetSend(oDebugInfo["socket"], "END_STATICS" + CRLF)
 RETURN
@@ -740,11 +740,11 @@ STATIC PROCEDURE SendPrivates(cParams)
       nLocal := __mvDbgInfo(HB_MV_PRIVATE_LOCAL, __dbgProcLevel() - nLevel)
    #endif
    
-   ? "=== SendPrivates DEBUG ==="
-   ? "Request params:", cParams  
-   ? "Parsed - nLevel:", nLevel, "nStart:", nStart, "nCount:", nCount
-   ? "__dbgProcLevel():", __dbgProcLevel()
-   ? "Private vars count (local to level):", nLocal
+//    ? "=== SendPrivates DEBUG ==="
+//    ? "Request params:", cParams  
+//    ? "Parsed - nLevel:", nLevel, "nStart:", nStart, "nCount:", nCount
+//    ? "__dbgProcLevel():", __dbgProcLevel()
+//    ? "Private vars count (local to level):", nLocal
    
    IF nCount == 0
       nCount := nLocal
@@ -752,24 +752,24 @@ STATIC PROCEDURE SendPrivates(cParams)
    
    // Try getting all privates first
    nAllPrivates := __mvDbgInfo(HB_MV_PRIVATE)
-   ? "Total private vars (all levels):", nAllPrivates
+//    ? "Total private vars (all levels):", nAllPrivates
    
    // Collect private variables first
    IF nLocal > 0
-      ? "Collecting local privates..."
+//       ? "Collecting local privates..."
       FOR i := 1 TO nLocal
          xValue := __mvDbgInfo(HB_MV_PRIVATE_LOCAL, i, @cName, __dbgProcLevel() - nLevel)
          cType := ValType(xValue)
-         ? "Private local[" + Str(i) + "]:", cName, "=", hb_CStr(xValue), "type:", cType
+//          ? "Private local[" + Str(i) + "]:", cName, "=", hb_CStr(xValue), "type:", cType
          // Show all private variables including GETLIST (user may define it locally)
          AAdd(aVarData, {cName, cType, FormatValue(xValue)})
       NEXT
    ELSEIF nAllPrivates > 0
-      ? "No local privates, collecting all privates..."
+//       ? "No local privates, collecting all privates..."
       FOR i := 1 TO nAllPrivates
          xValue := __mvDbgInfo(HB_MV_PRIVATE, i, @cName)
          cType := ValType(xValue)
-         ? "Private[" + Str(i) + "]:", cName, "=", hb_CStr(xValue), "type:", cType
+//          ? "Private[" + Str(i) + "]:", cName, "=", hb_CStr(xValue), "type:", cType
          // Show all private variables including GETLIST (user may define it locally)
          AAdd(aVarData, {cName, cType, FormatValue(xValue)})
       NEXT
@@ -785,7 +785,7 @@ STATIC PROCEDURE SendPrivates(cParams)
             aVarData[i,1] + ":" + aVarData[i,2] + ":" + aVarData[i,3] + CRLF)
       NEXT
    ELSE
-      ? "No private variables found"
+//       ? "No private variables found"
    ENDIF
    
    hb_inetSend(oDebugInfo["socket"], "END_PRIVATES" + CRLF)
@@ -840,26 +840,26 @@ STATIC FUNCTION InBreakpoint()
    LOCAL nLine := 0
    LOCAL cKey, i, aStack
    
-   ? "=== InBreakpoint DEBUG ==="
-   ? "Custom stack count:", Len(oDebugInfo["aStack"])
-   ? "VM stack available:", (oDebugInfo["vmStack"] != NIL)
+//    ? "=== InBreakpoint DEBUG ==="
+//    ? "Custom stack count:", Len(oDebugInfo["aStack"])
+//    ? "VM stack available:", (oDebugInfo["vmStack"] != NIL)
    
    // Get current position from stack
    IF Len(oDebugInfo["aStack"]) > 0
       aStack := ATail(oDebugInfo["aStack"])
       cFile := Lower(AllTrim(aStack[HB_DBG_CS_MODULE]))
       nLine := aStack[HB_DBG_CS_LINE]
-      ? "Using custom stack - file:", cFile, "line:", nLine
+//       ? "Using custom stack - file:", cFile, "line:", nLine
    ELSE
       // Fallback to ProcFile/ProcLine
-      ? "Custom stack empty, using ProcFile/ProcLine fallback"
+//       ? "Custom stack empty, using ProcFile/ProcLine fallback"
       FOR i := 2 TO 5
          cFile := ProcFile(i)
-         ? "  ProcFile(" + Str(i) + "):", cFile, "ProcLine(" + Str(i) + "):", ProcLine(i)
+//          ? "  ProcFile(" + Str(i) + "):", cFile, "ProcLine(" + Str(i) + "):", ProcLine(i)
          IF !Empty(cFile) .AND. !("harbour_debug" $ Lower(cFile))
             cFile := Lower(AllTrim(cFile))
             nLine := ProcLine(i)
-            ? "  SELECTED - file:", cFile, "line:", nLine
+//             ? "  SELECTED - file:", cFile, "line:", nLine
             EXIT
          ENDIF
       NEXT
@@ -875,15 +875,15 @@ STATIC FUNCTION InBreakpoint()
    ENDIF
    
    cKey := cFile + ":" + AllTrim(Str(nLine))
-   ? "Checking breakpoint key:", cKey
-   ? "Available breakpoints:", hb_HKeys(oDebugInfo["aBreaks"])
+//    ? "Checking breakpoint key:", cKey
+//    ? "Available breakpoints:", hb_HKeys(oDebugInfo["aBreaks"])
    
    // Check if this file:line has a breakpoint
    IF hb_HHasKey(oDebugInfo["aBreaks"], cKey)
-      ? "BREAKPOINT HIT at", cKey
+//       ? "BREAKPOINT HIT at", cKey
       RETURN .T.
    ELSE
-      ? "No breakpoint at", cKey
+//       ? "No breakpoint at", cKey
    ENDIF
    
 RETURN .F.
@@ -892,7 +892,7 @@ RETURN .F.
 STATIC FUNCTION IsAltDStop()
    // Check if AltD() was invoked using the VM's debug invoke flag
    IF __dbgInvokeDebug()
-      ? "AltD() invoked - forcing debug stop"
+//       ? "AltD() invoked - forcing debug stop"
       __dbgInvokeDebug(.T.)  // Clear flag after detecting
       RETURN .T.
    ENDIF
@@ -925,10 +925,10 @@ STATIC PROCEDURE SetBreakpoint(cParams)
       IF cOp == "+"
          oDebugInfo["aBreaks"][cKey] := .T.
          hb_inetSend(oDebugInfo["socket"], "BREAK:" + cFile + ":" + Str(nLine) + ":" + Str(nLine) + CRLF)
-         ? "Breakpoint set at", cKey
+//          ? "Breakpoint set at", cKey
       ELSE
          hb_HDel(oDebugInfo["aBreaks"], cKey)
-         ? "Breakpoint removed at", cKey
+//          ? "Breakpoint removed at", cKey
       ENDIF
    ENDIF
 RETURN
@@ -998,11 +998,11 @@ STATIC PROCEDURE LoadBreakpoints()
    LOCAL cContent, aLines, cLine, aTokens, nLine, cFileName, cKey, i, j
    
    IF !File(cFile)
-      ? "No init.cld file found - breakpoints will be set via socket commands"
+//       ? "No init.cld file found - breakpoints will be set via socket commands"
       RETURN
    ENDIF
    
-   ? "Loading breakpoints from init.cld..."
+//    ? "Loading breakpoints from init.cld..."
    cContent := hb_MemoRead(cFile)
    IF !Empty(cContent)
       aLines := hb_ATokens(cContent, Chr(10))
@@ -1026,13 +1026,13 @@ STATIC PROCEDURE LoadBreakpoints()
                
                cKey := cFileName + ":" + AllTrim(Str(nLine))
                oDebugInfo["aBreaks"][cKey] := .T.
-               ? "Loaded breakpoint:", cKey
+//                ? "Loaded breakpoint:", cKey
             ENDIF
          ENDIF
       NEXT
-      ? "Breakpoints loaded:", Len(oDebugInfo["aBreaks"])
+//       ? "Breakpoints loaded:", Len(oDebugInfo["aBreaks"])
    ELSE
-      ? "Could not read init.cld file"
+//       ? "Could not read init.cld file"
    ENDIF
 RETURN
 
@@ -1040,7 +1040,7 @@ RETURN
 INIT PROCEDURE __InitIntelliJDebugger()
    LOCAL oDebugInfo
 
-   altd()
+   // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
    
    // Force standard console output
    Set( _SET_CONSOLE, .T. )
@@ -1057,7 +1057,7 @@ INIT PROCEDURE __InitIntelliJDebugger()
    // Enable debugging
    Set( _SET_DEBUG, .T. )
    
-   ? "IntelliJ Harbour Debugger with breakpoint support initializing..."
+//    ? "IntelliJ Harbour Debugger with breakpoint support initializing..."
    
    // Set running state to true initially
    oDebugInfo["lRunning"] := .T.
@@ -1065,14 +1065,14 @@ INIT PROCEDURE __InitIntelliJDebugger()
    // Load pre-set breakpoints from init.cld
    LoadBreakpoints()
    
-   ? "Debugger initialized - ready for breakpoints and variable display"
+//    ? "Debugger initialized - ready for breakpoints and variable display"
 RETURN
 
 // Override AltD() to trigger debugger (WORKING SOLUTION FROM GIT HISTORY)
 PROCEDURE AltD()
    LOCAL t_oDebugInfo := __DEBUGITEM()
    
-   ? "AltD() called"
+//    ? "AltD() called"
    
    // Ensure debugger is initialized
    IF !t_oDebugInfo["lInitialized"]
@@ -1101,6 +1101,6 @@ PROCEDURE AltD()
          CheckSocket(.T.)  // Pass .T. to indicate we already sent STOP
       ENDDO
    ELSE
-      ? "AltD: Debugger not connected"
+//       ? "AltD: Debugger not connected"
    ENDIF
 RETURN

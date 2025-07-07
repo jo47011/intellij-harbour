@@ -102,7 +102,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         try {
             handler = new OSProcessHandler(commandLine);
             
-            // We need to detect if this is a GUI program to determine process termination behavior
+            // CRITICAL: Detect if this is a GUI program to determine process termination behavior
             // For GUI programs: terminate debug session when process ends
             // For console programs using remote debugging: allow debug connection to outlive process
             boolean isGuiProgram = isGuiProgram(runConfig);
@@ -231,9 +231,22 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         "Created build directory: " + buildDirFile.getPath());
             }
         }
+        
+        // Copy harbour_debug.prg to build directory for console programs
+        // This provides network connectivity for PyCharm debugging
+        File debugLibFile = new File(buildDirFile, "harbour_debug.prg");
+        try {
+            copyResourceFile(debugLibFile, "/debug/harbour_debug.prg");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Copied debug library to: " + debugLibFile.getAbsolutePath());
+        } catch (IOException e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Warning: Failed to copy debug library: " + e.getMessage());
+            // Continue without debug library
+        }
 
-        // Detect if this is a GUI program early
-        boolean isGuiProgram = isGuiProgram(buildTarget, runConfig.getCompilerOptions());
+        // Detect if this is a GUI program early - use same logic as in startProcess()
+        boolean isGuiProgram = isGuiProgram(runConfig);
         // USER FEEDBACK: Don't use instrumentation - debug original files only
         // The instrumented approach causes confusion and file management issues
         boolean shouldInstrument = shouldInstrumentSource() && !isGuiProgram; // Only console programs, never GUI
@@ -325,12 +338,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     "Converted to absolute path: " + finalBuildTarget);
         }
         
-        // Copy appropriate debug files based on program type per CLAUDE.md rules
+        // For console programs, let PyCharm handle debugging without additional libraries
         if (!isGui) {
-            // Console programs: Use PyCharm debugger
-            copyDebugLibrary(workingDir);
+            // Console programs: Use PyCharm debugger - no additional debug library needed
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Copied debug library for PyCharm remote debugging");
+                    "Console program: Using PyCharm debugging (no additional library needed)");
         } else {
             // GUI programs: Use Harbour internal debugger
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
@@ -349,20 +361,29 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Add debug source based on program type per CLAUDE.md rules
         if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
             if (!isGui) {
-                // Console programs: Use PyCharm debugger
-                String debugSourcePath = ".hbmk/harbour_debug_complete.prg";
+                // Console programs: Use debug library for PyCharm network connectivity
+                String debugSourcePath = buildDir + "/harbour_debug.prg";
                 parameters.add(debugSourcePath);
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Console program: Added debug source for PyCharm remote debugging: " + debugSourcePath);
+                        "Console program: Added debug library for PyCharm connectivity: " + debugSourcePath);
             }
             // GUI programs: No custom debug source - use Harbour internal debugger with init.cld
         }
         
+        // Add debug flags - both program types need -b flag for debugging support
         parameters.add("-b");
         parameters.add("-run");
         
-        // FORCE debug activation by adding preprocessor define to trigger AltD(1)
-        parameters.add("-DFORCE_DEBUG_MODE=1");
+        if (isGui) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "GUI program: Using -b flag with Harbour internal debugger");
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Console program: Using -b flag with PyCharm debugging (environment controls which interface)");
+        }
+        
+        // Remove FORCE_DEBUG_MODE - it was triggering Harbour debugger instead of PyCharm
+        // parameters.add("-DFORCE_DEBUG_MODE=1");  // REMOVED - not in working version
         
         // CRITICAL: Add debug flags for F9 breakpoint support
         parameters.add("-debug");  // Add C-level debug information 
@@ -373,8 +394,15 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Using incremental build (removed -clean as it prevented execution)");
 
-        // Don't use -workdir as it prevents linking - let hbmk2 use default temp directory
-        // parameters.add("-workdir=" + buildDir);  // REMOVED: prevents executable creation
+        // Add -workdir for console programs like the working version
+        if (!isGui) {
+            parameters.add("-workdir=" + buildDir);
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Console program: Added -workdir=" + buildDir + " like working version");
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "GUI program: No -workdir needed");
+        }
         parameters.add("-D__HARBOUR_DEBUG__");
         parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
         
@@ -409,16 +437,18 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "Console program detected - using PyCharm debugging approach");
             
-            // For console programs: use standard console output
+            // For console programs: use standard console output for PyCharm debugging
             parameters.add("-gtSTD");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Console program: Using -gtSTD for PyCharm debugging");
         }
         
-        // Additional Windows-specific console redirection
-        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
-            // Prevent new console window creation on Windows
+        // Additional Windows-specific console redirection (only for GUI programs)
+        if (System.getProperty("os.name").toLowerCase().contains("windows") && isGui) {
+            // Prevent new console window creation on Windows for GUI programs
             parameters.add("-D__INTELLIJ_DEBUG__");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Added Windows-specific console redirection flags");
+                    "Added Windows-specific console redirection flags for GUI program");
         }
 
         // Don't set ALTD environment variable for remote debugging
@@ -474,48 +504,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         commandLine.setWorkDirectory(finalWorkingDir);
         
-        // Set debug environment based on program type per CLAUDE.md rules
-        if (isGui) {
-            // GUI programs: Use Harbour internal debugger environment
-            String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
-            commandLine.withEnvironment("HB_DBG_PATH", debugPath);
-            
-            // CRITICAL: Set ALTD=BREAK to trigger AltD(1) in menu.prg line 90
-            commandLine.withEnvironment("ALTD", "BREAK");
-            
-            // Also set working directory as fallback for init.cld lookup
-            File initCldFile = new File(debugPath, "init.cld");
-            
-            
-            // ULTRA DEBUG: Check current working directory vs set working directory
-            
-            // Check if working directory contains expected files
-            File workDir = new File(finalWorkingDir);
-            if (workDir.exists() && workDir.isDirectory()) {
-                String[] files = workDir.list();
-                if (files != null) {
-                    for (String file : files) {
-                        if (file.equals("init.cld")) {
-                        }
-                    }
-                }
-            }
-            
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: Set HB_DBG_PATH=" + debugPath);
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: Set ALTD=BREAK to trigger AltD(1) in program");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: init.cld will be loaded automatically by Harbour internal debugger");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: Expected init.cld at " + initCldFile.getAbsolutePath());
-        } else {
-            // Console programs: Use PyCharm remote debugging
-            commandLine.withEnvironment("HB_DBG_PATH", ".");
-            commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Using PyCharm remote debugging with HB_DBG_PATH=.");
-        }
+        // REVERT to working version approach: Use same environment for ALL programs
+        // Based on working commit 5107483 - no GUI detection for environment variables
+        commandLine.withEnvironment("HB_DBG_PATH", ".");
+        commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+        // DON'T set ALTD environment variable (per working version)
+        
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "ALL programs: Using working version environment (HB_DBG_PATH=., HB_REMOTE_DEBUG=1, no ALTD)");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Program type detected as: " + (isGui ? "GUI" : "Console") + " but using same environment for all");
     }
 
     /**
@@ -529,9 +527,30 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (sourceFile.endsWith(".hbp")) {
             return isGuiProgram(sourceFile, config.getCompilerOptions());
         } else {
-            // For standalone .prg files, we add GUI flags automatically (see current logic)
-            // So they are considered GUI programs
-            return true;
+            // For standalone .prg files, check compiler options first
+            String compilerOptions = config.getCompilerOptions();
+            if (!StringUtil.isEmpty(compilerOptions)) {
+                String opts = compilerOptions.toLowerCase();
+                if (opts.contains("-gui") || opts.contains("-gtwvt") || opts.contains("-gtwvw") || 
+                    opts.contains("-gtwin") || opts.contains("-gtwvg") || opts.contains("-gtxwc")) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "GUI flags detected in compiler options for standalone .prg: " + compilerOptions);
+                    return true;
+                }
+            }
+            
+            // Check filename to determine program type
+            String fileName = new File(sourceFile).getName().toLowerCase();
+            if (fileName.contains("gui") || fileName.contains("window") || fileName.contains("dialog")) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "GUI program detected by filename: " + fileName);
+                return true;
+            }
+            
+            // Default for standalone .prg files without GUI indicators: console program
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Standalone .prg file without GUI indicators - treating as console program");
+            return false;
         }
     }
 
@@ -583,11 +602,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         "Error reading .hbp file for GUI detection: " + e.getMessage());
             }
         } else {
-            // For standalone .prg files, check if we're adding GUI flags automatically
-            // Current logic adds -gui for standalone .prg files
+            // For standalone .prg files, they default to console programs
+            // Only consider GUI if explicit GUI flags were already checked above
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Standalone .prg file detected - will add GUI flags automatically");
-            return true;
+                    "Standalone .prg file without GUI flags - treating as console program");
+            return false;
         }
         
         return false;
@@ -1116,18 +1135,18 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // Copy harbour_debug_complete.prg to build directory (for console programs)
-        File debugLibFile = new File(buildDir, "harbour_debug_complete.prg");
+        // Copy harbour_debug_simple.prg to build directory (for console programs)
+        File debugLibFile = new File(buildDir, "harbour_debug_simple.prg");
         try {
-            copyResourceFile(debugLibFile);
+            copyResourceFile(debugLibFile, "/debug/harbour_debug_simple.prg");
         } catch (IOException e) {
-            throw new ExecutionException("Failed to copy debug library: " + e.getMessage(), e);
+            throw new ExecutionException("Failed to copy simple debug library: " + e.getMessage(), e);
         }
     }
     
     
     private void copyResourceFile(File targetFile) throws IOException, ExecutionException {
-        copyResourceFile(targetFile, "/debug/harbour_debug_complete.prg");
+        copyResourceFile(targetFile, "/debug/harbour_debug.prg");
     }
     
     private void copyResourceFile(File targetFile, String resourcePath) throws IOException, ExecutionException {
@@ -1159,4 +1178,5 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 "VM-based debugging - instrumentation disabled");
         return false;
     }
+
 }
