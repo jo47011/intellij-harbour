@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.204</version>
+    <version>1.0.286</version>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
@@ -74,8 +74,20 @@
 
         <!-- Debug Support -->
         <configurationType implementation="org.intellij.sdk.language.HarbourDebuggerConfigType"/>
-        <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner"/>
+        <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner" id="HarbourDebuggerRunner" order="first"/>
         <xdebugger.breakpointType implementation="org.intellij.sdk.language.HarbourDebuggerLineBreakpointType"/>
+        
+        <!-- Windows-specific registration fix -->
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerRegistration"/>
+        
+        <!-- Plugin load test -->
+        <applicationService serviceImplementation="org.intellij.sdk.language.HarbourPluginLoadTest"/>
+        <applicationService serviceImplementation="org.intellij.sdk.language.HarbourMinimalTest"/>
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourPluginNotificationTest"/>
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerDiagnostics"/>
+        
+        <!-- Force debug server start for testing - DISABLED due to PyCharm crashes -->
+        <!-- <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebugServerForcer"/> -->
         
         <!-- Formatting -->
         <lang.formatter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFormattingModelBuilder"/>

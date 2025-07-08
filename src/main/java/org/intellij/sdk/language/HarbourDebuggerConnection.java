@@ -36,7 +36,137 @@ public class HarbourDebuggerConnection {
     }
     
     /**
-     * Start the debug server and wait for client connection
+     * Start listening on the debug port without accepting connections yet
+     * This allows us to ensure the server is ready before Harbour program execution
+     */
+    public boolean startListening() throws IOException {
+        try {
+            HarbourLogger.log("HarbourDebuggerConnection", "=== STARTING PYCHARM DEBUG SERVER v1.0.260 ===");
+            HarbourLogger.log("HarbourDebuggerConnection", "Starting to listen on port " + port);
+            System.out.println("🔧 HarbourDebuggerConnection.startListening() called");
+            System.out.println("🔧 Target port: " + port);
+            
+            // Aggressive port cleanup before binding
+            if (!isPortAvailable(port)) {
+                HarbourLogger.log("HarbourDebuggerConnection", "Port " + port + " is in use, attempting to free it");
+                System.out.println("⚠️  Port " + port + " is in use, attempting to free it");
+                forceReleasePort(port);
+                
+                // Wait a moment for port to be released
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                
+                // Check again
+                if (!isPortAvailable(port)) {
+                    HarbourLogger.log("HarbourDebuggerConnection", "WARNING: Port " + port + " still appears to be in use");
+                    System.out.println("⚠️  WARNING: Port " + port + " still appears to be in use");
+                }
+            } else {
+                System.out.println("✅ Port " + port + " is available");
+            }
+            
+            System.out.println("🔧 Creating ServerSocket on port " + port + "...");
+            serverSocket = new ServerSocket(port);
+            serverSocket.setReuseAddress(true); // Allow quick restart
+            serverSocket.setSoTimeout(ACCEPT_TIMEOUT);
+            
+            HarbourLogger.log("HarbourDebuggerConnection", "✅ Server socket created and listening on port " + port);
+            HarbourLogger.log("HarbourDebuggerConnection", "Server socket address: " + serverSocket.getInetAddress() + ":" + serverSocket.getLocalPort());
+            
+            System.out.println("✅ SUCCESS: ServerSocket created and bound to port " + port);
+            System.out.println("🔗 Server address: " + serverSocket.getInetAddress() + ":" + serverSocket.getLocalPort());
+            System.out.println("⚡ PYCHARM IS NOW LISTENING ON PORT " + port + " - READY FOR HARBOUR!");
+            
+            return true;
+            
+        } catch (IOException e) {
+            HarbourLogger.log("HarbourDebuggerConnection", "❌ Failed to start listening on port " + port + ": " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerConnection", e);
+            throw e;
+        }
+    }
+    
+    /**
+     * Accept a connection from the debug client (blocking operation)
+     */
+    public boolean acceptConnection(Consumer<String> messageHandler) throws IOException {
+        this.messageHandler = messageHandler;
+        
+        if (serverSocket == null || serverSocket.isClosed()) {
+            HarbourLogger.log("HarbourDebuggerConnection", "❌ Server socket not available for accepting connections");
+            return false;
+        }
+        
+        try {
+            HarbourLogger.log("HarbourDebuggerConnection", "Waiting for debug client connection on port " + port + "...");
+            
+            waitingForConnection = true;
+            
+            // Accept connection with proper timeout handling
+            try {
+                clientSocket = serverSocket.accept();
+                waitingForConnection = false;
+                HarbourLogger.log("HarbourDebuggerConnection", "✅ Client connection accepted successfully");
+            } catch (SocketTimeoutException e) {
+                waitingForConnection = false;
+                throw e; // Re-throw to be handled by outer catch block
+            }
+            
+            // Setup streams
+            reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+            
+            connected = true;
+            HarbourLogger.log("HarbourDebuggerConnection", "Debug client connected from " + clientSocket.getInetAddress());
+            
+            // Start message reading thread
+            startMessageThread();
+            
+            // Read handshake directly (executable name and PID)
+            // We need to read two lines: executable name and PID
+            String executableName = reader.readLine();
+            String pid = reader.readLine();
+            
+            if (executableName != null && pid != null) {
+                HarbourLogger.log("HarbourDebuggerConnection", "Received handshake - Executable: " + executableName + ", PID: " + pid);
+                
+                // Send HELLO response to complete handshake
+                sendCommand("HELLO");
+                HarbourLogger.log("HarbourDebuggerConnection", "Sent HELLO response");
+                
+                // Store handshake info if needed
+                if (messageHandler != null) {
+                    messageHandler.accept(executableName + CRLF + pid);
+                }
+                
+                return true;
+            }
+            
+        } catch (SocketTimeoutException e) {
+            HarbourLogger.log("HarbourDebuggerConnection", "Timeout waiting for debug client connection");
+            close();
+        } catch (IOException e) {
+            waitingForConnection = false;
+            if (e.getMessage() != null && e.getMessage().contains("Socket closed")) {
+                HarbourLogger.log("HarbourDebuggerConnection", "Server socket was closed externally - likely debug session ended or stopped by user");
+                // Don't rethrow if socket was intentionally closed
+                return false;
+            }
+            HarbourLogger.log("HarbourDebuggerConnection", "Error accepting connection: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerConnection", e);
+            close();
+            // Don't rethrow the exception - just return false to indicate failure
+            return false;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Start the debug server and wait for client connection (DEPRECATED - use startListening + acceptConnection)
      */
     public boolean start(Consumer<String> messageHandler) throws IOException {
         this.messageHandler = messageHandler;

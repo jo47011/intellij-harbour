@@ -106,6 +106,36 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Created remote debugger on port " + debugPort);
         
+        // Multiple output channels to ensure visibility
+        System.out.println("🚀 HARBOUR DEBUG PROCESS v1.0.265 CONSTRUCTOR CALLED!");
+        System.err.println("🚀 [STDERR] HARBOUR DEBUG PROCESS v1.0.265 CONSTRUCTOR CALLED!");
+        
+        // Write to file for absolute confirmation - try multiple locations
+        String[] logPaths = {
+            "harbour_debug_process_created.txt",
+            "C:\\temp\\harbour_debug_process_created.txt",
+            System.getProperty("user.home") + "\\harbour_debug_process_created.txt",
+            System.getProperty("java.io.tmpdir") + "\\harbour_debug_process_created.txt"
+        };
+        
+        for (String path : logPaths) {
+            try {
+                java.io.FileWriter fw = new java.io.FileWriter(path);
+                fw.write("HarbourDebuggerRemoteProcess v1.0.265 constructor called\n");
+                fw.write("Debug port: " + debugPort + "\n");
+                fw.write("OS: " + System.getProperty("os.name") + "\n");
+                fw.write("Time: " + java.time.LocalDateTime.now() + "\n");
+                fw.write("User Home: " + System.getProperty("user.home") + "\n");
+                fw.write("Working Dir: " + System.getProperty("user.dir") + "\n");
+                fw.write("Java Temp Dir: " + System.getProperty("java.io.tmpdir") + "\n");
+                fw.close();
+                System.out.println("🚀 Debug process file written to: " + path);
+                break;
+            } catch (Exception e) {
+                System.err.println("Failed to write debug process file to " + path + ": " + e.getMessage());
+            }
+        }
+        
         // Add shutdown hook to ensure cleanup even if normal shutdown fails
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "JVM shutdown hook - cleaning up debugger resources");
@@ -128,50 +158,106 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                         "Target process terminated with exit code: " + event.getExitCode() + " - stopping debug session");
                     
-                    // Stop the debug session when the GUI program terminates
-                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                    // Delay stopping the debug session to allow connection to establish
+                    // This prevents race condition where process exits before connection is made
+                    ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                        // Wait 5 seconds for connection to establish
                         try {
-                            getSession().stop();
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session stopped due to process termination");
-                        } catch (Exception e) {
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                "Error stopping debug session: " + e.getMessage());
+                                "Process terminated - waiting 5 seconds for debug connection...");
+                            Thread.sleep(5000);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
                         }
+                        
+                        // Now check if we have a connection
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            if (isConnected) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Connection established - keeping debug session active despite process termination");
+                            } else {
+                                try {
+                                    getSession().stop();
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "No debug connection after 5s wait - stopping debug session");
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Error stopping debug session: " + e.getMessage());
+                                }
+                            }
+                        });
                     });
                 }
             });
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Added process termination listener for automatic debug session cleanup");
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Added process termination listener with connection wait");
         }
         
-        // Start debug server in background
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            try {
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Starting debug server...");
-                isConnected = connection.start(this::handleDebugMessage);
-                
-                if (isConnected) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection established");
-                    updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
-                    
-                    // Record connection start time to prevent premature shutdown
-                    connectionStartTime = System.currentTimeMillis();
-                    
-                    // Send initial breakpoints
-                    sendInitialBreakpoints();
-                } else {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to establish debug connection");
-                    updateDebuggerState(DebuggerState.DISCONNECTED, false);
-                }
-            } catch (IOException e) {
-                // Don't log socket exceptions as errors if they're due to normal session termination
-                if (e.getMessage() != null && e.getMessage().contains("Socket closed")) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection closed - likely session was stopped");
-                } else {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection error: " + e.getMessage());
-                    HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
-                }
+        // Start debug server listening immediately in constructor to ensure it's ready before Harbour execution
+        try {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "=== PYCHARM DEBUG SERVER STARTUP v1.0.260 ===");
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "IMMEDIATE DEBUG SERVER STARTUP - CREATING SOCKET ON PORT " + debugPort);
+            
+            // Print to console as well for immediate visibility
+            System.out.println("🚀 STARTING PYCHARM DEBUG SERVER v1.0.260 ON PORT " + debugPort);
+            System.out.println("⏰ Timestamp: " + java.time.LocalDateTime.now());
+            System.out.println("🔧 Thread: " + Thread.currentThread().getName());
+            
+            // Start listening immediately in constructor - this is synchronous and fast
+            boolean serverStarted = connection.startListening();
+            
+            if (serverStarted) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "✅ SUCCESS: DEBUG SERVER IS NOW LISTENING ON PORT " + debugPort + " - READY FOR HARBOUR CONNECTIONS!");
+                System.out.println("✅ SUCCESS: PYCHARM DEBUG SERVER IS NOW LISTENING ON PORT " + debugPort);
+                System.out.println("🔗 Server Address: 127.0.0.1:" + debugPort);
+                System.out.println("⚡ READY FOR HARBOUR CONNECTIONS - NO MORE CONNECTION REFUSED ERRORS!");
+            } else {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "❌ CRITICAL FAILURE: COULD NOT START DEBUG SERVER ON PORT " + debugPort);
+                System.out.println("❌ CRITICAL FAILURE: COULD NOT START DEBUG SERVER ON PORT " + debugPort);
             }
-        });
+            
+            // Now start accepting connections asynchronously (this will block until connection arrives)
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                try {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Waiting for Harbour program to connect...");
+                    System.out.println("⏳ WAITING FOR HARBOUR PROGRAM TO CONNECT ON PORT " + debugPort + "...");
+                    System.out.println("🔍 PyCharm is now listening and ready to accept connections");
+                    
+                    isConnected = connection.acceptConnection(this::handleDebugMessage);
+                
+                    if (isConnected) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "✅ HARBOUR CONNECTION ESTABLISHED!");
+                        System.out.println("✅ HARBOUR CONNECTION ESTABLISHED!");
+                        System.out.println("🎉 DEBUG SESSION ACTIVE - CONNECTION SUCCESSFUL!");
+                        updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
+                        
+                        // Record connection start time to prevent premature shutdown
+                        connectionStartTime = System.currentTimeMillis();
+                        
+                        // Send initial breakpoints
+                        sendInitialBreakpoints();
+                    } else {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "❌ Failed to establish debug connection");
+                        System.out.println("❌ FAILED TO ESTABLISH DEBUG CONNECTION");
+                        updateDebuggerState(DebuggerState.DISCONNECTED, false);
+                    }
+                } catch (IOException e) {
+                    // Don't log socket exceptions as errors if they're due to normal session termination
+                    if (e.getMessage() != null && e.getMessage().contains("Socket closed")) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection closed - likely session was stopped");
+                    } else {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug connection error: " + e.getMessage());
+                        HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                    }
+                }
+            });
+            
+        } catch (IOException e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "❌ CRITICAL ERROR: Failed to start debug server listening: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+        }
     }
     
     /**
@@ -469,119 +555,284 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     private void handleVariables(String scope, String[] varLines) {
-        // Clear only this scope's variables to prevent stale data
-        variables.entrySet().removeIf(entry -> entry.getKey().startsWith(scope + "."));
-        
-        for (String line : varLines) {
-            // Check for end markers
-            if (line.equals("END_" + scope)) {
-                break;
+        try {
+            // Validate input parameters to prevent crashes
+            if (scope == null || scope.trim().isEmpty()) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Invalid scope for variables: " + scope);
+                return;
             }
             
-            // Parse variable line
-            String[] parts = line.split(":", 3);
-            if (parts.length >= 3) {
-                String name = parts[0];
-                String type = parts[1];
-                String value = parts[2];
-                
-                String key = scope + "." + name;
-                variables.put(key, new HarbourDebuggerValue(name, type, value));
-                
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                        "Variable " + scope + ": " + name + " = " + value + " (" + type + ")");
+            if (varLines == null) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Variable lines are null for scope: " + scope);
+                return;
             }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Processing " + varLines.length + " variable lines for scope: " + scope);
+            
+            // Clear only this scope's variables to prevent stale data
+            try {
+                variables.entrySet().removeIf(entry -> {
+                    try {
+                        return entry.getKey() != null && entry.getKey().startsWith(scope + ".");
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "ERROR: Exception during variable cleanup for key: " + entry.getKey() + " - " + e.getMessage());
+                        return false; // Don't remove on error
+                    }
+                });
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "ERROR: Exception during variable map cleanup for scope " + scope + ": " + e.getMessage());
+                HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+            }
+            
+            // Process each variable line with robust error handling
+            for (int i = 0; i < varLines.length; i++) {
+                try {
+                    String line = varLines[i];
+                    
+                    // Validate line
+                    if (line == null) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "WARNING: Null variable line at index " + i + " for scope " + scope);
+                        continue;
+                    }
+                    
+                    // Check for end markers
+                    if (line.equals("END_" + scope)) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Found end marker for scope: " + scope);
+                        break;
+                    }
+                    
+                    // Parse variable line with validation
+                    String[] parts = line.split(":", 3);
+                    if (parts.length >= 3) {
+                        String name = parts[0];
+                        String type = parts[1];
+                        String value = parts[2];
+                        
+                        // Validate parsed parts
+                        if (name == null || name.trim().isEmpty()) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "WARNING: Invalid variable name in line: " + line);
+                            continue;
+                        }
+                        
+                        if (type == null) {
+                            type = "Unknown";
+                        }
+                        
+                        if (value == null) {
+                            value = "";
+                        }
+                        
+                        // Safely create variable entry
+                        try {
+                            String key = scope + "." + name.trim();
+                            HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name.trim(), type.trim(), value);
+                            variables.put(key, debugValue);
+                            
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Variable " + scope + ": " + name.trim() + " = " + value + " (" + type.trim() + ")");
+                        } catch (Exception e) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "ERROR: Failed to create variable entry for line: " + line + " - " + e.getMessage());
+                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                        }
+                    } else {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "WARNING: Malformed variable line (expected 3 parts, got " + parts.length + "): " + line);
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "ERROR: Exception processing variable line " + i + " for scope " + scope + ": " + e.getMessage());
+                    HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                    // Continue processing other lines despite this error
+                }
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Finished processing variables for scope: " + scope + " (total variables: " + variables.size() + ")");
+                
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "CRITICAL ERROR: Exception in handleVariables for scope " + scope + ": " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+            
+            // Don't let variable processing errors crash the entire debug session
+            // Continue with partial variable information
         }
         
         // If we're waiting for variables, check if we've received all expected scopes
-        if (waitingForVariables) {
-            variablesReceived++;
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                "Received " + scope + " variables (" + variablesReceived + "/" + variablesExpected + ")");
-            
-            if (variablesReceived >= variablesExpected) {
-                // All variables received, now notify position reached
-                waitingForVariables = false;
-                variablesReceived = 0;
+        // Wrap in try-catch to prevent crashes during variable completion handling
+        try {
+            if (waitingForVariables) {
+                variablesReceived++;
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Received " + scope + " variables (" + variablesReceived + "/" + variablesExpected + ")");
                 
-                if (pendingStopPosition != null) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                        "All variables received, notifying position reached");
+                if (variablesReceived >= variablesExpected) {
+                    // All variables received, now notify position reached
+                    waitingForVariables = false;
+                    variablesReceived = 0;
                     
-                    // Capture values before clearing them
-                    final String stopFile = pendingStopFile;
-                    final int stopLine = pendingStopLine;
-                    final XSourcePosition stopPosition = pendingStopPosition;
-                    
-                    // Check if this is a conditional breakpoint that needs evaluation
-                    if (conditionalBreakpointFile != null && conditionalBreakpointLine != -1) {
-                        if (stopFile.equals(conditionalBreakpointFile) && stopLine == conditionalBreakpointLine) {
-                            HarbourLogger.log(project, "HarbourDebugger", 
-                                "NORMAL DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
-                            HarbourLogger.log(project, "HarbourDebugger", 
-                                "NORMAL DEBUG: Current variables: " + variables);
-                            
-                            boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
-                            HarbourLogger.log(project, "HarbourDebugger", 
-                                "NORMAL DEBUG: shouldStopAtConditionalBreakpoint returned: " + shouldStop);
-                            
-                            if (!shouldStop) {
-                                // Condition not met, continue execution without notifying position
-                                HarbourLogger.log(project, "HarbourDebugger", 
-                                    "Breakpoint condition not met at " + stopFile + ":" + stopLine + ", continuing");
-                                
-                                // Clear pending and conditional info
-                                pendingStopFile = null;
-                                pendingStopLine = -1;
-                                pendingStopPosition = null;
+                    if (pendingStopPosition != null) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "All variables received, notifying position reached");
+                        
+                        // Capture values before clearing them - with null checks
+                        final String stopFile = pendingStopFile;
+                        final int stopLine = pendingStopLine;
+                        final XSourcePosition stopPosition = pendingStopPosition;
+                        
+                        // Check if this is a conditional breakpoint that needs evaluation
+                        try {
+                            if (conditionalBreakpointFile != null && conditionalBreakpointLine != -1) {
+                                if (stopFile != null && stopFile.equals(conditionalBreakpointFile) && stopLine == conditionalBreakpointLine) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "NORMAL DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "NORMAL DEBUG: Current variables: " + variables);
+                                    
+                                    boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "NORMAL DEBUG: shouldStopAtConditionalBreakpoint returned: " + shouldStop);
+                                    
+                                    if (!shouldStop) {
+                                        // Condition not met, continue execution without notifying position
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Breakpoint condition not met at " + stopFile + ":" + stopLine + ", continuing");
+                                        
+                                        // Clear pending and conditional info
+                                        pendingStopFile = null;
+                                        pendingStopLine = -1;
+                                        pendingStopPosition = null;
+                                        conditionalBreakpointFile = null;
+                                        conditionalBreakpointLine = -1;
+                                        
+                                        // Continue execution
+                                        sendCommand("GO");
+                                        return;
+                                    } else {
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Breakpoint condition met at " + stopFile + ":" + stopLine + ", stopping");
+                                    }
+                                }
+                                // Clear conditional breakpoint info
                                 conditionalBreakpointFile = null;
                                 conditionalBreakpointLine = -1;
-                                
-                                // Continue execution
-                                sendCommand("GO");
-                                return;
-                            } else {
-                                HarbourLogger.log(project, "HarbourDebugger", 
-                                    "Breakpoint condition met at " + stopFile + ":" + stopLine + ", stopping");
                             }
-                        }
-                        // Clear conditional breakpoint info
-                        conditionalBreakpointFile = null;
-                        conditionalBreakpointLine = -1;
-                    }
-                    
-                    // Clear pending info BEFORE invokeLater to prevent race conditions
-                    pendingStopFile = null;
-                    pendingStopLine = -1;
-                    pendingStopPosition = null;
-                    
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        if (getSession() == null) {
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null!");
-                            return;
+                        } catch (Exception e) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "ERROR: Exception during conditional breakpoint evaluation: " + e.getMessage());
+                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                            // Continue with normal debugging despite conditional breakpoint error
                         }
                         
-                        HarbourDebuggerSuspendContext suspendContext = 
-                                new HarbourDebuggerSuspendContext(this, 
-                                    stopFile != null ? stopFile : "Unknown", 
-                                    stopLine, 
-                                    stopPosition);
+                        // Clear pending info BEFORE invokeLater to prevent race conditions
+                        pendingStopFile = null;
+                        pendingStopLine = -1;
+                        pendingStopPosition = null;
                         
+                        // Safely schedule UI update with comprehensive error handling
+                        try {
+                            ApplicationManager.getApplication().invokeLater(() -> {
+                                try {
+                                    if (getSession() == null) {
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null!");
+                                        return;
+                                    }
+                                    
+                                    // Validate parameters before creating suspend context
+                                    String safeStopFile = stopFile != null ? stopFile : "Unknown";
+                                    int safeStopLine = stopLine > 0 ? stopLine : 1;
+                                    
+                                    HarbourDebuggerSuspendContext suspendContext = 
+                                            new HarbourDebuggerSuspendContext(this, safeStopFile, safeStopLine, stopPosition);
+                                    
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Calling positionReached for " + safeStopFile + ":" + safeStopLine);
+                                    
+                                    // This is the critical call that may crash PyCharm
+                                    // Wrap in additional try-catch to detect crashes
+                                    try {
+                                        getSession().positionReached(suspendContext);
+                                    } catch (Exception positionReachedException) {
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "CRASH DETECTED: Exception during positionReached: " + positionReachedException.getMessage());
+                                        HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", positionReachedException);
+                                        
+                                        // This might be a PyCharm crash - attempt recovery
+                                        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                                            try {
+                                                Thread.sleep(1000); // Brief delay before recovery attempt
+                                                if (isSessionCrashed()) {
+                                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                        "Session crash confirmed - initiating recovery");
+                                                    initiateCrashRecovery();
+                                                }
+                                            } catch (Exception recoveryException) {
+                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                    "Error during crash detection/recovery: " + recoveryException.getMessage());
+                                            }
+                                        });
+                                        
+                                        throw positionReachedException; // Re-throw to maintain original behavior
+                                    }
+                                    
+                                    // Notify user that debugger has stopped
+                                    if (stopFile != null) {
+                                        try {
+                                            HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
+                                        } catch (Exception e) {
+                                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                "ERROR: Exception during breakpoint notification: " + e.getMessage());
+                                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                                        }
+                                    }
+                                    
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended, waiting for user action");
+                                    
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "CRITICAL ERROR: Exception in UI thread during positionReached: " + e.getMessage());
+                                    HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                                    
+                                    // Try to continue debugging despite UI error
+                                    try {
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Attempting to continue execution after UI error");
+                                        sendCommand("GO");
+                                    } catch (Exception continueError) {
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Failed to continue after UI error: " + continueError.getMessage());
+                                    }
+                                }
+                            });
+                        } catch (Exception e) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "ERROR: Exception scheduling UI update: " + e.getMessage());
+                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                        }
+                    } else {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                            "Calling positionReached for " + (stopFile != null ? stopFile : "Unknown") + 
-                            ":" + stopLine);
-                        
-                        getSession().positionReached(suspendContext);
-                        
-                        // Notify user that debugger has stopped
-                        if (stopFile != null) {
-                            HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
-                        }
-                        
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended, waiting for user action");
-                    });
+                            "WARNING: All variables received but no pending stop position");
+                    }
                 }
             }
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "CRITICAL ERROR: Exception in variable completion handling: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+            
+            // Reset state to prevent getting stuck
+            waitingForVariables = false;
+            variablesReceived = 0;
+            pendingStopFile = null;
+            pendingStopLine = -1;
+            pendingStopPosition = null;
         }
     }
     
@@ -692,6 +943,129 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         return null;
     }
+    
+    /**
+     * Crash recovery mechanism to restart debug server after PyCharm crashes
+     */
+    private void initiateCrashRecovery() {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Initiating crash recovery sequence");
+        
+        try {
+            // Close existing connection cleanly
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Error closing connection during crash recovery: " + e.getMessage());
+                }
+            }
+            
+            // Reset debug state
+            waitingForVariables = false;
+            variablesReceived = 0;
+            pendingStopFile = null;
+            pendingStopLine = -1;
+            pendingStopPosition = null;
+            conditionalBreakpointFile = null;
+            conditionalBreakpointLine = -1;
+            debuggerState = DebuggerState.DISCONNECTED;
+            isConnected = false;
+            
+            // Clear variables to prevent stale data
+            variables.clear();
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug state reset for crash recovery");
+            
+            // Schedule restart with delay to allow cleanup
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                try {
+                    Thread.sleep(2000); // Wait 2 seconds for cleanup
+                    
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Attempting to restart debug server connection");
+                    
+                    // Since connection is final, we'll try to restart the existing connection
+                    // First close it cleanly, then restart it
+                    try {
+                        boolean started = connection.start(this::handleDebugMessage);
+                        if (started) {
+                            isConnected = true;
+                            debuggerState = DebuggerState.RUNNING;
+                            connectionStartTime = System.currentTimeMillis();
+                            
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Debug server successfully restarted after crash recovery");
+                            
+                            // Send initial setup commands
+                            sendInitialBreakpoints();
+                            
+                            // Notify user about successful recovery
+                            ApplicationManager.getApplication().invokeLater(() -> {
+                                try {
+                                    ConsoleView console = (ConsoleView) executionResult.getExecutionConsole();
+                                    if (console != null) {
+                                        console.print("Debug server recovered and restarted successfully.\n", 
+                                            ConsoleViewContentType.SYSTEM_OUTPUT);
+                                    }
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Error notifying user about recovery: " + e.getMessage());
+                                }
+                            });
+                            
+                        } else {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Failed to restart debug server during crash recovery");
+                        }
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Exception during debug server restart: " + e.getMessage());
+                        HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                    }
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Crash recovery interrupted");
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Unexpected error during crash recovery: " + e.getMessage());
+                    HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+                }
+            });
+            
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "CRITICAL ERROR: Exception in crash recovery initiation: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
+        }
+    }
+    
+    /**
+     * Check if the debug session appears to have crashed and needs recovery
+     */
+    private boolean isSessionCrashed() {
+        try {
+            // Check if we lost connection unexpectedly
+            if (connection != null && !connection.isConnected() && isConnected) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Connection lost detected");
+                return true;
+            }
+            
+            // Check if the debug session is null (PyCharm crashed)
+            if (getSession() == null && isConnected) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session is null - PyCharm may have crashed");
+                return true;
+            }
+            
+            return false;
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Error checking session crash status: " + e.getMessage());
+            // If we can't check, assume we need recovery
+            return true;
+        }
+    }
+    
     
     @NotNull
     @Override
