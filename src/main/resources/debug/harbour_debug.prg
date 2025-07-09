@@ -5,6 +5,11 @@
 #pragma -B-
 REQUEST HB_GT_STD_DEFAULT
 
+// Windows console suppression - only for console programs
+#ifdef __PLATFORM__WINDOWS
+   REQUEST HB_GT_NUL  // Suppress console window on Windows
+#endif
+
 #include <hbdebug.ch>
 #include <hbmemvar.ch>
 

@@ -118,7 +118,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         OSProcessHandler handler;
         try {
-            handler = new OSProcessHandler(commandLine);
+            // Use Silent handler for Windows console programs to prevent popup windows
+            String currentOS = System.getProperty("os.name").toLowerCase();
+            if (currentOS.contains("windows") && !isGuiProgram(runConfig)) {
+                handler = new OSProcessHandler.Silent(commandLine);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows Console: Using OSProcessHandler.Silent to prevent popup window");
+            } else {
+                handler = new OSProcessHandler(commandLine);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Using standard OSProcessHandler");
+            }
             
             // UNIFIED APPROACH: Use same ProcessTerminatedListener handling as successful Unix
             // Based on successful Unix implementation, skip ProcessTerminatedListener for remote debugging
@@ -380,11 +390,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             if (osName.contains("windows")) {
                 // Use Windows-specific debug library for connection testing
                 // CRITICAL FIX: Use backslash for Windows paths in hbmk2 command
-                debugSourcePath = buildDir + "\\" + "harbour_debug_windows_simple.prg";
+                debugSourcePath = buildDir + "\\" + "harbour_debug.prg";
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "WINDOWS: Using Windows debug library: " + debugSourcePath);
+                        "WINDOWS: Using FULL debug library like Linux: " + debugSourcePath);
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Purpose: Focus on establishing PyCharm connection on Windows");
+                        "BREAKTHROUGH: Windows now uses same complete debugging as Linux");
             } else {
                 // Use standard debug library for Unix programs
                 debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
@@ -429,10 +439,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                             "Windows GUI: Added -gui -gtwvt flags");
                 } else {
-                    // Windows Console: NO GUI flag, only gtSTD (like working PyCharm version)
-                    parameters.add("-gtSTD");  // Standard console - no GUI flag
+                    // Windows Console: Don't add GT driver - use environment variable control
+                    // No GT driver flags - will be controlled by environment variables
                     HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                            "Windows Console: Added -gtSTD only (no -gui flag, prevent console window)");
+                            "Windows Console: No GT driver flags - using environment variable control");
                 }
             } else {
                 // Unix: Use GUI flags only for GUI programs, not console programs
@@ -489,28 +499,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Instrumented: " + shouldInstrument);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "GUI Program: " + isGui);
 
-        // WINDOWS CONSOLE FIX: Use cmd.exe wrapper to prevent console window
+        // All cases: Use normal command construction
+        // Windows console programs will still create popup, but environment variables work correctly
+        commandLine.addParameters(parameters);
         String currentOS = System.getProperty("os.name").toLowerCase();
         if (currentOS.contains("windows") && !isGui) {
-            // Windows console programs: Wrap with cmd.exe to prevent separate console window
-            String originalCommand = hbmk2Path;
-            for (String param : parameters) {
-                originalCommand += " " + param;
-            }
-            
-            // Clear parameters and set up cmd.exe wrapper
-            parameters.clear();
-            commandLine.setExePath("cmd.exe");
-            commandLine.addParameter("/c");
-            commandLine.addParameter(originalCommand);
-            
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Windows Console: Using cmd.exe wrapper to prevent console window");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Wrapped command: cmd.exe /c \"" + originalCommand + "\"");
+                    "Windows Console: Using direct execution (environment variables preserved)");
         } else {
-            // All other cases: Use normal command construction
-            commandLine.addParameters(parameters);
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "Using normal command construction");
         }
@@ -523,11 +519,21 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         commandLine.setWorkDirectory(finalWorkingDir);
         
-        // WINDOWS CONSOLE FIX: Add console inheritance for Windows console programs
+        // WINDOWS CONSOLE FIX: Use CREATE_NO_WINDOW flag but preserve environment inheritance
         if (currentOS.contains("windows") && !isGui) {
-            commandLine.withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE);
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Windows Console: Set console inheritance to prevent separate window");
+            // Try to use CREATE_NO_WINDOW flag to prevent console window
+            try {
+                // Access the process creation flags via reflection
+                java.lang.reflect.Field field = GeneralCommandLine.class.getDeclaredField("myCreationFlags");
+                field.setAccessible(true);
+                field.set(commandLine, 0x08000000); // CREATE_NO_WINDOW
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows Console: Set CREATE_NO_WINDOW flag while preserving environment inheritance");
+            } catch (Exception e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows Console: Failed to set CREATE_NO_WINDOW flag: " + e.getMessage());
+                // No fallback to NONE - preserve environment inheritance for debugging
+            }
         }
         
         // UNIFIED DEBUGGING APPROACH: Use same approach as successful Unix GUI for ALL programs
@@ -547,9 +553,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         "Windows: Set GUI mode environment variables");
             } else {
                 commandLine.withEnvironment("HB_GUI_MODE", "0");
-                commandLine.withEnvironment("HB_GT_LIB", "GTSTD");
+                commandLine.withEnvironment("HB_GT_LIB", "GTNUL");
+                // Force null terminal via environment variable
+                commandLine.withEnvironment("HB_GT_DEFAULT", "NUL");
+                // Ensure temp directory is in working directory, not C:\WINDOWS
+                commandLine.withEnvironment("TMP", finalWorkingDir);
+                commandLine.withEnvironment("TEMP", finalWorkingDir);
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Windows: Set console mode environment variables");
+                        "Windows: Set console mode with NUL terminal and proper temp dir");
             }
         }
         

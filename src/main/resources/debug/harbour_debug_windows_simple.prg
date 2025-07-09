@@ -1,8 +1,11 @@
 // Windows Debug Handler - Based on Working Unix Version
 // Complete implementation following the successful Unix protocol
-// VERSION 1.0.286 - CHR34-FIX
+// VERSION 1.0.291 - CONSOLE WINDOW FIX
 
 #pragma -B-
+
+// Suppress console window for Windows console programs
+REQUEST HB_GT_NUL
 
 // Completely self-contained debug library - no external includes
 // All constants defined directly to avoid any include path issues
@@ -89,7 +92,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    LOCAL oDebugInfo
    
    // Debug every entry for troubleshooting - logged to file only
-   ? "=== __dbgEntry v1.0.286 CHR34-FIX ==="
+   ? "=== __dbgEntry v1.0.290 CHR34-FIX ==="
    ? "nMode:", nMode, "HB_REMOTE_DEBUG:", hb_GetEnv("HB_REMOTE_DEBUG")
    
    // Only process if HB_REMOTE_DEBUG is set
@@ -475,9 +478,9 @@ INIT PROCEDURE __InitWindowsDebugger()
    // FORCE A UNIQUE MARKER FILE TO PROVE THIS VERSION IS RUNNING
    hLog := FCreate("VERSION_286_CHR34-FIX.txt", 0)
    IF hLog != -1
-      FWrite(hLog, "=== VERSION 1.0.286 CHR34-FIX DEBUG LIBRARY LOADED ===" + Chr(13) + Chr(10))
+      FWrite(hLog, "=== VERSION 1.0.290 CHR34-FIX DEBUG LIBRARY LOADED ===" + Chr(13) + Chr(10))
       FWrite(hLog, "Time: " + Time() + " Date: " + DToC(Date()) + Chr(13) + Chr(10))
-      FWrite(hLog, "This file proves v1.0.286 CHR34-FIX debug library executed" + Chr(13) + Chr(10))
+      FWrite(hLog, "This file proves v1.0.290 CHR34-FIX debug library executed" + Chr(13) + Chr(10))
       FWrite(hLog, "HB_REMOTE_DEBUG: " + hb_GetEnv("HB_REMOTE_DEBUG") + Chr(13) + Chr(10))
       FWrite(hLog, "HB_DBG_PATH: " + hb_GetEnv("HB_DBG_PATH") + Chr(13) + Chr(10))
       FClose(hLog)
@@ -486,7 +489,7 @@ INIT PROCEDURE __InitWindowsDebugger()
    // Create debug log file for troubleshooting  
    hLog := FCreate("harbour_debug.log", 0)
    IF hLog != -1
-      FWrite(hLog, "=== Windows Debugger INIT v1.0.286 CHR34-FIX ===" + Chr(13) + Chr(10))
+      FWrite(hLog, "=== Windows Debugger INIT v1.0.290 CHR34-FIX ===" + Chr(13) + Chr(10))
       FWrite(hLog, "HB_REMOTE_DEBUG: " + hb_GetEnv("HB_REMOTE_DEBUG") + Chr(13) + Chr(10))
       FWrite(hLog, "HB_DBG_PATH: " + hb_GetEnv("HB_DBG_PATH") + Chr(13) + Chr(10))
    ENDIF
