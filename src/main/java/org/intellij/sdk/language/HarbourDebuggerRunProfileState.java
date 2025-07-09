@@ -435,11 +435,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                             "Windows Console: Added -gtSTD only (no -gui flag, prevent console window)");
                 }
             } else {
-                // Unix: Keep successful unified approach
-                parameters.add("-gui");
-                parameters.add("-gtxwc");  // X Window Console - proven successful on Unix
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Unix: Added -gui -gtxwc flags for ALL programs");
+                // Unix: Use GUI flags only for GUI programs, not console programs
+                if (isGui) {
+                    parameters.add("-gui");
+                    parameters.add("-gtxwc");  // X Window Console for GUI programs
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Unix GUI: Added -gui -gtxwc flags");
+                } else {
+                    parameters.add("-gtSTD");  // Standard console output
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Unix Console: Added -gtSTD only (no GUI flags)");
+                }
             }
             
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
@@ -591,17 +597,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 }
             }
             
-            // Check filename to determine program type
-            String fileName = new File(sourceFile).getName().toLowerCase();
-            if (fileName.contains("gui") || fileName.contains("window") || fileName.contains("dialog")) {
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "GUI program detected by filename: " + fileName);
-                return true;
-            }
-            
-            // Default for standalone .prg files without GUI indicators: console program
+            // Default for standalone .prg files: console program
+            // GUI detection only from compiler options or .hbp file contents, NOT filename
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Standalone .prg file without GUI indicators - treating as console program");
+                    "Standalone .prg file - treating as console program (no GUI flags in compiler options)");
             return false;
         }
     }
