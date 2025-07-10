@@ -279,6 +279,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             workingDir = sourceFile.getParent();
         }
         
+        // RESTART FIX: Clean up any running processes and executables before compilation
+        cleanupExecutableBeforeCompilation(commandLine);
+        terminateRunningProcesses();
+        
         // Copy debug libraries to build directory before compilation
         copyDebugLibrary(workingDir);
         
@@ -810,6 +814,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (StringUtil.isEmpty(exePath)) {
             throw new ExecutionException("Executable path is not specified");
         }
+
+        // RESTART FIX: Terminate any running instances before starting
+        terminateRunningProcesses();
 
         commandLine.setExePath(exePath);
 
@@ -1352,6 +1359,200 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "VM-based debugging - instrumentation disabled");
         return false;
+    }
+    
+    /**
+     * Clean up executable files before compilation to prevent "Permission denied" errors
+     */
+    private void cleanupExecutableBeforeCompilation(GeneralCommandLine commandLine) {
+        try {
+            String workingDir = commandLine.getWorkDirectory() != null ? 
+                commandLine.getWorkDirectory().getAbsolutePath() : runConfig.getWorkingDirectory();
+            
+            if (workingDir == null) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "cleanupExecutableBeforeCompilation: No working directory, skipping cleanup");
+                return;
+            }
+            
+            // Determine executable name
+            String sourceFile = runConfig.getSourceFile();
+            String executableName;
+            
+            if (sourceFile.endsWith(".hbp")) {
+                executableName = new File(sourceFile).getName().replace(".hbp", "");
+            } else {
+                executableName = new File(sourceFile).getName().replace(".prg", "");
+            }
+            
+            String osName = System.getProperty("os.name").toLowerCase();
+            String[] extensions;
+            
+            if (osName.contains("windows")) {
+                extensions = new String[]{".exe", ""};
+            } else {
+                extensions = new String[]{"", ".exe"};
+            }
+            
+            // Try to delete all possible executable files
+            for (String ext : extensions) {
+                File execFile = new File(workingDir, executableName + ext);
+                if (execFile.exists()) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Attempting to delete executable: " + execFile.getAbsolutePath());
+                    
+                    if (!execFile.delete()) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Failed to delete executable, attempting force cleanup: " + execFile.getAbsolutePath());
+                        
+                        // If delete fails, try to kill processes using it
+                        forceCleanupExecutable(execFile.getAbsolutePath());
+                        
+                        // Try delete again after cleanup
+                        Thread.sleep(500);
+                        if (execFile.delete()) {
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                "Successfully deleted executable after force cleanup");
+                        }
+                    } else {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Successfully deleted executable: " + execFile.getAbsolutePath());
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Error in cleanupExecutableBeforeCompilation: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Force cleanup of an executable file by killing processes using it
+     */
+    private void forceCleanupExecutable(String executablePath) {
+        try {
+            String osName = System.getProperty("os.name").toLowerCase();
+            ProcessBuilder pb;
+            
+            if (osName.contains("windows")) {
+                // Windows: Use handle.exe or wmic to find and kill processes
+                String fileName = new File(executablePath).getName();
+                pb = new ProcessBuilder("cmd", "/c", 
+                    "taskkill /f /im \"" + fileName + "\"");
+            } else {
+                // Unix/Linux: Use fuser to kill processes using the file
+                pb = new ProcessBuilder("bash", "-c", 
+                    "fuser -k \"" + executablePath + "\" 2>/dev/null || true");
+            }
+            
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            
+            if (finished) {
+                int exitCode = process.exitValue();
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Force cleanup executable finished with exit code: " + exitCode);
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Force cleanup executable timed out");
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Error in forceCleanupExecutable: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Terminate all running Harbour processes
+     */
+    private void terminateRunningProcesses() {
+        try {
+            String osName = System.getProperty("os.name").toLowerCase();
+            
+            // Get the base name of our program
+            String sourceFile = runConfig.getSourceFile();
+            String programName;
+            
+            if (sourceFile.endsWith(".hbp")) {
+                programName = new File(sourceFile).getName().replace(".hbp", "");
+            } else {
+                programName = new File(sourceFile).getName().replace(".prg", "");
+            }
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Terminating any running instances of: " + programName);
+            
+            ProcessBuilder pb;
+            
+            if (osName.contains("windows")) {
+                // Windows: Kill by image name
+                String[] commands = {
+                    "taskkill /f /im \"" + programName + ".exe\" 2>nul",
+                    "taskkill /f /im \"" + programName + "\" 2>nul"
+                };
+                
+                for (String cmd : commands) {
+                    pb = new ProcessBuilder("cmd", "/c", cmd);
+                    executeKillCommand(pb, "Windows taskkill");
+                }
+            } else {
+                // Unix/Linux: Kill by process name
+                String[] commands = {
+                    "pkill -f \"" + programName + "\" 2>/dev/null || true",
+                    "killall \"" + programName + "\" 2>/dev/null || true"
+                };
+                
+                for (String cmd : commands) {
+                    pb = new ProcessBuilder("bash", "-c", cmd);
+                    executeKillCommand(pb, "Unix kill");
+                }
+            }
+            
+            // Also kill any harbour_debug processes that might be hanging
+            if (osName.contains("windows")) {
+                pb = new ProcessBuilder("cmd", "/c", "taskkill /f /im harbour_debug.exe 2>nul");
+                executeKillCommand(pb, "harbour_debug cleanup");
+            } else {
+                pb = new ProcessBuilder("bash", "-c", "pkill -f harbour_debug 2>/dev/null || true");
+                executeKillCommand(pb, "harbour_debug cleanup");
+            }
+            
+            // Give processes time to terminate
+            Thread.sleep(500);
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Error in terminateRunningProcesses: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Execute a kill command and log the result
+     */
+    private void executeKillCommand(ProcessBuilder pb, String description) {
+        try {
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            
+            if (finished) {
+                int exitCode = process.exitValue();
+                if (exitCode == 0) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        description + " succeeded");
+                } else {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        description + " completed with exit code: " + exitCode);
+                }
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    description + " timed out");
+            }
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                description + " error: " + e.getMessage());
+        }
     }
 
 }
