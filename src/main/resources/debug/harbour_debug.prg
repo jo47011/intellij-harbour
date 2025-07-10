@@ -5,10 +5,9 @@
 #pragma -B-
 REQUEST HB_GT_STD_DEFAULT
 
-// Windows console suppression - only for console programs
-#ifdef __PLATFORM__WINDOWS
-   REQUEST HB_GT_NUL  // Suppress console window on Windows
-#endif
+// Windows console suppression - use environment variable control
+// The GT driver will be controlled via HB_GT_LIB environment variable
+// This allows flexibility without hardcoding the terminal type
 
 #include <hbdebug.ch>
 #include <hbmemvar.ch>

@@ -118,16 +118,39 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         OSProcessHandler handler;
         try {
-            // Use Silent handler for Windows console programs to prevent popup windows
             String currentOS = System.getProperty("os.name").toLowerCase();
-            if (currentOS.contains("windows") && !isGuiProgram(runConfig)) {
+            boolean isWindowsConsole = currentOS.contains("windows") && !isGuiProgram(runConfig);
+            
+            if (isWindowsConsole) {
+                // BREAKTHROUGH: Two-phase approach for Windows console programs
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows Console: BREAKTHROUGH - Starting two-phase compile/execute approach");
+                
+                // Phase 1: Compile only (no -run flag)
                 handler = new OSProcessHandler.Silent(commandLine);
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Windows Console: Using OSProcessHandler.Silent to prevent popup window");
+                        "Phase 1: Compiling with Windows subsystem to prevent popup");
+                
+                handler.startNotify();
+                
+                // Wait for compilation to complete
+                handler.waitFor();
+                int compileExitCode = handler.getExitCode();
+                
+                if (compileExitCode == 0) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Phase 1: Compilation successful - proceeding to Phase 2");
+                    
+                    // Phase 2: Execute the compiled executable with debugging
+                    return executeCompiledProgram(commandLine);
+                } else {
+                    throw new ExecutionException("Compilation failed with exit code: " + compileExitCode);
+                }
             } else {
+                // Normal execution for other platforms
                 handler = new OSProcessHandler(commandLine);
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Using standard OSProcessHandler");
+                        "Using standard OSProcessHandler for non-Windows console");
             }
             
             // UNIFIED APPROACH: Use same ProcessTerminatedListener handling as successful Unix
@@ -174,6 +197,68 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         }
         
         return handler;
+    }
+    
+    private OSProcessHandler executeCompiledProgram(GeneralCommandLine originalCommandLine) throws ExecutionException {
+        try {
+            // Phase 2: Create command to execute the compiled program
+            String workingDir = originalCommandLine.getWorkDirectory().getAbsolutePath();
+            String sourceFile = runConfig.getSourceFile();
+            
+            // Determine executable name
+            String executableName;
+            if (sourceFile.endsWith(".hbp")) {
+                // For .hbp projects, use the project name
+                executableName = new File(sourceFile).getName().replace(".hbp", ".exe");
+            } else {
+                // For .prg files, use the source name
+                executableName = new File(sourceFile).getName().replace(".prg", ".exe");
+            }
+            
+            String executablePath = new File(workingDir, executableName).getAbsolutePath();
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Phase 2: Executing compiled program: " + executablePath);
+            
+            // Create new command line for execution
+            GeneralCommandLine execCommandLine = new GeneralCommandLine();
+            execCommandLine.setExePath(executablePath);
+            execCommandLine.setWorkDirectory(workingDir);
+            
+            // Copy environment variables from original command
+            execCommandLine.getEnvironment().putAll(originalCommandLine.getEnvironment());
+            
+            // Add program arguments if any
+            if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
+                execCommandLine.addParameters(StringUtil.split(runConfig.getProgramArguments(), " "));
+            }
+            
+            // Use CREATE_NO_WINDOW flag to prevent popup
+            try {
+                java.lang.reflect.Field field = GeneralCommandLine.class.getDeclaredField("myCreationFlags");
+                field.setAccessible(true);
+                field.set(execCommandLine, 0x08000000); // CREATE_NO_WINDOW
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Phase 2: Set CREATE_NO_WINDOW flag for executable");
+            } catch (Exception e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Phase 2: Failed to set CREATE_NO_WINDOW flag: " + e.getMessage());
+            }
+            
+            // Create and start the execution process
+            OSProcessHandler execHandler = new OSProcessHandler.Silent(execCommandLine);
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Phase 2: BREAKTHROUGH - Executing with Windows subsystem, no popup expected");
+            
+            return execHandler;
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Phase 2: Failed to execute compiled program: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebugger", e);
+            throw new ExecutionException("Failed to execute compiled program: " + e.getMessage(), e);
+        }
     }
 
     private void compileAndRunHarbourProgram(GeneralCommandLine commandLine) throws ExecutionException {
@@ -382,12 +467,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Using relative target: " + relativeTarget + " (was: " + finalBuildTarget + ")");
         
+        // Get OS name once for use throughout the method
+        String currentOS = System.getProperty("os.name").toLowerCase();
+        
         // PLATFORM-SPECIFIC DEBUG LIBRARY: Use Windows-specific version for Windows
         if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
             String debugSourcePath;
-            String osName = System.getProperty("os.name").toLowerCase();
             
-            if (osName.contains("windows")) {
+            if (currentOS.contains("windows")) {
                 // Use Windows-specific debug library for connection testing
                 // CRITICAL FIX: Use backslash for Windows paths in hbmk2 command
                 debugSourcePath = buildDir + "\\" + "harbour_debug.prg";
@@ -407,13 +494,24 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             parameters.add(debugSourcePath);
         }
         
-        // UNIFIED APPROACH: ALL programs get same debug flags
+        // UNIFIED APPROACH: ALL programs get same debug flags (except -run for Windows console)
         parameters.add("-b");
-        parameters.add("-run");
+        
+        boolean isWindowsConsole = currentOS.contains("windows") && !isGui;
+        
+        if (!isWindowsConsole) {
+            parameters.add("-run");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Added -run flag for immediate execution");
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "BREAKTHROUGH: Skipping -run flag for Windows console - will execute separately");
+        }
+        
         parameters.add("-debug");
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "UNIFIED: Added debug flags for ALL programs: -b -run -debug");
+                "UNIFIED: Added debug flags for ALL programs: -b " + (isWindowsConsole ? "" : "-run ") + "-debug");
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Purpose: Enable debugging symbols and execution");
         
@@ -429,8 +527,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         // PLATFORM-SPECIFIC APPROACH: Different approach based on platform and program type
         if (!finalBuildTarget.endsWith(".hbp")) {
-            String osName = System.getProperty("os.name").toLowerCase();
-            if (osName.contains("windows")) {
+            if (currentOS.contains("windows")) {
                 // Windows: Different approach for GUI vs Console programs
                 if (isGui) {
                     // Windows GUI: Use GUI flags like Unix
@@ -439,10 +536,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                             "Windows GUI: Added -gui -gtwvt flags");
                 } else {
-                    // Windows Console: Don't add GT driver - use environment variable control
-                    // No GT driver flags - will be controlled by environment variables
+                    // Windows Console: Separate compile and execute to prevent popup
+                    // Don't add -run flag - we'll execute separately with CREATE_NO_WINDOW
+                    parameters.add("-gui");  // Force Windows subsystem to prevent console window
+                    parameters.add("-gtNUL"); // Suppress any console output
                     HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                            "Windows Console: No GT driver flags - using environment variable control");
+                            "Windows Console: BREAKTHROUGH - Using separate compile/execute with Windows subsystem");
                 }
             } else {
                 // Unix: Use GUI flags only for GUI programs, not console programs
@@ -502,7 +601,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // All cases: Use normal command construction
         // Windows console programs will still create popup, but environment variables work correctly
         commandLine.addParameters(parameters);
-        String currentOS = System.getProperty("os.name").toLowerCase();
         if (currentOS.contains("windows") && !isGui) {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "Windows Console: Using direct execution (environment variables preserved)");
@@ -568,13 +666,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // ALTD=BREAK triggers Harbour's internal debugger instead of PyCharm debugger
         
         // Add comprehensive logging for debugging analysis
-        String osName = System.getProperty("os.name").toLowerCase();
-        boolean isWindows = osName.contains("windows");
+        boolean isWindows = currentOS.contains("windows");
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "=== UNIFIED DEBUGGING APPROACH ===");
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Operating System: " + osName);
+                "Operating System: " + currentOS);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Platform: " + (isWindows ? "Windows" : "Unix/Linux"));
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
