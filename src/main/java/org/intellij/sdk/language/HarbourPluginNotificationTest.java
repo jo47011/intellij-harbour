@@ -41,8 +41,9 @@ public class HarbourPluginNotificationTest implements StartupActivity {
             System.err.println("Failed to write notification test log: " + e.getMessage());
         }
         
-        // Show notification to user
-        String message = "Harbour Plugin v1.0.272 loaded successfully on " + SystemInfo.getOsNameAndVersion();
+        // Show notification to user - use current version
+        String version = "1.0.310";
+        String message = "Harbour Plugin v" + version + " loaded successfully on " + SystemInfo.getOsNameAndVersion();
         Notification notification = NOTIFICATION_GROUP.createNotification(
             "Harbour Plugin Test",
             message,

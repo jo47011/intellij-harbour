@@ -4,8 +4,8 @@
 
 #pragma -B-
 
-// Suppress console window for Windows console programs
-REQUEST HB_GT_NUL
+// Use standard console output for Windows console programs (like Unix version)
+REQUEST HB_GT_STD_DEFAULT
 
 // Completely self-contained debug library - no external includes
 // All constants defined directly to avoid any include path issues
