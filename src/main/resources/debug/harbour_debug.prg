@@ -290,8 +290,8 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    
    lStopSent := IF(Empty(lStopSent), .F., lStopSent)
    
-   // Add error handling to CheckSocket
-   BEGIN SEQUENCE WITH {|err| CheckSocketErrorHandler(err) }
+   // Simple error handling to prevent crashes
+   BEGIN SEQUENCE
    
    // Create comprehensive trace log to identify GUI crash cause
    hLog := FOpen("debug_trace.log", 1)  // Open for writing, append mode
@@ -301,7 +301,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       FSeek(hLog, 0, 2)  // Seek to end for append
    ENDIF
    IF hLog != -1
-      FWrite(hLog, "=== CheckSocket ENTRY #" + AllTrim(Str(Seconds())) + " v1.0.353 TRACE ===" + CRLF)
+      FWrite(hLog, "=== CheckSocket ENTRY #" + Time() + " v1.0.357 TRACE ===" + CRLF)
       FWrite(hLog, "Time: " + Time() + " Date: " + DToC(Date()) + CRLF)
       FWrite(hLog, "lStopSent: " + IF(lStopSent, "TRUE", "FALSE") + CRLF)
       FWrite(hLog, "Current Function: " + ProcName(1) + " Line: " + AllTrim(Str(ProcLine(1))) + CRLF)
@@ -688,52 +688,6 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    END SEQUENCE
 RETURN
 
-// Error handler for CheckSocket operations
-STATIC PROCEDURE CheckSocketErrorHandler(oError)
-   LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL hErrorLog, i, cErrorMsg
-   
-   // Create detailed error log
-   hErrorLog := FCreate("checksocket_error.log", 0)
-   IF hErrorLog != -1
-      FWrite(hErrorLog, "=== CHECKSOCKET ERROR at " + Time() + " ===" + CRLF)
-      FWrite(hErrorLog, "Error: " + oError:Description + CRLF)
-      FWrite(hErrorLog, "Operation: " + oError:Operation + CRLF)
-      FWrite(hErrorLog, "Subsystem: " + AllTrim(Str(oError:SubSystem)) + CRLF)
-      FWrite(hErrorLog, "Error Code: " + AllTrim(Str(oError:GenCode)) + CRLF)
-      
-      // Generate stack trace
-      FWrite(hErrorLog, "=== STACK TRACE ===" + CRLF)
-      FOR i := 1 TO 20
-         IF !Empty(ProcName(i))
-            FWrite(hErrorLog, "  " + AllTrim(Str(i)) + ": " + ProcName(i) + "(" + AllTrim(Str(ProcLine(i))) + ") in " + ProcFile(i) + CRLF)
-         ELSE
-            EXIT
-         ENDIF
-      NEXT
-      FClose(hErrorLog)
-   ENDIF
-   
-   // Send error to PyCharm console if socket is available
-   IF !Empty(oDebugInfo["socket"])
-      cErrorMsg := "CHECKSOCKET ERROR: " + oError:Description + " at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ")"
-      hb_inetSend(oDebugInfo["socket"], "ERROR:" + cErrorMsg + CRLF)
-   ENDIF
-   
-   // Also log to debug trace
-   hErrorLog := FOpen("debug_trace.log", 1)
-   IF hErrorLog != -1
-      FSeek(hErrorLog, 0, 2)  // Append
-      FWrite(hErrorLog, "*** CHECKSOCKET ERROR: " + oError:Description + " ***" + CRLF)
-      FWrite(hErrorLog, "*** at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ") ***" + CRLF)
-      FClose(hErrorLog)
-   ENDIF
-   
-   // Clean up socket on error
-   oDebugInfo["socket"] := NIL
-   oDebugInfo["lRunning"] := .T.
-   
-RETURN
 
 // Send call stack
 STATIC PROCEDURE SendStack()
