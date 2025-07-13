@@ -83,7 +83,8 @@
         <!-- Plugin load test -->
         <applicationService serviceImplementation="org.intellij.sdk.language.HarbourPluginLoadTest"/>
         <applicationService serviceImplementation="org.intellij.sdk.language.HarbourMinimalTest"/>
-        <postStartupActivity implementation="org.intellij.sdk.language.HarbourPluginNotificationTest"/>
+        <!-- REMOVED: Version popup notification -->
+        <!-- <postStartupActivity implementation="org.intellij.sdk.language.HarbourPluginNotificationTest"/> -->
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerDiagnostics"/>
         
         <!-- Force debug server start for testing - DISABLED due to PyCharm crashes -->

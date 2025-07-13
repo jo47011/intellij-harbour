@@ -75,6 +75,9 @@ RETURN t_oDebugInfo
 PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    LOCAL i, tmp, j, vv, oDebugInfo, lAltDInvoked
 
+   // Suppress unused parameter warnings
+   HB_SYMBOL_UNUSED(uParam4)
+
    // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
 
    DO CASE
