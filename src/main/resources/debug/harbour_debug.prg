@@ -77,6 +77,10 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
 
    // Suppress unused parameter warnings
    HB_SYMBOL_UNUSED(uParam4)
+   HB_SYMBOL_UNUSED(vv)
+   
+   // Add error handling and stacktrace logging
+   BEGIN SEQUENCE WITH {|err| ErrorHandler(err, nMode, uParam1, uParam2, uParam3, uParam4) }
 
    // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
 
@@ -200,6 +204,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
             FOR j := 1 TO Len(uParam3[i,HB_DBG_CS_LOCALS])
                tmp := uParam3[i,HB_DBG_CS_LOCALS,j]
                vv := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+               HB_SYMBOL_UNUSED(vv)  // Used for debugging when needed
 //                ? "  Local " + AllTrim(Str(j)) + ": " + tmp[HB_DBG_VAR_NAME] + " (" + tmp[HB_DBG_VAR_TYPE] + ") = " + hb_CStr(vv)
             NEXT
          NEXT
@@ -222,6 +227,57 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
          oDebugInfo["socket"] := NIL
       ENDIF
    ENDCASE
+   
+   END SEQUENCE
+RETURN
+
+// Error handler for debug operations - logs to PyCharm console and files
+STATIC PROCEDURE ErrorHandler(oError, nMode, uParam1, uParam2, uParam3, uParam4)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL hErrorLog, i, cErrorMsg
+   
+   // Suppress unused parameter warnings
+   HB_SYMBOL_UNUSED(uParam1)
+   HB_SYMBOL_UNUSED(uParam2)
+   HB_SYMBOL_UNUSED(uParam3)
+   HB_SYMBOL_UNUSED(uParam4)
+   
+   // Create error log
+   hErrorLog := FCreate("debug_error.log", 0)
+   IF hErrorLog != -1
+      FWrite(hErrorLog, "=== DEBUG ERROR at " + Time() + " ===" + CRLF)
+      FWrite(hErrorLog, "Error: " + oError:Description + CRLF)
+      FWrite(hErrorLog, "Operation: " + oError:Operation + CRLF)
+      FWrite(hErrorLog, "Mode: " + AllTrim(Str(nMode)) + CRLF)
+      FWrite(hErrorLog, "Subsystem: " + AllTrim(Str(oError:SubSystem)) + CRLF)
+      FWrite(hErrorLog, "Error Code: " + AllTrim(Str(oError:GenCode)) + CRLF)
+      
+      // Generate stack trace
+      FWrite(hErrorLog, "=== STACK TRACE ===" + CRLF)
+      FOR i := 1 TO 20
+         IF !Empty(ProcName(i))
+            FWrite(hErrorLog, "  " + AllTrim(Str(i)) + ": " + ProcName(i) + "(" + AllTrim(Str(ProcLine(i))) + ") in " + ProcFile(i) + CRLF)
+         ELSE
+            EXIT
+         ENDIF
+      NEXT
+      FClose(hErrorLog)
+   ENDIF
+   
+   // Send error to PyCharm console if socket is available
+   IF !Empty(oDebugInfo["socket"])
+      cErrorMsg := "ERROR: " + oError:Description + " at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ")"
+      hb_inetSend(oDebugInfo["socket"], "ERROR:" + cErrorMsg + CRLF)
+   ENDIF
+   
+   // Also log to debug trace
+   hErrorLog := FOpen("debug_trace.log", 1)
+   IF hErrorLog != -1
+      FSeek(hErrorLog, 0, 2)  // Append
+      FWrite(hErrorLog, "*** CRITICAL ERROR: " + oError:Description + " ***" + CRLF)
+      FWrite(hErrorLog, "*** at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ") ***" + CRLF)
+      FClose(hErrorLog)
+   ENDIF
 RETURN
 
 // Check socket and process debug commands
@@ -229,18 +285,49 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL tmp, lNeedExit := .F.
    LOCAL cCurrentFile, nCurrentLine, aStack, i
+   LOCAL hLog  // Add detailed logging to trace GUI crash
+   LOCAL nLoopCount, nMaxLoops  // Prevent infinite loops that crash GUI
    
    lStopSent := IF(Empty(lStopSent), .F., lStopSent)
    
+   // Add error handling to CheckSocket
+   BEGIN SEQUENCE WITH {|err| CheckSocketErrorHandler(err) }
+   
+   // Create comprehensive trace log to identify GUI crash cause
+   hLog := FOpen("debug_trace.log", 1)  // Open for writing, append mode
+   IF hLog == -1
+      hLog := FCreate("debug_trace.log", 0)  // Create if doesn't exist
+   ELSE
+      FSeek(hLog, 0, 2)  // Seek to end for append
+   ENDIF
+   IF hLog != -1
+      FWrite(hLog, "=== CheckSocket ENTRY #" + AllTrim(Str(Seconds())) + " v1.0.353 TRACE ===" + CRLF)
+      FWrite(hLog, "Time: " + Time() + " Date: " + DToC(Date()) + CRLF)
+      FWrite(hLog, "lStopSent: " + IF(lStopSent, "TRUE", "FALSE") + CRLF)
+      FWrite(hLog, "Current Function: " + ProcName(1) + " Line: " + AllTrim(Str(ProcLine(1))) + CRLF)
+      FWrite(hLog, "Socket exists: " + IF(Empty(oDebugInfo["socket"]), "NO", "YES") + CRLF)
+      FWrite(hLog, "lRunning: " + IF(oDebugInfo["lRunning"], "TRUE", "FALSE") + CRLF)
+      FWrite(hLog, "timeCheckForDebug: " + AllTrim(Str(oDebugInfo["timeCheckForDebug"])) + CRLF)
+   ENDIF
+   
    // Try to connect if not connected
    IF Empty(oDebugInfo["socket"]) .AND. oDebugInfo["timeCheckForDebug"] <= 14
+      IF hLog != -1
+         FWrite(hLog, "ATTEMPTING CONNECTION - timeCheck: " + AllTrim(Str(oDebugInfo["timeCheckForDebug"])) + CRLF)
+      ENDIF
       hb_inetInit()
       oDebugInfo["socket"] := hb_inetCreate(140 - oDebugInfo["timeCheckForDebug"]*10)
       hb_inetConnect("127.0.0.1", DBG_PORT, oDebugInfo["socket"])
       
       IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
+         IF hLog != -1
+            FWrite(hLog, "CONNECTION FAILED - Error: " + AllTrim(Str(hb_inetErrorCode(oDebugInfo["socket"]))) + CRLF)
+         ENDIF
          tmp := "NO"
       ELSE
+         IF hLog != -1
+            FWrite(hLog, "CONNECTION SUCCESS - sending handshake" + CRLF)
+         ENDIF
          // Send handshake
          hb_inetSend(oDebugInfo["socket"], HB_ARGV(0) + CRLF + Str(__PIDNum()) + CRLF)
          
@@ -250,41 +337,88 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDDO
          
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
+         IF hLog != -1
+            FWrite(hLog, "HANDSHAKE RESPONSE: '" + tmp + "'" + CRLF)
+         ENDIF
       ENDIF
       
       IF tmp != "HELLO"
+         IF hLog != -1
+            FWrite(hLog, "HANDSHAKE FAILED - Expected HELLO, got: '" + tmp + "'" + CRLF)
+         ENDIF
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
-//          ? "Debugger connected on port", DBG_PORT
+         IF hLog != -1
+            FWrite(hLog, "HANDSHAKE SUCCESS - Debugger connected" + CRLF)
+         ENDIF
       ENDIF
    ENDIF
    
    IF Empty(oDebugInfo["socket"])
-      RETURN
+      IF hLog != -1
+         FWrite(hLog, "NO SOCKET - RETURNING" + CRLF)
+         FClose(hLog)
+      ENDIF
+      BREAK
    ENDIF
    
-   // Main command loop
-   DO WHILE .T.
+   IF hLog != -1
+      FWrite(hLog, "SOCKET AVAILABLE - ENTERING MAIN LOOP" + CRLF)
+   ENDIF
+   
+   // CRITICAL FIX v1.0.350: Add timeout to prevent GUI crashes from infinite loops
+   nLoopCount := 0
+   nMaxLoops := 1000  // Variables already declared at function start
+   
+   // Log timeout configuration
+   IF hLog != -1
+      FWrite(hLog, "Starting loop with timeout: " + AllTrim(Str(nMaxLoops)) + " iterations" + CRLF)
+   ENDIF
+   
+   // Main command loop with safety timeout
+   DO WHILE .T. .AND. nLoopCount < nMaxLoops
+      nLoopCount++
+      
+      IF hLog != -1 .AND. nLoopCount % 100 == 1  // Log every 100 iterations
+         FWrite(hLog, "MAIN LOOP iteration: " + AllTrim(Str(nLoopCount)) + CRLF)
+      ENDIF
+      
       IF Empty(oDebugInfo["socket"]) .OR. hb_inetErrorCode(oDebugInfo["socket"]) != 0
+         IF hLog != -1
+            FWrite(hLog, "SOCKET ERROR - ErrorCode: " + AllTrim(Str(hb_inetErrorCode(oDebugInfo["socket"]))) + CRLF)
+            FClose(hLog)
+         ENDIF
          oDebugInfo["socket"] := NIL
          oDebugInfo["lRunning"] := .T.
          oDebugInfo["aBreaks"] := {=>}
          oDebugInfo["maxLevel"] := NIL
-         RETURN
+         BREAK
       ENDIF
       
       DO WHILE hb_inetDataReady(oDebugInfo["socket"]) == 1
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
          
+         IF hLog != -1 .AND. !Empty(tmp)
+            FWrite(hLog, "RECEIVED COMMAND: '" + tmp + "'" + CRLF)
+         ENDIF
+         
          IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
+            IF hLog != -1
+               FWrite(hLog, "SOCKET ERROR IN COMMAND LOOP - ErrorCode: " + AllTrim(Str(hb_inetErrorCode(oDebugInfo["socket"]))) + CRLF)
+            ENDIF
             EXIT
          ENDIF
          
          IF !Empty(tmp)
-//             ? "DEBUG: Received command:", tmp
+            IF hLog != -1
+               FWrite(hLog, "PROCESSING COMMAND: '" + tmp + "'" + CRLF)
+            ENDIF
             DO CASE
                CASE tmp == "GO"
+                  IF hLog != -1
+                     FWrite(hLog, "GO COMMAND - Setting lRunning=TRUE, lNeedExit=TRUE" + CRLF)
+                  ENDIF
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
@@ -320,35 +454,92 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   SendStack()
                   
                CASE Left(tmp, 6) == "LOCALS"
-//                   ? "DEBUG: Processing LOCALS command:", tmp
+                  IF hLog != -1
+                     FWrite(hLog, "LOCALS COMMAND: '" + tmp + "'" + CRLF)
+                  ENDIF
                   IF ":" $ tmp
-//                      ? "DEBUG: Has colon, calling SendLocals with:", SubStr(tmp, 8)
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendLocals with: '" + SubStr(tmp, 8) + "'" + CRLF)
+                     ENDIF
                      SendLocals(SubStr(tmp, 8))  // LOCALS: = 7 chars, so 8 gets after colon
                   ELSE
-//                      ? "DEBUG: No colon, calling SendLocals with: 0"
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendLocals with: '0'" + CRLF)
+                     ENDIF
                      SendLocals("0")
+                  ENDIF
+                  IF hLog != -1
+                     FWrite(hLog, "SendLocals completed" + CRLF)
                   ENDIF
                   
                CASE Left(tmp, 7) == "STATICS"
+                  IF hLog != -1
+                     FWrite(hLog, "STATICS COMMAND: '" + tmp + "'" + CRLF)
+                  ENDIF
                   IF ":" $ tmp
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendStatics with: '" + SubStr(tmp, 8) + "'" + CRLF)
+                     ENDIF
                      SendStatics(SubStr(tmp, 8))  // STATICS: = 8 chars  
                   ELSE
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendStatics with: '0'" + CRLF)
+                     ENDIF
                      SendStatics("0")
+                  ENDIF
+                  IF hLog != -1
+                     FWrite(hLog, "SendStatics completed" + CRLF)
                   ENDIF
                   
                CASE Left(tmp, 8) == "PRIVATES"
+                  IF hLog != -1
+                     FWrite(hLog, "PRIVATES COMMAND: '" + tmp + "'" + CRLF)
+                  ENDIF
                   IF ":" $ tmp
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendPrivates with: '" + SubStr(tmp, 9) + "'" + CRLF)
+                     ENDIF
                      SendPrivates(SubStr(tmp, 9))  // PRIVATES: = 9 chars
                   ELSE
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendPrivates with: '0'" + CRLF)
+                     ENDIF
                      SendPrivates("0")
+                  ENDIF
+                  IF hLog != -1
+                     FWrite(hLog, "SendPrivates completed" + CRLF)
                   ENDIF
                   
                CASE Left(tmp, 7) == "PUBLICS"
+                  IF hLog != -1
+                     FWrite(hLog, "PUBLICS COMMAND: '" + tmp + "'" + CRLF)
+                  ENDIF
                   IF ":" $ tmp
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendPublics with: '" + SubStr(tmp, 8) + "'" + CRLF)
+                     ENDIF
                      SendPublics(SubStr(tmp, 8))  // PUBLICS: = 8 chars
                   ELSE
+                     IF hLog != -1
+                        FWrite(hLog, "Calling SendPublics with: '0'" + CRLF)
+                     ENDIF
                      SendPublics("0")
                   ENDIF
+                  IF hLog != -1
+                     FWrite(hLog, "SendPublics completed" + CRLF)
+                  ENDIF
+                  
+               CASE tmp == "BREAKPOINT"
+                  IF hLog != -1
+                     FWrite(hLog, "BREAKPOINT COMMAND - Acknowledgment only (breakpoints set separately)" + CRLF)
+                  ENDIF
+                  // BREAKPOINT command is just an acknowledgment - actual breakpoints come as ADDBREAK commands
+                  
+               CASE Left(tmp, 1) == "+" .OR. Left(tmp, 1) == "-"
+                  IF hLog != -1
+                     FWrite(hLog, "BREAKPOINT SET/REMOVE: '" + tmp + "'" + CRLF)
+                  ENDIF
+                  SetBreakpoint(tmp)
                   
                CASE Left(tmp, 8) == "ADDBREAK"
                   IF ":" $ tmp
@@ -360,13 +551,17 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["aBreaks"] := {=>}
                   oDebugInfo["maxLevel"] := NIL
-                  RETURN
+                  BREAK
             ENDCASE
          ENDIF
       ENDDO
       
       IF lNeedExit
-         RETURN
+         IF hLog != -1
+            FWrite(hLog, "lNeedExit=TRUE - EXITING CheckSocket" + CRLF)
+            FClose(hLog)
+         ENDIF
+         BREAK
       ENDIF
       
       // Check if we should stop
@@ -375,7 +570,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          IF oDebugInfo["lSingleStep"]
             // Check step-over level restrictions
             IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] > 0 .AND. oDebugInfo["__dbgEntryLevel"] > oDebugInfo["maxLevel"]
-               RETURN
+               BREAK
             ENDIF
             
             oDebugInfo["lSingleStep"] := .F.
@@ -468,9 +663,76 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          oDebugInfo["lInternalRun"] := .F.
       ELSE
          // Running or no socket - exit
-         RETURN
+         BREAK
       ENDIF
    ENDDO
+   
+   // CRITICAL FIX v1.0.350: Safety exit if loop limit exceeded 
+   IF nLoopCount >= nMaxLoops
+      IF hLog != -1
+         FWrite(hLog, "TIMEOUT REACHED - EMERGENCY EXIT after " + AllTrim(Str(nLoopCount)) + " iterations" + CRLF)
+         FWrite(hLog, "This prevents GUI crashes from infinite loops" + CRLF)
+         FClose(hLog)
+      ENDIF
+      // Emergency exit to prevent GUI crashes
+      oDebugInfo["socket"] := NIL
+      oDebugInfo["lRunning"] := .T.
+      oDebugInfo["aBreaks"] := {=>}
+   ELSE
+      IF hLog != -1
+         FWrite(hLog, "NORMAL EXIT from CheckSocket after " + AllTrim(Str(nLoopCount)) + " iterations" + CRLF)
+         FClose(hLog)
+      ENDIF
+   ENDIF
+   
+   END SEQUENCE
+RETURN
+
+// Error handler for CheckSocket operations
+STATIC PROCEDURE CheckSocketErrorHandler(oError)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL hErrorLog, i, cErrorMsg
+   
+   // Create detailed error log
+   hErrorLog := FCreate("checksocket_error.log", 0)
+   IF hErrorLog != -1
+      FWrite(hErrorLog, "=== CHECKSOCKET ERROR at " + Time() + " ===" + CRLF)
+      FWrite(hErrorLog, "Error: " + oError:Description + CRLF)
+      FWrite(hErrorLog, "Operation: " + oError:Operation + CRLF)
+      FWrite(hErrorLog, "Subsystem: " + AllTrim(Str(oError:SubSystem)) + CRLF)
+      FWrite(hErrorLog, "Error Code: " + AllTrim(Str(oError:GenCode)) + CRLF)
+      
+      // Generate stack trace
+      FWrite(hErrorLog, "=== STACK TRACE ===" + CRLF)
+      FOR i := 1 TO 20
+         IF !Empty(ProcName(i))
+            FWrite(hErrorLog, "  " + AllTrim(Str(i)) + ": " + ProcName(i) + "(" + AllTrim(Str(ProcLine(i))) + ") in " + ProcFile(i) + CRLF)
+         ELSE
+            EXIT
+         ENDIF
+      NEXT
+      FClose(hErrorLog)
+   ENDIF
+   
+   // Send error to PyCharm console if socket is available
+   IF !Empty(oDebugInfo["socket"])
+      cErrorMsg := "CHECKSOCKET ERROR: " + oError:Description + " at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ")"
+      hb_inetSend(oDebugInfo["socket"], "ERROR:" + cErrorMsg + CRLF)
+   ENDIF
+   
+   // Also log to debug trace
+   hErrorLog := FOpen("debug_trace.log", 1)
+   IF hErrorLog != -1
+      FSeek(hErrorLog, 0, 2)  // Append
+      FWrite(hErrorLog, "*** CHECKSOCKET ERROR: " + oError:Description + " ***" + CRLF)
+      FWrite(hErrorLog, "*** at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ") ***" + CRLF)
+      FClose(hErrorLog)
+   ENDIF
+   
+   // Clean up socket on error
+   oDebugInfo["socket"] := NIL
+   oDebugInfo["lRunning"] := .T.
+   
 RETURN
 
 // Send call stack
@@ -502,6 +764,19 @@ STATIC PROCEDURE SendLocals(cParams)
    LOCAL i, n, cName, xValue, cType, aInfo
    LOCAL l, nStackIndex
    LOCAL aVarData := {}
+   LOCAL hLog
+   
+   // Create trace log for SendLocals  
+   hLog := FOpen("sendlocals_trace.log", 1)  // Open for writing, append mode
+   IF hLog == -1
+      hLog := FCreate("sendlocals_trace.log", 0)  // Create if doesn't exist
+   ELSE
+      FSeek(hLog, 0, 2)  // Seek to end for append
+   ENDIF
+   IF hLog != -1
+      FWrite(hLog, "=== SendLocals ENTRY ===" + CRLF)
+      FWrite(hLog, "Time: " + Time() + " Params: '" + cParams + "'" + CRLF)
+   ENDIF
    
    // Parse parameters: level:start:count
    aParams := hb_ATokens(cParams, ":")
@@ -597,7 +872,11 @@ STATIC PROCEDURE SendLocals(cParams)
    ENDIF
    
    hb_inetSend(oDebugInfo["socket"], "END_LOCALS" + CRLF)
-//    ? "=== END SendLocals ==="
+   
+   IF hLog != -1
+      FWrite(hLog, "=== SendLocals EXIT ===" + CRLF)
+      FClose(hLog)
+   ENDIF
 RETURN
 
 // Send static variables - FIXED VERSION with active enumeration
@@ -1049,11 +1328,11 @@ INIT PROCEDURE __InitIntelliJDebugger()
 
    // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
    
-   // Force standard console output
-   Set( _SET_CONSOLE, .T. )
-   Set( _SET_ALTERNATE, .F. )
-   Set( _SET_DEVICE, "SCREEN" )
-   Set( _SET_BELL, .F. )
+   // CRITICAL FIX v1.0.349: Do NOT force console settings - interferes with main program I/O
+   // Set( _SET_CONSOLE, .T. )     // REMOVED - causes qout()/wait conflicts
+   // Set( _SET_ALTERNATE, .F. )   // REMOVED - causes qout()/wait conflicts  
+   // Set( _SET_DEVICE, "SCREEN" ) // REMOVED - causes qout()/wait conflicts
+   // Set( _SET_BELL, .F. )        // REMOVED - causes qout()/wait conflicts
    
    // Initialize debug info
    oDebugInfo := __DEBUGITEM()
@@ -1084,10 +1363,11 @@ PROCEDURE AltD()
    // Ensure debugger is initialized
    IF !t_oDebugInfo["lInitialized"]
       // Manual initialization since we can't call INIT procedure
-      Set( _SET_CONSOLE, .T. )
-      Set( _SET_ALTERNATE, .F. )
-      Set( _SET_DEVICE, "SCREEN" )
-      Set( _SET_BELL, .F. )  // Disable beep sounds
+      // CRITICAL FIX v1.0.349: Do NOT force console settings in AltD either
+      // Set( _SET_CONSOLE, .T. )     // REMOVED - causes qout()/wait conflicts
+      // Set( _SET_ALTERNATE, .F. )   // REMOVED - causes qout()/wait conflicts
+      // Set( _SET_DEVICE, "SCREEN" ) // REMOVED - causes qout()/wait conflicts
+      // Set( _SET_BELL, .F. )        // REMOVED - causes qout()/wait conflicts
       __dbgSetEntry()
       Set( _SET_DEBUG, .T. )
       t_oDebugInfo["lInitialized"] := .T.

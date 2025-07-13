@@ -185,17 +185,23 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                             // Determine executable name from build target
                             String buildTarget = runConfig.getSourceFile();
                             String exeName;
+                            String currentOS = System.getProperty("os.name").toLowerCase();
+                            String exeExtension = currentOS.contains("windows") ? ".exe" : "";
+                            
                             if (buildTarget.endsWith(".hbp")) {
                                 // For .hbp files, use the project name
                                 File hbpFile = new File(buildTarget);
                                 String projectName = hbpFile.getName().replace(".hbp", "");
-                                exeName = projectName + ".exe";
+                                exeName = projectName + exeExtension;
                             } else {
                                 // For .prg files, use the source name
                                 File sourceFile = new File(buildTarget);
                                 String sourceName = sourceFile.getName().replace(".prg", "");
-                                exeName = sourceName + ".exe";
+                                exeName = sourceName + exeExtension;
                             }
+                            
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                    "CRITICAL FIX v1.0.348: Using OS-appropriate executable extension: '" + exeExtension + "'");
                             
                             // Launch executable in original project directory (not hbmk2's working directory)
                             File projectDir = new File(originalWorkingDir);
