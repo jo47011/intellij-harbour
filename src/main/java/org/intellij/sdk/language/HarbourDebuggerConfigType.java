@@ -18,7 +18,7 @@ public class HarbourDebuggerConfigType implements ConfigurationType {
     @NotNull
     @Override
     public String getDisplayName() {
-        return "Harbour Debugger";
+        return "Harbour Application";
     }
 
     @Override
@@ -43,12 +43,12 @@ public class HarbourDebuggerConfigType implements ConfigurationType {
             @NotNull
             @Override
             public RunConfiguration createTemplateConfiguration(@NotNull Project project) {
-                return new HarbourDebuggerRunConfig(project, this, "Harbour Debug");
+                return new HarbourDebuggerRunConfig(project, this, "Harbour Application");
             }
 
             @Override
             public @NotNull String getId() {
-                return "Harbour Debugger Factory";
+                return "Harbour Application Factory";
             }
         }};
     }

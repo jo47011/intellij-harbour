@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.357</version>
+    <version>1.0.359</version>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
@@ -102,7 +102,7 @@
         <enterHandlerDelegate implementation="org.intellij.sdk.language.HarbourEnterHandler"/>
         
         <!-- Notification Group -->
-        <notificationGroup id="Harbour Debugger" displayType="BALLOON" isLogByDefault="true"/>
+        <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
     </extensions>
 
     <actions>
