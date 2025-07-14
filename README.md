@@ -168,6 +168,8 @@ RETURN
 
 - Debugger not showing static vars
 
+- compile / debug errors should be navigatable
+
 
 - making-of schreiben:
   - Erfahrung O1 Pro vs claude, evtl. als Tabelle

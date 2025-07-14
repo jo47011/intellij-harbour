@@ -336,6 +336,22 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             handleConsoleOutput(consoleOutput);
                         }
                         break;
+                        
+                    case "ERROR_MSG":
+                        if (parts.length >= 2) {
+                            // Handle runtime error messages from global error handler
+                            String errorMessage = command.substring(10); // Skip "ERROR_MSG:"
+                            handleErrorMessage(errorMessage);
+                        }
+                        break;
+                        
+                    case "ERROR_STACK":
+                        if (parts.length >= 2) {
+                            // Handle stack trace lines from global error handler
+                            String stackLine = command.substring(12); // Skip "ERROR_STACK:"
+                            handleErrorStackTrace(stackLine);
+                        }
+                        break;
                 }
             }
             return;
@@ -1767,6 +1783,42 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         return connection;
     }
     
+    /**
+     * TEST METHOD: Generate a realistic Harbour debugging error for console logging verification
+     * This simulates common debugging errors that could occur during real debugging sessions
+     */
+    public void generateTestHarbourError() {
+        try {
+            HarbourLogger.log(project, "HarbourDebugger", "=== TESTING HARBOUR ERROR LOGGING ===");
+            
+            // Simulate a common debugging error: file not found during source resolution
+            String testFileName = "NonExistentHarbourFile.prg";
+            Path testPath = Paths.get("/invalid/path/to/" + testFileName);
+            
+            HarbourLogger.log(project, "HarbourDebugger", "Attempting to resolve source file: " + testPath);
+            
+            // This will throw a realistic exception that could occur during debugging
+            List<String> lines = Files.readAllLines(testPath);
+            
+            // This code should never be reached
+            HarbourLogger.log(project, "HarbourDebugger", "Unexpectedly succeeded reading file: " + lines.size() + " lines");
+            
+        } catch (IOException e) {
+            // This is a realistic error that could occur during Harbour debugging
+            HarbourLogger.log(project, "HarbourDebugger", "ERROR: Failed to read Harbour source file during debugging");
+            HarbourLogger.log(project, "HarbourDebugger", "Error details: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebugger", e);
+            
+        } catch (Exception e) {
+            // Any other unexpected errors
+            HarbourLogger.log(project, "HarbourDebugger", "UNEXPECTED ERROR during Harbour debugging operation");
+            HarbourLogger.log(project, "HarbourDebugger", "Error details: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebugger", e);
+            
+        } finally {
+            HarbourLogger.log(project, "HarbourDebugger", "=== HARBOUR ERROR LOGGING TEST COMPLETED ===");
+        }
+    }
     @Override
     public Map<String, HarbourDebuggerValue> getVariables() {
         return variables;
@@ -1799,6 +1851,36 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         .replace("\\n", "\n")
                         .replace("\\t", "\t");
                 consoleView.print(processedOutput, ConsoleViewContentType.NORMAL_OUTPUT);
+            }
+        });
+    }
+    
+    /**
+     * Handle runtime error messages from global error handler
+     */
+    private void handleErrorMessage(String errorMessage) {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            ExecutionConsole console = getSession().getConsoleView();
+            if (console instanceof ConsoleView) {
+                ConsoleView consoleView = (ConsoleView) console;
+                // Display error with ERROR formatting (red text) - no duplicate logging
+                consoleView.print(errorMessage + "\n", ConsoleViewContentType.ERROR_OUTPUT);
+                // REMOVED: HarbourLogger.error() to prevent Java stack traces in console
+            }
+        });
+    }
+    
+    /**
+     * Handle stack trace lines from global error handler with clickable file references
+     */
+    private void handleErrorStackTrace(String stackLine) {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            ExecutionConsole console = getSession().getConsoleView();
+            if (console instanceof ConsoleView) {
+                ConsoleView consoleView = (ConsoleView) console;
+                // Display stack trace line - CompilerOutputFilter will make file references clickable
+                consoleView.print(stackLine + "\n", ConsoleViewContentType.ERROR_OUTPUT);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stack trace: " + stackLine);
             }
         });
     }

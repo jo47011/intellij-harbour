@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.359</version>
+    <version>1.0.384</version>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
@@ -118,6 +118,15 @@
         <action id="HarbourNextErrorAction" class="org.intellij.sdk.language.HarbourNextErrorAction"
                 text="Next Harbour Error" description="Go to next Harbour error">
             <add-to-group group-id="CodeMenu" anchor="last"/>
+        </action>
+
+        <!-- Test Error Logging Action -->
+        <action id="HarbourTestErrorAction" class="org.intellij.sdk.language.HarbourTestErrorAction"
+                text="Test Harbour Error Logging" description="Generate test Harbour error to verify console logging">
+            <add-to-group group-id="CodeMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift T"/>
         </action>
     </actions>
 </idea-plugin>

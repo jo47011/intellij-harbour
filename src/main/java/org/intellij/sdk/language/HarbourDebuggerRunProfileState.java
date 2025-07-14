@@ -1059,7 +1059,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     
                     for (String line : lines) {
                         line = line.trim();
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Processing line: " + line);
+                        // Removed flooding log message - was logging every HBP line
                         
                         // Look for .prg files (first one is typically the main)
                         if (line.endsWith(".prg") && !line.startsWith("#") && !line.startsWith("//")) {
@@ -1157,7 +1157,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 int line = bp.getSourcePosition().getLine() + 1;
                 String filePath = file.getPath();
                 
-                HarbourLogger.log(project, "HarbourDebugger", "  Checking breakpoint - file: " + fileName + ", path: " + filePath + ", line: " + line);
+                // Removed flooding log message - was logging every breakpoint check
                 HarbourLogger.log(project, "HarbourDebugger", "  Target file: " + targetPrgFile);
                 HarbourLogger.log(project, "HarbourDebugger", "  Init.cld directory: " + initCldFile.getParent());
 
@@ -1274,6 +1274,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         consoleBuilder.filters(new HarbourCompilerOutputFilter(env.getProject()));
         ConsoleView console = consoleBuilder.getConsole();
         console.attachToProcess(processHandler);
+        
+        // Set the console in HarbourLogger so all Harbour errors go to PyCharm console
+        HarbourLogger.setConsole(console);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled - Harbour errors will appear in PyCharm console", HarbourLogger.LogLevel.DEBUG);
+
+        // Re-enabled: File monitor needed for error display in PyCharm console
+        startHarbourErrorFileMonitor(console, env.getProject());
 
         // Print the exact command to the PyCharm console
         if (lastExecutedCommand != null) {
@@ -1664,6 +1671,80 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             HarbourLogger.logStackTrace("HarbourDebugger", e);
             return hbpFilePath; // Fallback to original
         }
+    }
+
+    /**
+     * Start error file monitor for Harbour runtime errors
+     */
+    private void startHarbourErrorFileMonitor(ConsoleView console, Project project) {
+        String workingDir = runConfig.getWorkingDirectory();
+        if (workingDir == null || workingDir.isEmpty()) {
+            File sourceFile = new File(runConfig.getSourceFile());
+            workingDir = sourceFile.getParent();
+        }
+        
+        final String errorFilePath = workingDir + File.separator + "pycharm_error.log";
+        final File errorFile = new File(errorFilePath);
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Starting error file monitor for: " + errorFilePath);
+        
+        // Start a background thread to monitor the error file
+        Thread errorMonitor = new Thread(() -> {
+            long lastModified = 0;
+            long lastSize = 0;
+            
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    if (errorFile.exists()) {
+                        long currentModified = errorFile.lastModified();
+                        long currentSize = errorFile.length();
+                        
+                        // Only read if file was modified and has new content
+                        if (currentModified > lastModified && currentSize > lastSize) {
+                            try {
+                                String content = new String(java.nio.file.Files.readAllBytes(errorFile.toPath()));
+                                if (!content.trim().isEmpty()) {
+                                    // Send error to PyCharm console
+                                    console.print("[Harbour Runtime Error] " + content.trim() + "\n", 
+                                        com.intellij.execution.ui.ConsoleViewContentType.ERROR_OUTPUT);
+                                    
+                                    HarbourLogger.log(project, "HarbourDebugger", 
+                                        "Runtime error captured and sent to PyCharm console: " + content.trim());
+                                    
+                                    // Delete the error file after reading to prevent re-processing
+                                    errorFile.delete();
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Error reading error file: " + e.getMessage());
+                            }
+                            
+                            lastModified = currentModified;
+                            lastSize = currentSize;
+                        }
+                    }
+                    
+                    // Check every 100ms (much less frequent than before)
+                    Thread.sleep(100);
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "Error in error file monitor: " + e.getMessage());
+                    break;
+                }
+            }
+            
+            HarbourLogger.log(project, "HarbourDebugger", "Error file monitor stopped");
+        });
+        
+        errorMonitor.setDaemon(true);
+        errorMonitor.setName("Harbour-Error-Monitor");
+        errorMonitor.start();
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Error file monitor started successfully");
     }
 
 }

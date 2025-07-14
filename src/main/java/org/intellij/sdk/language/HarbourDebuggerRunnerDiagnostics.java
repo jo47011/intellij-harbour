@@ -20,11 +20,35 @@ import java.util.Arrays;
  */
 public class HarbourDebuggerRunnerDiagnostics implements StartupActivity {
     
+    // DEBUG FLAG: Set to false to disable test error logging
+    private static final boolean ENABLE_TEST_ERROR = false;
+    
     @Override
     public void runActivity(@NotNull Project project) {
         System.out.println("🔍 HarbourDebuggerRunnerDiagnostics v1.0.270 - COMPREHENSIVE DEBUG ANALYSIS");
         System.out.println("🔍 OS: " + SystemInfo.getOsNameAndVersion());
         System.out.println("🔍 Project: " + project.getName());
+        
+        // TEST ERROR: Generate a test error to verify console logging is working
+        // Can be easily disabled by setting ENABLE_TEST_ERROR = false
+        if (ENABLE_TEST_ERROR) {
+            System.out.println("🧪 TEST ERROR: Creating intentional test error for console logging verification");
+            HarbourLogger.log(project, "TEST_ERROR", "=== TEST ERROR START ===");
+            HarbourLogger.log(project, "TEST_ERROR", "This is a test error to verify PyCharm console logging");
+            HarbourLogger.log(project, "TEST_ERROR", "Time: " + LocalDateTime.now());
+            
+            // Create a test exception for stack trace logging
+            try {
+                throw new RuntimeException("TEST ERROR: Intentional test exception for logging verification");
+            } catch (Exception e) {
+                HarbourLogger.log(project, "TEST_ERROR", "Test exception caught: " + e.getMessage());
+                HarbourLogger.logStackTrace("TEST_ERROR", e);
+                System.out.println("🧪 TEST ERROR: Exception logged to HarbourLogger - check PyCharm console");
+            }
+            
+            HarbourLogger.log(project, "TEST_ERROR", "=== TEST ERROR END ===");
+            System.out.println("🧪 TEST ERROR: Test error logging completed");
+        }
         
         StringBuilder diagnostics = new StringBuilder();
         diagnostics.append("HarbourDebuggerRunnerDiagnostics v1.0.270 - " + LocalDateTime.now() + "\n");
