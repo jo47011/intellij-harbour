@@ -71,7 +71,7 @@ INIT PROCEDURE SetGlobalErrorHandler()
       FWrite(hLog, "=== GLOBAL ERROR HANDLER INITIALIZED ===" + CRLF)
       FWrite(hLog, "Time: " + Time() + CRLF)
       FWrite(hLog, "Date: " + DToC(Date()) + CRLF)
-      FWrite(hLog, "Version: 1.0.397" + CRLF)
+      FWrite(hLog, "Version: 1.0.398" + CRLF)
       FWrite(hLog, "Previous handler: " + IF(oCurrentHandler == NIL, "NIL", "EXISTS") + CRLF)
       FWrite(hLog, "Error handler set successfully" + CRLF)
       FWrite(hLog, "INIT procedure called - this should happen early" + CRLF)
@@ -425,7 +425,7 @@ FUNCTION GlobalErrorHandler(oError)
          FWrite(hErrorLog, "Debug info: " + IF(oDebugInfo == NIL, "NIL", "EXISTS") + CRLF)
       ENDIF
       
-      FWrite(hErrorLog, "Global error handler version: 1.0.397" + CRLF)
+      FWrite(hErrorLog, "Global error handler version: 1.0.398" + CRLF)
       FWrite(hErrorLog, "IMPORTANT: This error should appear in PyCharm console if debug mode is active" + CRLF)
       
       FClose(hErrorLog)

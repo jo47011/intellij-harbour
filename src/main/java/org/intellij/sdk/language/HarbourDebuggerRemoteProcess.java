@@ -528,7 +528,8 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             getSession().positionReached(suspendContext);
                             
                             if (stopFile != null) {
-                                HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
+                                // DISABLED: Remove popup notifications for breakpoint hits
+                                // HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
                             }
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended after timeout");
@@ -798,15 +799,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                         throw positionReachedException; // Re-throw to maintain original behavior
                                     }
                                     
-                                    // Notify user that debugger has stopped
+                                    // DISABLED: Remove popup notifications for breakpoint hits
                                     if (stopFile != null) {
-                                        try {
-                                            HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
-                                        } catch (Exception e) {
-                                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                "ERROR: Exception during breakpoint notification: " + e.getMessage());
-                                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
-                                        }
+                                        // User feedback: Remove popups that say "Debugger stopped at menu.prg:3028"
+                                        // HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
                                     }
                                     
                                     HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended, waiting for user action");

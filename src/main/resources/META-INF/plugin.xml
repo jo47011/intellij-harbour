@@ -120,13 +120,6 @@
             <add-to-group group-id="CodeMenu" anchor="last"/>
         </action>
 
-        <!-- Test Error Logging Action -->
-        <action id="HarbourTestErrorAction" class="org.intellij.sdk.language.HarbourTestErrorAction"
-                text="Test Harbour Error Logging" description="Generate test Harbour error to verify console logging">
-            <add-to-group group-id="CodeMenu" anchor="last"/>
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift T"/>
-        </action>
+        <!-- REMOVED: HarbourTestErrorAction - obsolete since error handling now works properly -->
     </actions>
 </idea-plugin>
