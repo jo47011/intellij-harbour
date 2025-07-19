@@ -1025,7 +1025,7 @@ STATIC PROCEDURE SendStatics(cParams)
    LOCAL i, cName, xValue, cType, aInfo
    LOCAL l, nStackIndex, cModule, nModIndex
    LOCAL aVarData := {}
-   LOCAL aStaticNames := {"s_nStaticVar", "s_cStaticMessage", "S_NSTATICVAR", "S_CSTATICMESSAGE", "S_NSTATICVAR", "S_CSTATICMESSAGE", "TEST_SIMPLE.S_NSTATICVAR", "TEST_SIMPLE.S_CSTATICMESSAGE"}
+   LOCAL aStaticNames := {}  // Empty array - static variables should be discovered dynamically
    LOCAL lFoundAny := .F.
    
    // Parse parameters

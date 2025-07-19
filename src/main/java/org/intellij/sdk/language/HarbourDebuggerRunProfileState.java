@@ -1311,7 +1311,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // Copy standard debug library (for Unix programs)
+        // Copy unified debug library (for all platforms)
         File standardDebugLibFile = new File(buildDir, "harbour_debug.prg");
         try {
             copyResourceFile(standardDebugLibFile, "/debug/harbour_debug.prg");
@@ -1319,21 +1319,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             throw new ExecutionException("Failed to copy standard debug library: " + e.getMessage(), e);
         }
         
-        // Copy Windows-specific simple debug library (for connection testing)
-        File windowsDebugLibFile = new File(buildDir, "harbour_debug_windows_simple.prg");
-        try {
-            copyResourceFile(windowsDebugLibFile, "/debug/harbour_debug_windows_simple.prg");
-        } catch (IOException e) {
-            throw new ExecutionException("Failed to copy Windows simple debug library: " + e.getMessage(), e);
-        }
-        
-        // Copy Windows-specific minimal debug library (for syntax compatibility)
-        File windowsMinimalDebugLibFile = new File(buildDir, "harbour_debug_windows_minimal.prg");
-        try {
-            copyResourceFile(windowsMinimalDebugLibFile, "/debug/harbour_debug_windows_minimal.prg");
-        } catch (IOException e) {
-            throw new ExecutionException("Failed to copy Windows minimal debug library: " + e.getMessage(), e);
-        }
     }
     
     
@@ -1342,6 +1327,32 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     }
     
     private void copyResourceFile(File targetFile, String resourcePath) throws IOException, ExecutionException {
+        // Check if target file already exists and compare with resource
+        if (targetFile.exists()) {
+            try (InputStream resourceStream = getClass().getResourceAsStream(resourcePath)) {
+                if (resourceStream == null) {
+                    throw new ExecutionException("Resource not found: " + resourcePath);
+                }
+                
+                // Read resource content
+                byte[] resourceBytes = resourceStream.readAllBytes();
+                
+                // Read existing file content
+                byte[] existingBytes = Files.readAllBytes(targetFile.toPath());
+                
+                // Compare contents
+                if (java.util.Arrays.equals(resourceBytes, existingBytes)) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Skipping copy of " + resourcePath + " - file unchanged (size: " + targetFile.length() + " bytes)");
+                    return;
+                }
+                
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Updating " + resourcePath + " - content has changed");
+            }
+        }
+        
+        // File doesn't exist or content has changed - copy it
         try (InputStream resourceStream = getClass().getResourceAsStream(resourcePath)) {
             if (resourceStream == null) {
                 throw new ExecutionException("Resource not found: " + resourcePath);
