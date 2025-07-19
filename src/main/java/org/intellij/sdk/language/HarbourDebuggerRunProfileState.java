@@ -48,6 +48,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     private final ExecutionEnvironment env;
     private String lastExecutedCommand; // Store command for console output
     private final Project project;
+    private String originalWorkingDir; // Store original working directory for GUI executable launch
 
     public HarbourDebuggerRunProfileState(ExecutionEnvironment env,
                                           HarbourDebuggerRunConfig runConfig) {
@@ -79,16 +80,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         commandLine.setRedirectErrorStream(true);
         
-        // Windows-specific console handling to prevent popup windows
-        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
-            // Try to prevent creation of new console window on Windows
-            // Keep debugging functionality intact - only modify process creation
-            commandLine.withEnvironment("HIDE_CONSOLE", "1");
-            commandLine.withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE);
-            
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Applied Windows console inheritance settings");
-        }
+        // FIXED: Program type detection for reference only - no manual parameter override
+        boolean isGuiProgram = isGuiProgram(runConfig);
+        
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "FIXED: Program type detection: " + (isGuiProgram ? "GUI" : "Console") + " (based on config/hbp only)");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "FIXED: No manual parameter additions - respecting user's compiler options");
         
         // Log full command details before starting
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
@@ -96,27 +94,62 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Working directory: " + commandLine.getWorkDirectory());
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Environment: " + commandLine.getEnvironment());
+                "Environment variables count: " + commandLine.getEnvironment().size());
+        
+        // DEBUGGING: Log key environment variables for comparison with manual execution
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "PATH: " + commandLine.getEnvironment().get("PATH"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "TEMP: " + commandLine.getEnvironment().get("TEMP"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Current working directory (Java): " + System.getProperty("user.dir"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Project base path: " + env.getProject().getBasePath());
+        
+        // Add comprehensive debugging for Windows connection issues
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "========= CONNECTION DEBUGGING v1.0.240 =========");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "OS detected: " + osName);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Debug library selection: " + (osName.contains("windows") ? "Windows Simple" : "Unix Standard"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "HB_REMOTE_DEBUG environment variable: " + commandLine.getEnvironment().get("HB_REMOTE_DEBUG"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "HB_DBG_PATH environment variable: " + commandLine.getEnvironment().get("HB_DBG_PATH"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Expected debug protocol: TCP socket on port 9876");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Expected PyCharm behavior: Should listen on 127.0.0.1:9876 for incoming connections");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "================================================");
 
         OSProcessHandler handler;
         try {
+            String currentOS = System.getProperty("os.name").toLowerCase();
+            boolean isWindowsConsole = currentOS.contains("windows") && !isGuiProgram(runConfig);
+            
+            // UNIFIED APPROACH: Use single-phase compile+run for all platforms
+            // This ensures proper PyCharm debug console integration
             handler = new OSProcessHandler(commandLine);
             
-            // CRITICAL: Detect if this is a GUI program to determine process termination behavior
-            // For GUI programs: terminate debug session when process ends
-            // For console programs using remote debugging: allow debug connection to outlive process
-            boolean isGuiProgram = isGuiProgram(runConfig);
-            
-            if (isGuiProgram) {
-                // For GUI programs: terminate debug session when process ends
-                ProcessTerminatedListener.attach(handler);
+            if (isWindowsConsole) {
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "GUI program: Attached ProcessTerminatedListener - debug session will end with process");
+                        "Windows Console: Using unified single-phase approach for PyCharm console integration");
             } else {
-                // For console programs using remote debugging: allow debug connection to outlive process
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Console program: Skipping ProcessTerminatedListener to allow remote debug connection to outlive process");
+                        "Using standard OSProcessHandler for " + (currentOS.contains("windows") ? "Windows GUI" : "Unix"));
             }
+            
+            // UNIFIED APPROACH: Use same ProcessTerminatedListener handling as successful Unix
+            // Based on successful Unix implementation, skip ProcessTerminatedListener for remote debugging
+            // This allows debug connection to outlive process for ALL programs
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "UNIFIED: Skipping ProcessTerminatedListener to allow remote debug connection to outlive process");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "UNIFIED: Using same approach as successful Unix implementation");
             
             handler.startNotify();
             
@@ -142,6 +175,71 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 public void processTerminated(@NotNull com.intellij.execution.process.ProcessEvent event) {
                     HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                             "Process terminated with exit code: " + event.getExitCode());
+                    
+                    // FIXED: For GUI applications, launch executable after successful compilation
+                    if (event.getExitCode() == 0 && isGuiProgram) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                "GUI APPLICATION: Compilation successful, launching executable for debugging");
+                        
+                        try {
+                            // Determine executable name from build target
+                            String buildTarget = runConfig.getSourceFile();
+                            String exeName;
+                            String currentOS = System.getProperty("os.name").toLowerCase();
+                            String exeExtension = currentOS.contains("windows") ? ".exe" : "";
+                            
+                            if (buildTarget.endsWith(".hbp")) {
+                                // For .hbp files, use the project name
+                                File hbpFile = new File(buildTarget);
+                                String projectName = hbpFile.getName().replace(".hbp", "");
+                                exeName = projectName + exeExtension;
+                            } else {
+                                // For .prg files, use the source name
+                                File sourceFile = new File(buildTarget);
+                                String sourceName = sourceFile.getName().replace(".prg", "");
+                                exeName = sourceName + exeExtension;
+                            }
+                            
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                    "CRITICAL FIX v1.0.348: Using OS-appropriate executable extension: '" + exeExtension + "'");
+                            
+                            // Launch executable in original project directory (not hbmk2's working directory)
+                            File projectDir = new File(originalWorkingDir);
+                            File executable = new File(projectDir, exeName);
+                            
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                    "Looking for GUI executable in original directory: " + projectDir.getAbsolutePath());
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                    "Expected executable path: " + executable.getAbsolutePath());
+                            
+                            if (executable.exists()) {
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                        "Found GUI executable: " + executable.getAbsolutePath());
+                                
+                                // Create command to launch executable with debug environment
+                                GeneralCommandLine launchCommand = new GeneralCommandLine();
+                                launchCommand.setExePath(executable.getAbsolutePath());
+                                launchCommand.setWorkDirectory(projectDir);
+                                launchCommand.withEnvironment("HB_REMOTE_DEBUG", "1");
+                                launchCommand.withEnvironment("HB_DBG_PATH", projectDir.getAbsolutePath());
+                                
+                                // Launch as separate process for debugging
+                                OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
+                                launchHandler.startNotify();
+                                
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                        "GUI executable launched successfully for debugging");
+                            } else {
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                        "GUI executable not found: " + executable.getAbsolutePath());
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                        "CRITICAL FIX v1.0.342: Check original working directory vs hbmk2 working directory");
+                            }
+                        } catch (Exception e) {
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                    "Error launching GUI executable: " + e.getMessage());
+                        }
+                    }
                 }
             });
             
@@ -154,6 +252,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         return handler;
     }
+    
+    /* REMOVED: executeCompiledProgram method - no longer needed with unified single-phase approach
+     * This two-phase approach was causing console output to go to Terminal instead of PyCharm Debug Console
+     * Now using unified single-phase compile+run approach for all platforms for proper PyCharm integration
+     */
 
     private void compileAndRunHarbourProgram(GeneralCommandLine commandLine) throws ExecutionException {
         String hbmk2Path = runConfig.getHbmk2Path();
@@ -172,6 +275,18 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             File sourceFile = new File(runConfig.getSourceFile());
             workingDir = sourceFile.getParent();
         }
+        
+        // Save original working directory for GUI executable launch
+        originalWorkingDir = workingDir;
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Saved original working directory: " + originalWorkingDir);
+        
+        // RESTART FIX: Clean up any running processes and executables before compilation
+        cleanupExecutableBeforeCompilation(commandLine);
+        terminateRunningProcesses();
+        
+        // Copy debug libraries to build directory before compilation
+        copyDebugLibrary(workingDir);
         
         // Fix Windows/WSL path issues for working directory
         if (workingDir != null && workingDir.contains("\\wsl.localhost\\")) {
@@ -358,104 +473,75 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Using relative target: " + relativeTarget + " (was: " + finalBuildTarget + ")");
         
-        // Add debug source based on program type per CLAUDE.md rules
-        if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
-            if (!isGui) {
-                // Console programs: Use debug library for PyCharm network connectivity
-                String debugSourcePath = buildDir + "/harbour_debug.prg";
-                parameters.add(debugSourcePath);
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Console program: Added debug library for PyCharm connectivity: " + debugSourcePath);
-            }
-            // GUI programs: No custom debug source - use Harbour internal debugger with init.cld
-        }
+        // Get OS name once for use throughout the method
+        String currentOS = System.getProperty("os.name").toLowerCase();
         
-        // Add debug flags - both program types need -b flag for debugging support
+        // PLATFORM-SPECIFIC DEBUG LIBRARY: Added later after compiler options
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Debug library will be added after compiler options for proper parameter order");
+        
+        // FIXED APPROACH: Different strategy for GUI vs Console programs
         parameters.add("-b");
-        parameters.add("-run");
         
         if (isGui) {
+            // GUI programs: Compile only, don't auto-launch with -run
+            // PyCharm will handle the executable launch separately for proper debugging
+            parameters.add("-debug");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: Using -b flag with Harbour internal debugger");
+                    "GUI PROGRAM: Added debug flags: -b -debug (no -run for GUI apps)");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "GUI STRATEGY: Compile only, let PyCharm handle executable launch for proper debugging context");
         } else {
+            // Console programs: Use -run for immediate execution
+            parameters.add("-run");
+            parameters.add("-debug");
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Using -b flag with PyCharm debugging (environment controls which interface)");
+                    "CONSOLE PROGRAM: Added debug flags: -b -run -debug");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "CONSOLE STRATEGY: Immediate execution with -run flag");
         }
+        
+        boolean isWindowsConsole = currentOS.contains("windows") && !isGui;
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Purpose: Enable debugging symbols and immediate execution with PyCharm console integration");
         
         // Remove FORCE_DEBUG_MODE - it was triggering Harbour debugger instead of PyCharm
         // parameters.add("-DFORCE_DEBUG_MODE=1");  // REMOVED - not in working version
         
-        // CRITICAL: Add debug flags for F9 breakpoint support
-        parameters.add("-debug");  // Add C-level debug information 
-        // NOTE: Removed -lhbdebug as hbmk2 warns it's a core library automatically included with -b
-        
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Added debug flag: -debug for C-level debug support");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Using incremental build (removed -clean as it prevented execution)");
-
-        // Add -workdir for console programs like the working version
-        if (!isGui) {
-            parameters.add("-workdir=" + buildDir);
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Added -workdir=" + buildDir + " like working version");
-        } else {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: No -workdir needed");
-        }
+        // UNIFIED APPROACH: Add standard debug defines for ALL programs
         parameters.add("-D__HARBOUR_DEBUG__");
         parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
         
-        if (isGui) {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program detected - using GUI debugging approach");
-            
-            // For GUI programs: add appropriate GUI flags and use init.cld approach
-            if (!finalBuildTarget.endsWith(".hbp")) {
-                // Add platform-specific GUI flags for standalone .prg files
-                parameters.add("-gui");
-                
-                // Use platform-specific GT driver
-                if (System.getProperty("os.name").toLowerCase().contains("windows")) {
-                    parameters.add("-gtwvt");  // Windows Video Terminal
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                            "Added Windows GUI flags (-gui -gtwvt) for standalone .prg file");
-                } else {
-                    // Linux/Unix: use X Window Console GT driver
-                    parameters.add("-gtxwc");  // X Window Console
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                            "Added Linux GUI flags (-gui -gtxwc) for standalone .prg file");
-                }
-            }
-            
-            // For GUI programs: Use built-in debug support (don't add -lhbdebug as it causes warnings)
-            // Debug builds automatically include hbdebug library
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI program: Using built-in debug support (hbdebug included automatically in -b builds)");
-            
-        } else {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program detected - using PyCharm debugging approach");
-            
-            // For console programs: use standard console output for PyCharm debugging
-            parameters.add("-gtSTD");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Console program: Using -gtSTD for PyCharm debugging");
-        }
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "FIXED: Added debug defines: -D__HARBOUR_DEBUG__ -DDBG_PORT=" + runConfig.getDebugPort());
         
-        // Additional Windows-specific console redirection (only for GUI programs)
-        if (System.getProperty("os.name").toLowerCase().contains("windows") && isGui) {
-            // Prevent new console window creation on Windows for GUI programs
-            parameters.add("-D__INTELLIJ_DEBUG__");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Added Windows-specific console redirection flags for GUI program");
-        }
+        // FIXED: No manual GUI parameter additions
+        // Let compiler options from config and .hbp files determine GUI settings
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "FIXED: No manual GUI parameter additions - using config/hbp settings only");
 
-        // Don't set ALTD environment variable for remote debugging
-        // commandLine.withEnvironment("ALTD", "BREAK");
-
+        // Add compiler options before debug library
         if (!StringUtil.isEmpty(runConfig.getCompilerOptions())) {
             parameters.addAll(StringUtil.split(runConfig.getCompilerOptions(), " "));
+        }
+
+        // UNIFIED APPROACH v1.0.345: Add debug library for ALL files (.prg AND .hbp)
+        if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
+            String debugSourcePath;
+            
+            if (currentOS.contains("windows")) {
+                debugSourcePath = buildDir + "\\" + "harbour_debug.prg";
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "WINDOWS: Adding debug library for unified approach: " + debugSourcePath);
+            } else {
+                debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "UNIX: Adding debug library for unified approach: " + debugSourcePath);
+            }
+            
+            parameters.add(debugSourcePath);
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "UNIFIED v1.0.345: Added debug library for both .prg and .hbp files: " + debugSourcePath);
         }
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
@@ -491,29 +577,105 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Instrumented: " + shouldInstrument);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "GUI Program: " + isGui);
 
+        // All cases: Use normal command construction
+        // Windows console programs will still create popup, but environment variables work correctly
         commandLine.addParameters(parameters);
-        
-        // CRITICAL FIX: Ensure working directory uses Windows format on Windows for init.cld loading
-        String finalWorkingDir = workingDir;
-        if (System.getProperty("os.name").toLowerCase().contains("windows") && workingDir != null) {
-            // Convert to Windows path format for proper init.cld loading
-            finalWorkingDir = workingDir.replace("/", "\\");
+        if (currentOS.contains("windows") && !isGui) {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Converted working directory to Windows format: " + finalWorkingDir);
+                    "Windows Console: Using direct execution (environment variables preserved)");
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Using normal command construction");
         }
+        
+        // UNIFIED APPROACH: Use same path format as successful Unix implementation
+        // Keep Unix-style paths for debugging compatibility
+        String finalWorkingDir = workingDir;
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "UNIFIED: Using same path format as Unix for debugging compatibility: " + finalWorkingDir);
         
         commandLine.setWorkDirectory(finalWorkingDir);
         
-        // REVERT to working version approach: Use same environment for ALL programs
-        // Based on working commit 5107483 - no GUI detection for environment variables
-        commandLine.withEnvironment("HB_DBG_PATH", ".");
+        // WINDOWS PROCESS CREATION: Try alternative approach for console popup suppression
+        if (currentOS.contains("windows")) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Windows: IntelliJ 2024.3.4 - myCreationFlags field not available, trying alternative approach");
+            
+            // Alternative 1: Try using ProcessBuilder approach through environment
+            // Set Windows-specific environment to minimize console visibility
+            commandLine.withEnvironment("_CONSOLE_LOGON", "0");
+            commandLine.withEnvironment("SUBPROCESS_MODE", "1");
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Windows: Set alternative environment variables to minimize console visibility");
+            
+            // Alternative 2: Consider using different process creation pattern
+            // The myProcessCreator function might be customizable in newer IntelliJ versions
+            try {
+                java.lang.reflect.Field processCreatorField = GeneralCommandLine.class.getDeclaredField("myProcessCreator");
+                processCreatorField.setAccessible(true);
+                Object currentCreator = processCreatorField.get(commandLine);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows: Current process creator: " + (currentCreator != null ? currentCreator.getClass().getName() : "null"));
+                
+                // Note: In newer IntelliJ, process creation might be handled differently
+                // This logs the current approach for potential future customization
+                
+            } catch (Exception e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows: Process creator inspection failed: " + e.getMessage());
+            }
+        }
+        
+        // UNIFIED DEBUGGING APPROACH: Use same approach as successful Unix GUI for ALL programs
+        // This eliminates GUI vs Console distinction and provides Harbour GUI + PyCharm debugging for all
+        
+        String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
+        commandLine.withEnvironment("HB_DBG_PATH", debugPath);
         commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
-        // DON'T set ALTD environment variable (per working version)
+        
+        // WINDOWS-SPECIFIC: Add environment variables for Windows debug library
+        if (currentOS.contains("windows")) {
+            // Help Windows debug library detect GUI mode
+            if (isGui) {
+                commandLine.withEnvironment("HB_GUI_MODE", "1");
+                commandLine.withEnvironment("HB_GT_LIB", "GTWVT");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows: Set GUI mode environment variables");
+            } else {
+                // Windows Console: Back to NUL approach with enhanced output handling
+                commandLine.withEnvironment("HB_GUI_MODE", "0");     // Console mode
+                commandLine.withEnvironment("HB_GT_LIB", "GTNUL");   // NULL terminal  
+                commandLine.withEnvironment("HB_GT_DEFAULT", "NUL"); // NULL terminal
+                // Force output to stdout/stderr for PyCharm capture
+                commandLine.withEnvironment("HB_FORCE_STDOUT", "1");
+                commandLine.withEnvironment("HARBOUR_STDOUT_REDIRECT", "1");
+                // Ensure temp directory is in working directory, not C:\WINDOWS
+                commandLine.withEnvironment("TMP", finalWorkingDir);
+                commandLine.withEnvironment("TEMP", finalWorkingDir);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Windows: Using NUL terminal with forced stdout redirection for PyCharm capture");
+            }
+        }
+        
+        // CRITICAL: Do NOT set ALTD=BREAK as it conflicts with PyCharm remote debugging
+        // ALTD=BREAK triggers Harbour's internal debugger instead of PyCharm debugger
+        
+        // Add comprehensive logging for debugging analysis
+        boolean isWindows = currentOS.contains("windows");
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "ALL programs: Using working version environment (HB_DBG_PATH=., HB_REMOTE_DEBUG=1, no ALTD)");
+                "=== UNIFIED DEBUGGING APPROACH ===");
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Program type detected as: " + (isGui ? "GUI" : "Console") + " but using same environment for all");
+                "Operating System: " + currentOS);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Platform: " + (isWindows ? "Windows" : "Unix/Linux"));
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Program Type Detection: " + (isGuiProgram ? "GUI" : "Console") + " (for reference only)");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "PyCharm Remote Debugging Environment: HB_DBG_PATH=" + debugPath + ", HB_REMOTE_DEBUG=1");
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Target: PyCharm remote debugging for ALL programs (no ALTD=BREAK)");
     }
 
     /**
@@ -539,17 +701,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 }
             }
             
-            // Check filename to determine program type
-            String fileName = new File(sourceFile).getName().toLowerCase();
-            if (fileName.contains("gui") || fileName.contains("window") || fileName.contains("dialog")) {
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "GUI program detected by filename: " + fileName);
-                return true;
-            }
-            
-            // Default for standalone .prg files without GUI indicators: console program
+            // Default for standalone .prg files: console program
+            // GUI detection only from compiler options or .hbp file contents, NOT filename
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Standalone .prg file without GUI indicators - treating as console program");
+                    "Standalone .prg file - treating as console program (no GUI flags in compiler options)");
             return false;
         }
     }
@@ -651,6 +806,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (StringUtil.isEmpty(exePath)) {
             throw new ExecutionException("Executable path is not specified");
         }
+
+        // RESTART FIX: Terminate any running instances before starting
+        terminateRunningProcesses();
 
         commandLine.setExePath(exePath);
 
@@ -777,6 +935,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 HarbourLogger.log(project, "HarbourDebugger", "Windows .hbp detected - also writing init.cld to: " + 
                     altBreakpointFile.getAbsolutePath());
             }
+            
+            // Also write to .hbmk build directory where hbmk2 may look for files
+            File hbmkBuildDir = new File(hbpDir, ".hbmk");
+            if (hbmkBuildDir.exists() || hbmkBuildDir.mkdirs()) {
+                File hbmkBreakpointFile = new File(hbmkBuildDir, breakpointFileName);
+                if (!hbmkBreakpointFile.equals(breakpointFile) && !hbmkBreakpointFile.equals(altBreakpointFile)) {
+                    breakpointFiles.add(hbmkBreakpointFile);
+                    HarbourLogger.log(project, "HarbourDebugger", "Windows .hbp detected - also writing init.cld to .hbmk build dir: " + 
+                        hbmkBreakpointFile.getAbsolutePath());
+                }
+            }
         }
         HarbourLogger.log(project, "HarbourDebugger", "=====================================");
 
@@ -890,7 +1059,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     
                     for (String line : lines) {
                         line = line.trim();
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Processing line: " + line);
+                        // Removed flooding log message - was logging every HBP line
                         
                         // Look for .prg files (first one is typically the main)
                         if (line.endsWith(".prg") && !line.startsWith("#") && !line.startsWith("//")) {
@@ -950,18 +1119,18 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             HarbourLogger.log(project, "HarbourDebugger", "File does not exist, will create new");
         }
         
-        // Filter out old BP entries, FILE OPEN commands for our target file, and Options Path
+        // Filter out ALL old BP entries and FILE OPEN commands to prevent growing
         List<String> filteredLines = new ArrayList<>();
         for (String line : existingLines) {
             String trimmedLine = line.trim();
-            if (trimmedLine.startsWith("BP ") && trimmedLine.contains(targetPrgFile)) {
-                // Remove old breakpoint entries for our target file only
-                HarbourLogger.log(project, "HarbourDebugger", "Removing old BP entry for target file: " + line);
+            if (trimmedLine.startsWith("BP ")) {
+                // Remove ALL old breakpoint entries to prevent file growing
+                HarbourLogger.log(project, "HarbourDebugger", "Removing old BP entry: " + line);
                 continue;
             }
-            if (trimmedLine.startsWith("FILE OPEN ") && trimmedLine.contains(targetPrgFile)) {
-                // Remove old FILE OPEN commands for our target file only
-                HarbourLogger.log(project, "HarbourDebugger", "Removing old FILE OPEN entry for target file: " + line);
+            if (trimmedLine.startsWith("FILE OPEN ")) {
+                // Remove ALL old FILE OPEN commands to prevent file growing
+                HarbourLogger.log(project, "HarbourDebugger", "Removing old FILE OPEN entry: " + line);
                 continue;
             }
             // NOTE: We now preserve Options Path as it's needed for source file lookup
@@ -988,7 +1157,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 int line = bp.getSourcePosition().getLine() + 1;
                 String filePath = file.getPath();
                 
-                HarbourLogger.log(project, "HarbourDebugger", "  Checking breakpoint - file: " + fileName + ", path: " + filePath + ", line: " + line);
+                // Removed flooding log message - was logging every breakpoint check
                 HarbourLogger.log(project, "HarbourDebugger", "  Target file: " + targetPrgFile);
                 HarbourLogger.log(project, "HarbourDebugger", "  Init.cld directory: " + initCldFile.getParent());
 
@@ -1105,6 +1274,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         consoleBuilder.filters(new HarbourCompilerOutputFilter(env.getProject()));
         ConsoleView console = consoleBuilder.getConsole();
         console.attachToProcess(processHandler);
+        
+        // Set the console in HarbourLogger so all Harbour errors go to PyCharm console
+        HarbourLogger.setConsole(console);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled - Harbour errors will appear in PyCharm console", HarbourLogger.LogLevel.DEBUG);
+
+        // Re-enabled: File monitor needed for error display in PyCharm console
+        startHarbourErrorFileMonitor(console, env.getProject());
 
         // Print the exact command to the PyCharm console
         if (lastExecutedCommand != null) {
@@ -1123,7 +1299,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Copy the debug library to build directory (.hbmk) to avoid cluttering project directory
         String buildDir = workingDir + File.separator + ".hbmk";
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Copying IntelliJ debug library to build directory: " + buildDir);
+                "Copying IntelliJ debug libraries to build directory: " + buildDir);
         
         // Ensure build directory exists
         File buildDirFile = new File(buildDir);
@@ -1135,12 +1311,28 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // Copy harbour_debug_simple.prg to build directory (for console programs)
-        File debugLibFile = new File(buildDir, "harbour_debug_simple.prg");
+        // Copy standard debug library (for Unix programs)
+        File standardDebugLibFile = new File(buildDir, "harbour_debug.prg");
         try {
-            copyResourceFile(debugLibFile, "/debug/harbour_debug_simple.prg");
+            copyResourceFile(standardDebugLibFile, "/debug/harbour_debug.prg");
         } catch (IOException e) {
-            throw new ExecutionException("Failed to copy simple debug library: " + e.getMessage(), e);
+            throw new ExecutionException("Failed to copy standard debug library: " + e.getMessage(), e);
+        }
+        
+        // Copy Windows-specific simple debug library (for connection testing)
+        File windowsDebugLibFile = new File(buildDir, "harbour_debug_windows_simple.prg");
+        try {
+            copyResourceFile(windowsDebugLibFile, "/debug/harbour_debug_windows_simple.prg");
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to copy Windows simple debug library: " + e.getMessage(), e);
+        }
+        
+        // Copy Windows-specific minimal debug library (for syntax compatibility)
+        File windowsMinimalDebugLibFile = new File(buildDir, "harbour_debug_windows_minimal.prg");
+        try {
+            copyResourceFile(windowsMinimalDebugLibFile, "/debug/harbour_debug_windows_minimal.prg");
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to copy Windows minimal debug library: " + e.getMessage(), e);
         }
     }
     
@@ -1177,6 +1369,382 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "VM-based debugging - instrumentation disabled");
         return false;
+    }
+    
+    /**
+     * Clean up executable files before compilation to prevent "Permission denied" errors
+     */
+    private void cleanupExecutableBeforeCompilation(GeneralCommandLine commandLine) {
+        try {
+            String workingDir = commandLine.getWorkDirectory() != null ? 
+                commandLine.getWorkDirectory().getAbsolutePath() : runConfig.getWorkingDirectory();
+            
+            if (workingDir == null) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "cleanupExecutableBeforeCompilation: No working directory, skipping cleanup");
+                return;
+            }
+            
+            // Determine executable name
+            String sourceFile = runConfig.getSourceFile();
+            String executableName;
+            
+            if (sourceFile.endsWith(".hbp")) {
+                executableName = new File(sourceFile).getName().replace(".hbp", "");
+            } else {
+                executableName = new File(sourceFile).getName().replace(".prg", "");
+            }
+            
+            String osName = System.getProperty("os.name").toLowerCase();
+            String[] extensions;
+            
+            if (osName.contains("windows")) {
+                extensions = new String[]{".exe", ""};
+            } else {
+                extensions = new String[]{"", ".exe"};
+            }
+            
+            // Try to delete all possible executable files
+            for (String ext : extensions) {
+                File execFile = new File(workingDir, executableName + ext);
+                if (execFile.exists()) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Attempting to delete executable: " + execFile.getAbsolutePath());
+                    
+                    if (!execFile.delete()) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Failed to delete executable, attempting force cleanup: " + execFile.getAbsolutePath());
+                        
+                        // If delete fails, try to kill processes using it
+                        forceCleanupExecutable(execFile.getAbsolutePath());
+                        
+                        // Try delete again after cleanup
+                        Thread.sleep(500);
+                        if (execFile.delete()) {
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                "Successfully deleted executable after force cleanup");
+                        }
+                    } else {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Successfully deleted executable: " + execFile.getAbsolutePath());
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Error in cleanupExecutableBeforeCompilation: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Force cleanup of an executable file by killing processes using it
+     */
+    private void forceCleanupExecutable(String executablePath) {
+        try {
+            String osName = System.getProperty("os.name").toLowerCase();
+            ProcessBuilder pb;
+            
+            if (osName.contains("windows")) {
+                // Windows: Use handle.exe or wmic to find and kill processes
+                String fileName = new File(executablePath).getName();
+                pb = new ProcessBuilder("cmd", "/c", 
+                    "taskkill /f /im \"" + fileName + "\"");
+            } else {
+                // Unix/Linux: Use fuser to kill processes using the file
+                pb = new ProcessBuilder("bash", "-c", 
+                    "fuser -k \"" + executablePath + "\" 2>/dev/null || true");
+            }
+            
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            
+            if (finished) {
+                int exitCode = process.exitValue();
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Force cleanup executable finished with exit code: " + exitCode);
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Force cleanup executable timed out");
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Error in forceCleanupExecutable: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Terminate all running Harbour processes
+     */
+    private void terminateRunningProcesses() {
+        try {
+            String osName = System.getProperty("os.name").toLowerCase();
+            
+            // Get the base name of our program
+            String sourceFile = runConfig.getSourceFile();
+            String programName;
+            
+            if (sourceFile.endsWith(".hbp")) {
+                programName = new File(sourceFile).getName().replace(".hbp", "");
+            } else {
+                programName = new File(sourceFile).getName().replace(".prg", "");
+            }
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Terminating any running instances of: " + programName);
+            
+            ProcessBuilder pb;
+            
+            if (osName.contains("windows")) {
+                // Windows: Kill by image name
+                String[] commands = {
+                    "taskkill /f /im \"" + programName + ".exe\" 2>nul",
+                    "taskkill /f /im \"" + programName + "\" 2>nul"
+                };
+                
+                for (String cmd : commands) {
+                    pb = new ProcessBuilder("cmd", "/c", cmd);
+                    executeKillCommand(pb, "Windows taskkill");
+                }
+            } else {
+                // Unix/Linux: Kill by process name
+                String[] commands = {
+                    "pkill -f \"" + programName + "\" 2>/dev/null || true",
+                    "killall \"" + programName + "\" 2>/dev/null || true"
+                };
+                
+                for (String cmd : commands) {
+                    pb = new ProcessBuilder("bash", "-c", cmd);
+                    executeKillCommand(pb, "Unix kill");
+                }
+            }
+            
+            // Also kill any harbour_debug processes that might be hanging
+            if (osName.contains("windows")) {
+                pb = new ProcessBuilder("cmd", "/c", "taskkill /f /im harbour_debug.exe 2>nul");
+                executeKillCommand(pb, "harbour_debug cleanup");
+            } else {
+                pb = new ProcessBuilder("bash", "-c", "pkill -f harbour_debug 2>/dev/null || true");
+                executeKillCommand(pb, "harbour_debug cleanup");
+            }
+            
+            // Give processes time to terminate
+            Thread.sleep(500);
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Error in terminateRunningProcesses: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Execute a kill command and log the result
+     */
+    private void executeKillCommand(ProcessBuilder pb, String description) {
+        try {
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            
+            if (finished) {
+                int exitCode = process.exitValue();
+                if (exitCode == 0) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        description + " succeeded");
+                } else {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        description + " completed with exit code: " + exitCode);
+                }
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    description + " timed out");
+            }
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                description + " error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extract compiler parameters from .hbp file
+     */
+    private String extractHbpParameters(String hbpFilePath) {
+        try {
+            File hbpFile = new File(hbpFilePath);
+            List<String> lines = Files.readAllLines(hbpFile.toPath());
+            
+            List<String> parameters = new ArrayList<>();
+            
+            for (String line : lines) {
+                line = line.trim();
+                
+                // Skip comments, empty lines, and source files
+                if (line.isEmpty() || line.startsWith("#") || line.endsWith(".prg") || line.endsWith(".hbc")) {
+                    continue;
+                }
+                
+                // Include hbmk2 parameters (lines starting with -)
+                if (line.startsWith("-")) {
+                    parameters.add(line);
+                }
+            }
+            
+            return String.join(" ", parameters);
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Error extracting .hbp parameters: " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * CRITICAL FIX v1.0.343: Convert .hbp file to command line parameters
+     * This treats .hbp files like expanded .prg files for unified debugging approach
+     */
+    private String expandHbpToCommandLine(String hbpFilePath, File workingDir) {
+        try {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "CRITICAL FIX v1.0.343: Expanding .hbp to command line: " + hbpFilePath);
+            
+            File hbpFile = new File(hbpFilePath);
+            List<String> lines = Files.readAllLines(hbpFile.toPath());
+            
+            String mainPrgFile = null;
+            List<String> hbpParameters = new ArrayList<>();
+            
+            for (String line : lines) {
+                line = line.trim();
+                
+                // Skip comments and empty lines
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                
+                // Find the main .prg file (first .prg file found)
+                if (line.endsWith(".prg") && !line.contains("harbour_debug")) {
+                    if (mainPrgFile == null) {
+                        mainPrgFile = line;
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                                "Found main PRG file: " + mainPrgFile);
+                    }
+                } else if (line.startsWith("-")) {
+                    // Add hbmk2 parameters from .hbp file to runConfig compiler options
+                    hbpParameters.add(line);
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                            "Found hbmk2 parameter: " + line);
+                }
+            }
+            
+            // Combine existing compiler options with .hbp parameters
+            String existingOptions = runConfig.getCompilerOptions();
+            String combinedOptions = String.join(" ", hbpParameters);
+            if (!StringUtil.isEmpty(existingOptions)) {
+                combinedOptions = existingOptions + " " + combinedOptions;
+            }
+            
+            // Update the runConfig with combined compiler options
+            // Note: We need to find a way to pass these parameters to the compilation
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Combined compiler options from .hbp: " + combinedOptions);
+            
+            if (mainPrgFile != null) {
+                // Return the main .prg file path (relative to working directory)
+                File mainPrg = new File(workingDir, mainPrgFile);
+                String result = mainPrg.getAbsolutePath();
+                
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "CRITICAL FIX v1.0.343: Converted .hbp to main PRG: " + result);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Will add .hbp parameters to compiler options: " + combinedOptions);
+                
+                return result;
+            } else {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "ERROR: No main .prg file found in .hbp file");
+                return hbpFilePath; // Fallback to original
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Error expanding .hbp file: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourDebugger", e);
+            return hbpFilePath; // Fallback to original
+        }
+    }
+
+    /**
+     * Start error file monitor for Harbour runtime errors
+     */
+    private void startHarbourErrorFileMonitor(ConsoleView console, Project project) {
+        String workingDir = runConfig.getWorkingDirectory();
+        if (workingDir == null || workingDir.isEmpty()) {
+            File sourceFile = new File(runConfig.getSourceFile());
+            workingDir = sourceFile.getParent();
+        }
+        
+        final String errorFilePath = workingDir + File.separator + "pycharm_error.log";
+        final File errorFile = new File(errorFilePath);
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Starting error file monitor for: " + errorFilePath);
+        
+        // Start a background thread to monitor the error file
+        Thread errorMonitor = new Thread(() -> {
+            long lastModified = 0;
+            long lastSize = 0;
+            
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    if (errorFile.exists()) {
+                        long currentModified = errorFile.lastModified();
+                        long currentSize = errorFile.length();
+                        
+                        // Only read if file was modified and has new content
+                        if (currentModified > lastModified && currentSize > lastSize) {
+                            try {
+                                String content = new String(java.nio.file.Files.readAllBytes(errorFile.toPath()));
+                                if (!content.trim().isEmpty()) {
+                                    // Send error to PyCharm console
+                                    console.print("[Harbour Runtime Error] " + content.trim() + "\n", 
+                                        com.intellij.execution.ui.ConsoleViewContentType.ERROR_OUTPUT);
+                                    
+                                    HarbourLogger.log(project, "HarbourDebugger", 
+                                        "Runtime error captured and sent to PyCharm console: " + content.trim());
+                                    
+                                    // Delete the error file after reading to prevent re-processing
+                                    errorFile.delete();
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.log(project, "HarbourDebugger", 
+                                    "Error reading error file: " + e.getMessage());
+                            }
+                            
+                            lastModified = currentModified;
+                            lastSize = currentSize;
+                        }
+                    }
+                    
+                    // Check every 100ms (much less frequent than before)
+                    Thread.sleep(100);
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                        "Error in error file monitor: " + e.getMessage());
+                    break;
+                }
+            }
+            
+            HarbourLogger.log(project, "HarbourDebugger", "Error file monitor stopped");
+        });
+        
+        errorMonitor.setDaemon(true);
+        errorMonitor.setName("Harbour-Error-Monitor");
+        errorMonitor.start();
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Error file monitor started successfully");
     }
 
 }

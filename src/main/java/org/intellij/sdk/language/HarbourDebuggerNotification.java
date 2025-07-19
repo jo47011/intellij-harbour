@@ -10,7 +10,7 @@ import com.intellij.xdebugger.XSourcePosition;
 public class HarbourDebuggerNotification {
     
     private static final NotificationGroup NOTIFICATION_GROUP = 
-            NotificationGroupManager.getInstance().getNotificationGroup("Harbour Debugger");
+            NotificationGroupManager.getInstance().getNotificationGroup("Harbour Application");
     
     /**
      * Show notification when debugger stops at a breakpoint
@@ -19,7 +19,7 @@ public class HarbourDebuggerNotification {
         String message = String.format("Debugger stopped at %s:%d", fileName, line);
         
         Notification notification = NOTIFICATION_GROUP.createNotification(
-                "Harbour Debugger", 
+                "Harbour Application", 
                 message, 
                 NotificationType.INFORMATION
         );
@@ -38,7 +38,7 @@ public class HarbourDebuggerNotification {
      */
     public static void notifyError(Project project, String message) {
         Notification notification = NOTIFICATION_GROUP.createNotification(
-                "Harbour Debugger Error", 
+                "Harbour Application Error", 
                 message, 
                 NotificationType.ERROR
         );
