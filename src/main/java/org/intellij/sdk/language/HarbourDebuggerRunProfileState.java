@@ -50,6 +50,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     private String lastExecutedCommand; // Store command for console output
     private final Project project;
     private String originalWorkingDir; // Store original working directory for GUI executable launch
+    private boolean isDebugMode = false; // Track whether we're running in debug vs run mode
 
     public HarbourDebuggerRunProfileState(ExecutionEnvironment env,
                                           HarbourDebuggerRunConfig runConfig) {
@@ -296,8 +297,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         cleanupExecutableBeforeCompilation(commandLine);
         terminateRunningProcesses();
         
-        // Copy debug libraries to build directory before compilation
-        copyDebugLibrary(workingDir);
+        // Copy debug libraries to build directory before compilation (debug mode only)
+        if (isDebugMode) {
+            copyDebugLibrary(workingDir);
+        }
         
         // Fix Windows/WSL path issues for working directory
         if (workingDir != null && workingDir.contains("\\wsl.localhost\\")) {
@@ -358,17 +361,22 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // Copy harbour_debug.prg to build directory for console programs
+        // Copy harbour_debug.prg to build directory for console programs (debug mode only)
         // This provides network connectivity for PyCharm debugging
-        File debugLibFile = new File(buildDirFile, "harbour_debug.prg");
-        try {
-            copyResourceFile(debugLibFile, "/debug/harbour_debug.prg");
+        if (isDebugMode) {
+            File debugLibFile = new File(buildDirFile, "harbour_debug.prg");
+            try {
+                copyResourceFile(debugLibFile, "/debug/harbour_debug.prg");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE: Copied debug library to: " + debugLibFile.getAbsolutePath());
+            } catch (IOException e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Warning: Failed to copy debug library: " + e.getMessage());
+                // Continue without debug library
+            }
+        } else {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Copied debug library to: " + debugLibFile.getAbsolutePath());
-        } catch (IOException e) {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Warning: Failed to copy debug library: " + e.getMessage());
-            // Continue without debug library
+                    "RUN MODE: Skipped copying debug library");
         }
 
         // Detect if this is a GUI program early - use same logic as in startProcess()
@@ -491,25 +499,40 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Debug library will be added after compiler options for proper parameter order");
         
-        // FIXED APPROACH: Different strategy for GUI vs Console programs
-        parameters.add("-b");
-        
-        if (isGui) {
-            // GUI programs: Compile only, don't auto-launch with -run
-            // PyCharm will handle the executable launch separately for proper debugging
-            parameters.add("-debug");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI PROGRAM: Added debug flags: -b -debug (no -run for GUI apps)");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "GUI STRATEGY: Compile only, let PyCharm handle executable launch for proper debugging context");
+        // Check if we're in debug mode before adding debug-specific parameters
+        if (isDebugMode) {
+            // DEBUG MODE: Add debug-specific compilation flags
+            parameters.add("-b");
+            
+            if (isGui) {
+                // GUI programs: Compile only, don't auto-launch with -run
+                // PyCharm will handle the executable launch separately for proper debugging
+                parameters.add("-debug");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE - GUI PROGRAM: Added debug flags: -b -debug (no -run for GUI apps)");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE - GUI STRATEGY: Compile only, let PyCharm handle executable launch for proper debugging context");
+            } else {
+                // Console programs: Use -run for immediate execution
+                parameters.add("-run");
+                parameters.add("-debug");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE - CONSOLE PROGRAM: Added debug flags: -b -run -debug");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE - CONSOLE STRATEGY: Immediate execution with -run flag");
+            }
         } else {
-            // Console programs: Use -run for immediate execution
-            parameters.add("-run");
-            parameters.add("-debug");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "CONSOLE PROGRAM: Added debug flags: -b -run -debug");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "CONSOLE STRATEGY: Immediate execution with -run flag");
+            // RUN MODE: Standard compilation without debug flags
+            if (isGui) {
+                // GUI programs: Just compile
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "RUN MODE - GUI PROGRAM: Standard compilation (no debug flags)");
+            } else {
+                // Console programs: Use -run for immediate execution
+                parameters.add("-run");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "RUN MODE - CONSOLE PROGRAM: Standard compilation with -run");
+            }
         }
         
         boolean isWindowsConsole = currentOS.contains("windows") && !isGui;
@@ -519,12 +542,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Remove FORCE_DEBUG_MODE - it was triggering Harbour debugger instead of PyCharm
         // parameters.add("-DFORCE_DEBUG_MODE=1");  // REMOVED - not in working version
         
-        // UNIFIED APPROACH: Add standard debug defines for ALL programs
-        parameters.add("-D__HARBOUR_DEBUG__");
-        parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
-        
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "FIXED: Added debug defines: -D__HARBOUR_DEBUG__ -DDBG_PORT=" + runConfig.getDebugPort());
+        // Add debug defines only in debug mode
+        if (isDebugMode) {
+            parameters.add("-D__HARBOUR_DEBUG__");
+            parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
+            
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "DEBUG MODE: Added debug defines: -D__HARBOUR_DEBUG__ -DDBG_PORT=" + runConfig.getDebugPort());
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "RUN MODE: Skipped debug defines");
+        }
         
         // FIXED: No manual GUI parameter additions
         // Let compiler options from config and .hbp files determine GUI settings
@@ -536,23 +564,26 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             parameters.addAll(StringUtil.split(runConfig.getCompilerOptions(), " "));
         }
 
-        // UNIFIED APPROACH v1.0.345: Add debug library for ALL files (.prg AND .hbp)
-        if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
+        // Add debug library only in debug mode
+        if (isDebugMode && !finalBuildTarget.endsWith("harbour_debug.prg")) {
             String debugSourcePath;
             
             if (currentOS.contains("windows")) {
                 debugSourcePath = buildDir + "\\" + "harbour_debug.prg";
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "WINDOWS: Adding debug library for unified approach: " + debugSourcePath);
+                        "DEBUG MODE - WINDOWS: Adding debug library: " + debugSourcePath);
             } else {
                 debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "UNIX: Adding debug library for unified approach: " + debugSourcePath);
+                        "DEBUG MODE - UNIX: Adding debug library: " + debugSourcePath);
             }
             
             parameters.add(debugSourcePath);
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "UNIFIED v1.0.345: Added debug library for both .prg and .hbp files: " + debugSourcePath);
+                    "DEBUG MODE: Added debug library for debugging: " + debugSourcePath);
+        } else if (!isDebugMode) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "RUN MODE: Skipped debug library");
         }
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
@@ -638,21 +669,26 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // UNIFIED DEBUGGING APPROACH: Use same approach as successful Unix GUI for ALL programs
-        // This eliminates GUI vs Console distinction and provides Harbour GUI + PyCharm debugging for all
+        // DEBUGGING APPROACH: Set debug environment variables only in debug mode
+        if (isDebugMode) {
+            String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
+            commandLine.withEnvironment("HB_DBG_PATH", debugPath);
+            commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "DEBUG MODE: Set debug environment variables - HB_DBG_PATH=" + debugPath + ", HB_REMOTE_DEBUG=1");
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "RUN MODE: Skipped debug environment variables");
+        }
         
-        String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
-        commandLine.withEnvironment("HB_DBG_PATH", debugPath);
-        commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
-        
-        // WINDOWS-SPECIFIC: Add environment variables for Windows debug library
-        if (currentOS.contains("windows")) {
+        // WINDOWS-SPECIFIC: Add environment variables for Windows debug library (debug mode only)
+        if (currentOS.contains("windows") && isDebugMode) {
             // Help Windows debug library detect GUI mode
             if (isGui) {
                 commandLine.withEnvironment("HB_GUI_MODE", "1");
                 commandLine.withEnvironment("HB_GT_LIB", "GTWVT");
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Windows: Set GUI mode environment variables");
+                        "DEBUG MODE - Windows: Set GUI mode environment variables");
             } else {
                 // Windows Console: Back to NUL approach with enhanced output handling
                 commandLine.withEnvironment("HB_GUI_MODE", "0");     // Console mode
@@ -665,8 +701,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 commandLine.withEnvironment("TMP", finalWorkingDir);
                 commandLine.withEnvironment("TEMP", finalWorkingDir);
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Windows: Using NUL terminal with forced stdout redirection for PyCharm capture");
+                        "DEBUG MODE - Windows: Using NUL terminal with forced stdout redirection for PyCharm capture");
             }
+        } else if (currentOS.contains("windows") && !isDebugMode) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "RUN MODE - Windows: Skipped debug library environment variables");
         }
         
         // CRITICAL: Do NOT set ALTD=BREAK as it conflicts with PyCharm remote debugging
@@ -683,10 +722,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 "Platform: " + (isWindows ? "Windows" : "Unix/Linux"));
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Program Type Detection: " + (isGuiProgram ? "GUI" : "Console") + " (for reference only)");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "PyCharm Remote Debugging Environment: HB_DBG_PATH=" + debugPath + ", HB_REMOTE_DEBUG=1");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Target: PyCharm remote debugging for ALL programs (no ALTD=BREAK)");
+        if (isDebugMode) {
+            String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "DEBUG MODE: PyCharm Remote Debugging Environment: HB_DBG_PATH=" + debugPath + ", HB_REMOTE_DEBUG=1");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Target: PyCharm remote debugging for ALL programs (no ALTD=BREAK)");
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "RUN MODE: No debugging environment set");
+        }
     }
 
     /**
@@ -842,8 +887,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         commandLine.addParameters(parameters);
         commandLine.setWorkDirectory(workingDir);
-        commandLine.withEnvironment("HB_DBG_PATH", ".");
-        commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+        
+        // Set debug environment variables only in debug mode
+        if (isDebugMode) {
+            commandLine.withEnvironment("HB_DBG_PATH", ".");
+            commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+        }
         
         // Log the complete executable command for debugging - make it very visible
         StringBuilder cmdLog = new StringBuilder();
@@ -1462,9 +1511,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "execute() method called");
         
         // Check if this is debug mode and if mute state is available from HarbourDebuggerRunner
-        boolean isDebugMode = DefaultDebugExecutor.EXECUTOR_ID.equals(executor.getId());
+        this.isDebugMode = DefaultDebugExecutor.EXECUTOR_ID.equals(executor.getId());
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Executor mode: " + (isDebugMode ? "DEBUG" : "RUN") + " (ID: " + executor.getId() + ")");
+                "Executor mode: " + (this.isDebugMode ? "DEBUG" : "RUN") + " (ID: " + executor.getId() + ")");
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call startProcess()");
         
