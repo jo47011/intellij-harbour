@@ -16,6 +16,7 @@ import com.intellij.execution.ui.ConsoleView;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.project.Project;
+import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 
@@ -66,7 +67,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call exportBreakpointsToFile()");
         
-        exportBreakpointsToFile();
+        // Check if mute state is available from HarbourDebuggerRunner (two-phase startup)
+        Boolean globalMuteState = env.getUserData(HarbourDebuggerRunner.GLOBAL_MUTE_STATE_KEY);
+        if (globalMuteState != null) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Two-phase startup: Using actual mute state from runner: " + globalMuteState);
+            exportBreakpointsToFile(globalMuteState);
+        } else {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Two-phase startup: Mute state not available, using fallback approach");
+            exportBreakpointsToFile();
+        }
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "exportBreakpointsToFile() call completed");
 
@@ -851,6 +862,119 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Environment: HB_DBG_PATH=., HB_REMOTE_DEBUG=1");
     }
 
+    private void exportBreakpointsToFile(boolean globallyMuted) {
+        Project project = env.getProject();
+        XBreakpointManager breakpointManager = XDebuggerManager.getInstance(project).getBreakpointManager();
+
+        // COMPREHENSIVE DEBUG LOGGING
+        HarbourLogger.log(project, "HarbourDebugger", "========= EXPORT BREAKPOINTS DEBUG START (WITH MUTE STATE) =========");
+        
+        // Check if this method is actually being called
+        HarbourLogger.log(project, "HarbourDebugger", "exportBreakpointsToFile(boolean) method called with globallyMuted: " + globallyMuted);
+        
+        String breakpointFileName = StringUtil.isEmpty(runConfig.getBreakpointFile())
+                ? "init.cld" : runConfig.getBreakpointFile();
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Breakpoint filename: " + breakpointFileName);
+
+        String workingDir = runConfig.getWorkingDirectory();
+        if (StringUtil.isEmpty(workingDir)) {
+            if (runConfig.isUseDirectExecution() && !StringUtil.isEmpty(runConfig.getExecutablePath())) {
+                File exeFile = new File(runConfig.getExecutablePath());
+                workingDir = exeFile.getParent();
+            } else if (!StringUtil.isEmpty(runConfig.getSourceFile())) {
+                File sourceFile = new File(runConfig.getSourceFile());
+                workingDir = sourceFile.getParent();
+            } else {
+                workingDir = project.getBasePath();
+            }
+        }
+
+        File breakpointFile = new File(workingDir, breakpointFileName);
+        
+        List<File> breakpointFiles = new ArrayList<>();
+        breakpointFiles.add(breakpointFile);
+        
+        if (System.getProperty("os.name").toLowerCase().contains("windows") && 
+            runConfig.getSourceFile().endsWith(".hbp")) {
+            File hbpDir = new File(runConfig.getSourceFile()).getParentFile();
+            File altBreakpointFile = new File(hbpDir, breakpointFileName);
+            if (!altBreakpointFile.equals(breakpointFile)) {
+                breakpointFiles.add(altBreakpointFile);
+            }
+            
+            File hbmkBuildDir = new File(hbpDir, ".hbmk");
+            if (hbmkBuildDir.exists() || hbmkBuildDir.mkdirs()) {
+                File hbmkBreakpointFile = new File(hbmkBuildDir, breakpointFileName);
+                if (!hbmkBreakpointFile.equals(breakpointFile) && !hbmkBreakpointFile.equals(altBreakpointFile)) {
+                    breakpointFiles.add(hbmkBreakpointFile);
+                }
+            }
+        }
+
+        if (!breakpointFile.getParentFile().exists()) {
+            if (!breakpointFile.getParentFile().mkdirs()) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", "Failed to create breakpoint directory");
+            }
+        }
+
+        String sourceFilePath = runConfig.getSourceFile();
+        if (!new File(sourceFilePath).isAbsolute()) {
+            sourceFilePath = new File(workingDir, sourceFilePath).getAbsolutePath();
+        }
+        String targetPrgFile = getMainPrgFileFromSource(sourceFilePath);
+        HarbourLogger.log(project, "HarbourDebugger", "Target .prg file for debugging: " + targetPrgFile);
+        
+        // Count total enabled breakpoints
+        int totalBreakpoints = 0;
+        for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
+            if (bp instanceof XLineBreakpoint &&
+                    bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
+                    bp.getSourcePosition() != null) {
+
+                VirtualFile file = bp.getSourcePosition().getFile();
+                String fileName = file.getName();
+
+                if (fileName.equals(targetPrgFile)) {
+                    if (bp.isEnabled()) {
+                        totalBreakpoints++;
+                    }
+                }
+            }
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+                "TWO-PHASE APPROACH: Global mute state: " + globallyMuted + 
+                ", Total enabled breakpoints: " + totalBreakpoints);
+        
+        for (File bpFile : breakpointFiles) {
+            try {
+                if (!bpFile.getParentFile().exists()) {
+                    bpFile.getParentFile().mkdirs();
+                }
+                
+                if (globallyMuted) {
+                    // Create minimal init.cld when globally muted
+                    try (java.io.FileWriter writer = new java.io.FileWriter(bpFile)) {
+                        writer.write("// IntelliJ-managed breakpoints - globally muted, all breakpoints via remote protocol\n");
+                    }
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Created minimal init.cld (muted mode) at: " + bpFile.getAbsolutePath());
+                } else {
+                    // Write full breakpoints to init.cld when not muted
+                    updateInitCldFile(bpFile, targetPrgFile, totalBreakpoints, breakpointManager, project);
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Created full init.cld with " + totalBreakpoints + " breakpoints at: " + bpFile.getAbsolutePath());
+                }
+            } catch (IOException e) {
+                HarbourLogger.log(project, "HarbourDebugger", "Failed to create init.cld at " + 
+                    bpFile.getAbsolutePath() + ": " + e.getMessage());
+            }
+        }
+
+        HarbourLogger.log(project, "HarbourDebugger", "========= EXPORT BREAKPOINTS DEBUG END (WITH MUTE STATE) =========");
+    }
+    
     private void exportBreakpointsToFile() {
         Project project = env.getProject();
         XBreakpointManager breakpointManager = XDebuggerManager.getInstance(project).getBreakpointManager();
@@ -1336,6 +1460,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             throws ExecutionException {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "========= EXECUTE DEBUG =========");
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "execute() method called");
+        
+        // Check if this is debug mode and if mute state is available from HarbourDebuggerRunner
+        boolean isDebugMode = DefaultDebugExecutor.EXECUTOR_ID.equals(executor.getId());
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                "Executor mode: " + (isDebugMode ? "DEBUG" : "RUN") + " (ID: " + executor.getId() + ")");
         
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call startProcess()");
         
