@@ -60,7 +60,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     workingDirChooser,
                     null,
-                    null,
+                    HarbourFileUtils.getVirtualFileFromPath(workingDirField.getText()),
                     file -> workingDirField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
@@ -94,7 +94,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     hbmk2Chooser,
                     null,
-                    null,
+                    HarbourFileUtils.getVirtualFileFromPath(hbmk2PathField.getText()),
                     file -> hbmk2PathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
@@ -107,7 +107,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     sourceFileDesc,
                     null,
-                    null,
+                    HarbourFileUtils.getVirtualFileFromPath(sourceFileField.getText()),
                     file -> sourceFileField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
@@ -127,7 +127,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     exeChooser,
                     null,
-                    null,
+                    HarbourFileUtils.getVirtualFileFromPath(executablePathField.getText()),
                     file -> executablePathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });

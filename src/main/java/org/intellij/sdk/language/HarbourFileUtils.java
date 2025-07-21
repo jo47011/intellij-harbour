@@ -195,4 +195,31 @@ public class HarbourFileUtils {
         // Convert to OS-appropriate separators
         return path.replace('/', File.separatorChar).replace('\\', File.separatorChar);
     }
+
+    /**
+     * Get VirtualFile from a path string, useful for file chooser initialization
+     * 
+     * @param path The file or directory path
+     * @return VirtualFile if path exists, null otherwise
+     */
+    public static VirtualFile getVirtualFileFromPath(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return null;
+        }
+        
+        // Normalize path separators first
+        String normalizedPath = normalizePathSeparators(path.trim());
+        File file = new File(normalizedPath);
+        
+        // If file doesn't exist, try parent directory for file paths
+        if (!file.exists() && file.getParentFile() != null && file.getParentFile().exists()) {
+            file = file.getParentFile();
+        }
+        
+        if (file.exists()) {
+            return LocalFileSystem.getInstance().findFileByIoFile(file);
+        }
+        
+        return null;
+    }
 }
