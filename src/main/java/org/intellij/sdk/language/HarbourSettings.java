@@ -50,6 +50,9 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     // Build output directory (default .hbmk)
     private String buildOutputDirectory = ".hbmk";
+    
+    // Last known global mute state for debugger
+    private boolean lastKnownGlobalMuteState = false;
 
     // Indentation size (default 2 spaces)
     private int indentationSize = 2;
@@ -86,6 +89,15 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public void setBuildOutputDirectory(String buildOutputDirectory) {
         this.buildOutputDirectory = buildOutputDirectory;
+    }
+    
+    // Last known mute state methods
+    public boolean getLastKnownGlobalMuteState() {
+        return lastKnownGlobalMuteState;
+    }
+    
+    public void setLastKnownGlobalMuteState(boolean muted) {
+        this.lastKnownGlobalMuteState = muted;
     }
 
     /**

@@ -12,6 +12,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerUtil;
+import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.xdebugger.XDebuggerManagerListener;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.breakpoints.XBreakpointHandler;
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider;
@@ -19,6 +21,7 @@ import com.intellij.xdebugger.frame.XSuspendContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,6 +53,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile boolean isLocked = false;
     private volatile String lastCommand = "";
     private volatile long lastCommandTime = 0;
+    private volatile boolean sessionInitialized = false;
     
     // Conditional breakpoint evaluation fields
     private String conditionalBreakpointFile = null;
@@ -100,6 +104,30 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         this.project = session.getProject();
         this.debugPort = debugPort;
         this.breakpointHandler = new HarbourDebuggerBreakpointHandler(this);
+        
+        // Set up listener for proper breakpoint timing
+        project.getMessageBus().connect().subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
+            @Override
+            public void processStarted(@NotNull XDebugProcess debugProcess) {
+                if (debugProcess == HarbourDebuggerRemoteProcess.this) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Session initialized - safe to check mute state");
+                    sessionInitialized = true;
+                    // Defer breakpoint sending to ensure proper state
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "XDebuggerManagerListener.processStarted - about to check breakpoints");
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "isConnected: " + isConnected + ", sessionInitialized: " + sessionInitialized);
+                        if (isConnected && sessionInitialized) {
+                            sendBreakpointsAfterSessionReady();
+                        } else {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Not ready to send breakpoints yet");
+                        }
+                    });
+                }
+            }
+        });
         
         // Create debug connection
         this.connection = new HarbourDebuggerConnection(debugPort);
@@ -235,8 +263,21 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         // Record connection start time to prevent premature shutdown
                         connectionStartTime = System.currentTimeMillis();
                         
-                        // Send initial breakpoints
-                        sendInitialBreakpoints();
+                        // With minimal init.cld approach, no immediate clearing needed
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Connection established - init.cld is minimal, will set breakpoints via remote protocol");
+                        
+                        // Standard breakpoint processing 
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "sessionInitialized: " + sessionInitialized);
+                        if (sessionInitialized) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Session ready, processing breakpoints via remote protocol");
+                            sendBreakpointsAfterSessionReady();
+                        } else {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Waiting for proper session initialization");
+                        }
                     } else {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "❌ Failed to establish debug connection");
                         System.out.println("❌ FAILED TO ESTABLISH DEBUG CONNECTION");
@@ -865,13 +906,138 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         sendCommand("PUBLICS");
     }
     
-    private void sendInitialBreakpoints() {
-        // Send all breakpoints registered with the handler
-        breakpointHandler.sendAllBreakpoints();
+    private void sendBreakpointsAfterSessionReady() {
+        // This method is called after session is properly initialized
+        boolean globallyMuted = getSession().areBreakpointsMuted();
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "=== SENDING BREAKPOINTS AFTER SESSION READY ===");
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Global mute state: " + globallyMuted);
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Session initialized: " + sessionInitialized);
+        
+        // Save the mute state to settings for next run
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        if (settings != null) {
+            settings.setLastKnownGlobalMuteState(globallyMuted);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Saved global mute state to settings: " + globallyMuted);
+        }
+        
+        // ALWAYS send breakpoints via remote protocol (init.cld is now minimal)
+        if (globallyMuted) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Breakpoints globally muted - NOT sending any breakpoints");
+        } else {
+            // Send all breakpoints registered with the handler
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Sending breakpoints via remote protocol (init.cld is minimal)");
+            breakpointHandler.sendAllBreakpoints();
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Breakpoints sent, waiting for program to hit AltD()");
+        }
         
         // Don't send GO automatically - wait for user to click Continue
         // The program will pause when it hits AltD() and send STOP
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Breakpoints sent, waiting for program to hit AltD()");
+    }
+    
+    /**
+     * Clear breakpoints that were set from init.cld file when globally muted
+     */
+    private void clearInitCldBreakpoints() {
+        try {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "=== CLEAR INIT.CLD BREAKPOINTS START ===");
+            
+            // Get working directory from the project and other potential locations
+            String currentDir = System.getProperty("user.dir");
+            String projectDir = project.getBasePath();
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Current working directory: " + currentDir);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Project base path: " + projectDir);
+            
+            // Check multiple potential init.cld locations
+            String[] initCldPaths = {
+                currentDir + "/init.cld",
+                projectDir + "/init.cld",
+                projectDir + "/windows/hbmiki-test-windows/init.cld",
+                "/home/developer/workspace/windows/hbmiki-test-windows/init.cld",
+                currentDir + "/../init.cld",
+                currentDir + "/../../init.cld"
+            };
+            
+            int clearedCount = 0;
+            boolean foundAnyFile = false;
+            
+            for (String initCldPath : initCldPaths) {
+                File initCldFile = new File(initCldPath);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Checking init.cld at: " + initCldFile.getAbsolutePath() + " - exists: " + initCldFile.exists());
+                
+                if (initCldFile.exists()) {
+                    foundAnyFile = true;
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "FOUND init.cld at: " + initCldFile.getAbsolutePath());
+                    
+                    try {
+                        List<String> lines = java.nio.file.Files.readAllLines(initCldFile.toPath());
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Read " + lines.size() + " lines from init.cld");
+                        
+                        for (String line : lines) {
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Processing line: '" + line + "'");
+                            
+                            if (line.trim().startsWith("BP ") && line.contains(" ")) {
+                                // Parse line format: "BP line filename"
+                                String[] parts = line.trim().split(" ", 3);
+                                if (parts.length >= 3) {
+                                    String lineNum = parts[1];
+                                    String fileName = parts[2];
+                                    
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Parsed BP: line=" + lineNum + ", file=" + fileName);
+                                    
+                                    // Send remove command
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Sending BREAKPOINT command...");
+                                    sendCommand("BREAKPOINT");
+                                    
+                                    String removeCmd = "-:" + fileName + ":" + lineNum;
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Sending remove command: " + removeCmd);
+                                    sendCommand(removeCmd);
+                                    
+                                    clearedCount++;
+                                    
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Successfully sent clear command for: " + fileName + ":" + lineNum);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Error reading init.cld: " + e.getMessage());
+                        e.printStackTrace();
+                    }
+                }
+            }
+            
+            if (!foundAnyFile) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "WARNING: No init.cld files found in any checked location!");
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "=== CLEAR SUMMARY: Found files=" + foundAnyFile + ", Cleared " + clearedCount + " breakpoints ===");
+            
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Error clearing init.cld breakpoints: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**
@@ -1008,8 +1174,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                 "Debug server successfully restarted after crash recovery");
                             
-                            // Send initial setup commands
-                            sendInitialBreakpoints();
+                            // Send initial setup commands - but only if session is ready
+                            if (sessionInitialized) {
+                                sendBreakpointsAfterSessionReady();
+                            }
                             
                             // Notify user about successful recovery
                             ApplicationManager.getApplication().invokeLater(() -> {

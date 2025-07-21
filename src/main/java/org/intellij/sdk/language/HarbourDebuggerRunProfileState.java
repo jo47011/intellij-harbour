@@ -971,7 +971,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         boolean isInstrumented = targetPrgFile.endsWith("_instrumented.prg");
         String originalFileName = isInstrumented ? 
             targetPrgFile.replace("_instrumented.prg", ".prg") : targetPrgFile;
-        // Count total breakpoints for logging
+        // Count total enabled breakpoints and check for potential global mute
+        int totalBreakpointsAvailable = 0;
+        int individuallyDisabledCount = 0;
+        
         for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
             if (bp instanceof XLineBreakpoint &&
                     bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
@@ -980,28 +983,71 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 VirtualFile file = bp.getSourcePosition().getFile();
                 String fileName = file.getName();
 
-                // Only count breakpoints for the file we're actually debugging
+                // Count breakpoints for the file we're actually debugging
                 if (fileName.equals(originalFileName) || 
                     (isInstrumented && fileName.equals(targetPrgFile))) {
-                    totalBreakpoints++;
-                    breakpointFileNames.add(fileName);
+                    totalBreakpointsAvailable++;
+                    
+                    if (bp.isEnabled()) {
+                        totalBreakpoints++;
+                        breakpointFileNames.add(fileName);
+                    } else {
+                        individuallyDisabledCount++;
+                    }
                 }
             }
         }
         
-        // Write breakpoints to all init.cld file locations, preserving existing content
-        HarbourLogger.log(project, "HarbourDebugger", "About to write to " + breakpointFiles.size() + " locations");
+        // Check last known global mute state from settings
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        boolean lastKnownMuteState = false;
+        if (settings != null) {
+            lastKnownMuteState = settings.getLastKnownGlobalMuteState();
+            HarbourLogger.log(project, "HarbourDebugger", 
+                    "Last known global mute state from settings: " + lastKnownMuteState);
+        }
+        
+        // Heuristic: If we have breakpoints but none are individually disabled, 
+        // they might be globally muted (since global mute doesn't change individual isEnabled())
+        boolean possiblyGloballyMuted = (totalBreakpointsAvailable > 0) && 
+                                      (individuallyDisabledCount == 0) && 
+                                      (totalBreakpoints == totalBreakpointsAvailable);
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+                "Breakpoint analysis: total=" + totalBreakpointsAvailable + 
+                ", enabled=" + totalBreakpoints + 
+                ", individually disabled=" + individuallyDisabledCount + 
+                ", possibly globally muted=" + possiblyGloballyMuted);
+        
+        // HARMONIZED SOLUTION: Use last known mute state to decide init.cld content
+        boolean shouldUseMinimalInitCld = lastKnownMuteState;
+        
+        HarbourLogger.log(project, "HarbourDebugger", 
+                "HARMONIZED APPROACH: Using " + (shouldUseMinimalInitCld ? "minimal" : "full") + 
+                " init.cld based on last known mute state: " + lastKnownMuteState);
         
         for (File bpFile : breakpointFiles) {
-            HarbourLogger.log(project, "HarbourDebugger", "Processing init.cld at: " + bpFile.getAbsolutePath());
-            
             try {
-                updateInitCldFile(bpFile, originalFileName, totalBreakpoints, breakpointManager, project);
-                HarbourLogger.log(project, "HarbourDebugger", "Successfully updated init.cld at: " + bpFile.getAbsolutePath());
+                if (!bpFile.getParentFile().exists()) {
+                    bpFile.getParentFile().mkdirs();
+                }
+                
+                if (shouldUseMinimalInitCld) {
+                    // Create minimal init.cld when globally muted
+                    try (java.io.FileWriter writer = new java.io.FileWriter(bpFile)) {
+                        writer.write("// IntelliJ-managed breakpoints - globally muted, all breakpoints via remote protocol\n");
+                    }
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Created minimal init.cld (muted mode) at: " + bpFile.getAbsolutePath());
+                } else {
+                    // Write full breakpoints to init.cld when not muted
+                    updateInitCldFile(bpFile, targetPrgFile, totalBreakpoints, breakpointManager, project);
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Created full init.cld with " + totalBreakpoints + " breakpoints at: " + bpFile.getAbsolutePath());
+                }
             } catch (IOException e) {
-                HarbourLogger.log(project, "HarbourDebugger", "Failed to update init.cld at " + 
+                HarbourLogger.log(project, "HarbourDebugger", "Failed to create init.cld at " + 
                     bpFile.getAbsolutePath() + ": " + e.getMessage());
-                e.printStackTrace();
             }
         }
             
@@ -1147,15 +1193,42 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(project, "HarbourDebugger", "Adding new breakpoints...");
         
         int addedBreakpoints = 0;
+        int skippedBreakpoints = 0;
         for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
             if (bp instanceof XLineBreakpoint &&
                     bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
                     bp.getSourcePosition() != null) {
-
+                    
+                if (!bp.isEnabled()) {
+                    // Log skipped disabled breakpoints with detailed info
+                    VirtualFile file = bp.getSourcePosition().getFile();
+                    String fileName = file.getName();
+                    int line = bp.getSourcePosition().getLine() + 1;
+                    
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "=== SKIPPING DISABLED BREAKPOINT ===");
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "File: " + fileName + ", Line: " + line);
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Enabled: " + bp.isEnabled() + " (muted/disabled)");
+                    skippedBreakpoints++;
+                    continue;
+                }
+                
+                // Log enabled breakpoints
                 VirtualFile file = bp.getSourcePosition().getFile();
                 String fileName = file.getName();
                 int line = bp.getSourcePosition().getLine() + 1;
+
+                // Variables already declared above for logging
                 String filePath = file.getPath();
+                
+                HarbourLogger.log(project, "HarbourDebugger", 
+                        "=== WRITING BREAKPOINT TO init.cld ===");
+                HarbourLogger.log(project, "HarbourDebugger", 
+                        "File: " + fileName + ", Line: " + line);
+                HarbourLogger.log(project, "HarbourDebugger", 
+                        "Enabled: " + bp.isEnabled() + " (should be true)");
                 
                 // Removed flooding log message - was logging every breakpoint check
                 HarbourLogger.log(project, "HarbourDebugger", "  Target file: " + targetPrgFile);
@@ -1212,7 +1285,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        HarbourLogger.log(project, "HarbourDebugger", "Added " + addedBreakpoints + " breakpoints total");
+        HarbourLogger.log(project, "HarbourDebugger", "Added " + addedBreakpoints + " enabled breakpoints");
+        HarbourLogger.log(project, "HarbourDebugger", "Skipped " + skippedBreakpoints + " disabled/muted breakpoints");
         
         // Write updated content
         HarbourLogger.log(project, "HarbourDebugger", "Writing " + filteredLines.size() + " lines to init.cld");
