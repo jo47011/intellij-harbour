@@ -179,4 +179,20 @@ public class HarbourFileUtils {
 
         return excludedFiles.contains(filename);
     }
+
+    /**
+     * Normalize a file path to use OS-appropriate separators
+     * Converts Unix-style paths (with forward slashes) to the native OS format
+     *
+     * @param path The path to normalize
+     * @return The path with OS-appropriate separators
+     */
+    public static String normalizePathSeparators(String path) {
+        if (path == null || path.isEmpty()) {
+            return path;
+        }
+        
+        // Convert to OS-appropriate separators
+        return path.replace('/', File.separatorChar).replace('\\', File.separatorChar);
+    }
 }

@@ -61,7 +61,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
                     workingDirChooser,
                     null,
                     null,
-                    file -> workingDirField.setText(file.getPath())
+                    file -> workingDirField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         commonPanel.add(createLabeledField("Working Directory:", workingDirField), c);
@@ -95,7 +95,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
                     hbmk2Chooser,
                     null,
                     null,
-                    file -> hbmk2PathField.setText(file.getPath())
+                    file -> hbmk2PathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         compilePanel.add(createLabeledField("hbmk2 Path:", hbmk2PathField), c);
@@ -108,7 +108,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
                     sourceFileDesc,
                     null,
                     null,
-                    file -> sourceFileField.setText(file.getPath())
+                    file -> sourceFileField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         compilePanel.add(createLabeledField("Source File:", sourceFileField), c);
@@ -128,7 +128,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
                     exeChooser,
                     null,
                     null,
-                    file -> executablePathField.setText(file.getPath())
+                    file -> executablePathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         directPanel.add(createLabeledField("Executable Path:", executablePathField), c);

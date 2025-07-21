@@ -109,7 +109,7 @@ public class HarbourSettingsConfigurable implements Configurable {
                     dirChooser,
                     myProject,
                     null, // Initial file, can be null
-                    file -> myDebugLogPathField.setText(file.getPath())
+                    file -> myDebugLogPathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
 
