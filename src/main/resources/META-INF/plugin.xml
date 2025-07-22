@@ -80,15 +80,6 @@
         <!-- Windows-specific registration fix -->
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerRegistration"/>
         
-        <!-- Plugin load test -->
-        <applicationService serviceImplementation="org.intellij.sdk.language.HarbourPluginLoadTest"/>
-        <applicationService serviceImplementation="org.intellij.sdk.language.HarbourMinimalTest"/>
-        <!-- REMOVED: Version popup notification -->
-        <!-- <postStartupActivity implementation="org.intellij.sdk.language.HarbourPluginNotificationTest"/> -->
-        <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerDiagnostics"/>
-        
-        <!-- Force debug server start for testing - DISABLED due to PyCharm crashes -->
-        <!-- <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebugServerForcer"/> -->
         
         <!-- Formatting -->
         <lang.formatter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFormattingModelBuilder"/>

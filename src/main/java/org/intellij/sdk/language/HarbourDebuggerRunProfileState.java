@@ -143,12 +143,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             boolean isWindowsConsole = currentOS.contains("windows") && !isGuiProgram(runConfig);
             
             // UNIFIED APPROACH: Use single-phase compile+run for all platforms
-            // This ensures proper PyCharm debug console integration
+            // This ensures proper debug console integration
             handler = new OSProcessHandler(commandLine);
             
             if (isWindowsConsole) {
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "Windows Console: Using unified single-phase approach for PyCharm console integration");
+                        "Windows Console: Using unified single-phase approach for console integration");
             } else {
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                         "Using standard OSProcessHandler for " + (currentOS.contains("windows") ? "Windows GUI" : "Unix"));
@@ -537,7 +537,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         boolean isWindowsConsole = currentOS.contains("windows") && !isGui;
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Purpose: Enable debugging symbols and immediate execution with PyCharm console integration");
+                "Purpose: Enable debugging symbols and immediate execution with console integration");
         
         // Remove FORCE_DEBUG_MODE - it was triggering Harbour debugger instead of PyCharm
         // parameters.add("-DFORCE_DEBUG_MODE=1");  // REMOVED - not in working version
@@ -1527,14 +1527,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         ConsoleView console = consoleBuilder.getConsole();
         console.attachToProcess(processHandler);
         
-        // Set the console in HarbourLogger so all Harbour errors go to PyCharm console
+        // Set the console in HarbourLogger
         HarbourLogger.setConsole(console);
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled - Harbour errors will appear in PyCharm console", HarbourLogger.LogLevel.DEBUG);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled", HarbourLogger.LogLevel.DEBUG);
 
-        // Re-enabled: File monitor needed for error display in PyCharm console
+        // File monitor for error display in console
         startHarbourErrorFileMonitor(console, env.getProject());
 
-        // Print the exact command to the PyCharm console
+        // Print the exact command to the console
         if (lastExecutedCommand != null) {
             console.print("=== EXACT HBMK2 COMMAND ===\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
             console.print(lastExecutedCommand + "\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
@@ -1967,12 +1967,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                             try {
                                 String content = new String(java.nio.file.Files.readAllBytes(errorFile.toPath()));
                                 if (!content.trim().isEmpty()) {
-                                    // Send error to PyCharm console
+                                    // Send error to console
                                     console.print("[Harbour Runtime Error] " + content.trim() + "\n", 
                                         com.intellij.execution.ui.ConsoleViewContentType.ERROR_OUTPUT);
                                     
                                     HarbourLogger.log(project, "HarbourDebugger", 
-                                        "Runtime error captured and sent to PyCharm console: " + content.trim());
+                                        "Runtime error captured and sent to console: " + content.trim());
                                     
                                     // Delete the error file after reading to prevent re-processing
                                     errorFile.delete();

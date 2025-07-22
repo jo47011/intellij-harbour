@@ -43,38 +43,9 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
 
     @Override
     public boolean canRun(@NotNull String executorId, @NotNull RunProfile profile) {
-        System.out.println("🔍 HarbourDebuggerRunner.canRun() called - v1.0.274");
-        System.out.println("🔍 OS: " + System.getProperty("os.name"));
-        System.out.println("🔍 Executor ID: " + executorId);
-        System.out.println("🔍 Expected ID: " + DefaultDebugExecutor.EXECUTOR_ID);
-        System.out.println("🔍 Profile class: " + profile.getClass().getName());
-        System.out.println("🔍 Profile name: " + profile.getName());
-        
-        // Windows-specific logging with absolute path
-        try {
-            String logPath = System.getProperty("user.home") + "/harbour_canRun_called.txt";
-            java.io.FileWriter fw = new java.io.FileWriter(logPath, true);
-            fw.write("canRun() called at " + java.time.LocalDateTime.now() + "\n");
-            fw.write("OS: " + System.getProperty("os.name") + "\n");
-            fw.write("Executor ID: " + executorId + "\n");
-            fw.write("Profile class: " + profile.getClass().getName() + "\n");
-            fw.write("Profile name: " + profile.getName() + "\n");
-            fw.write("Runner ID: " + getRunnerId() + "\n");
-            fw.write("---\n");
-            fw.close();
-            System.out.println("🔍 Log written to: " + logPath);
-        } catch (Exception e) {
-            System.err.println("Failed to write canRun log: " + e.getMessage());
-        }
-        
         boolean isDebugExecutor = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
         boolean isHarbourDebugConfig = profile instanceof HarbourDebuggerRunConfig;
-        
-        System.out.println("🔍 Is debug executor: " + isDebugExecutor);
-        System.out.println("🔍 Is HarbourDebuggerRunConfig: " + isHarbourDebugConfig);
-        
         boolean result = isDebugExecutor && isHarbourDebugConfig;
-        System.out.println("🔍 canRun() returning: " + result);
         
         return result;
     }
@@ -83,9 +54,6 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
     @Override
     protected RunContentDescriptor doExecute(@NotNull RunProfileState state,
                                              @NotNull ExecutionEnvironment env) throws ExecutionException {
-        // CRITICAL DEBUG OUTPUT - ALWAYS VISIBLE
-        System.out.println("🚀🚀🚀 HARBOUR DEBUG RUNNER doExecute() CALLED v1.0.274 🚀🚀🚀");
-        System.err.println("🚀🚀🚀 [STDERR] HARBOUR DEBUG RUNNER doExecute() CALLED v1.0.274 🚀🚀🚀");
         
         Project project = env.getProject();
 
@@ -104,22 +72,6 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
         XDebuggerManager debuggerManager = XDebuggerManager.getInstance(project);
         
         // Create debug session
-        System.out.println("🚀 HARBOUR DEBUG RUNNER v1.0.415 - CREATING DEBUG SESSION");
-        System.out.println("🔧 Two-phase startup: Creating session first to check mute state");
-        
-        // Log to file for debugging
-        try {
-            String tempDir = System.getProperty("java.io.tmpdir");
-            java.io.FileWriter fw = new java.io.FileWriter(tempDir + "/harbour_doExecute_called.txt", true);
-            fw.write("doExecute() called at " + java.time.LocalDateTime.now() + "\n");
-            fw.write("Project: " + project.getName() + "\n");
-            fw.write("Debug port: " + debugPort + "\n");
-            fw.write("Two-phase startup enabled\n");
-            fw.write("---\n");
-            fw.close();
-        } catch (Exception e) {
-            System.err.println("Failed to write doExecute log: " + e.getMessage());
-        }
         
         // Create a holder for the execution result
         final ExecutionResult[] executionResultHolder = new ExecutionResult[1];
@@ -128,11 +80,8 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
             @Override
             @NotNull
             public XDebugProcess start(@NotNull XDebugSession session) throws ExecutionException {
-                System.out.println("🔧 XDebugProcessStarter.start() called");
-                
                 // PHASE 1: Check mute state immediately
                 boolean globallyMuted = session.areBreakpointsMuted();
-                System.out.println("🔧 Global mute state detected: " + globallyMuted);
                 HarbourLogger.log(project, "HarbourDebugger", 
                         "Two-phase startup - mute state detected: " + globallyMuted);
                 
@@ -140,7 +89,6 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
                 env.putUserData(GLOBAL_MUTE_STATE_KEY, globallyMuted);
                 
                 // PHASE 2: Now execute the program with correct init.cld
-                System.out.println("🔧 Executing program with mute state: " + globallyMuted);
                 ExecutionResult executionResult = state.execute(env.getExecutor(), HarbourDebuggerRunner.this);
                 
                 if (executionResult == null) {
@@ -153,13 +101,8 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
                 HarbourDebuggerRunConfig config = (HarbourDebuggerRunConfig) env.getRunProfile();
                 int debugPort = config.getDebugPortAsInt();
                 
-                System.out.println("🔧 Debug port from config: " + debugPort);
-                System.out.println("🔧 About to create HarbourDebuggerRemoteProcess...");
-                
                 // Create remote debug process
                 HarbourDebuggerRemoteProcess process = new HarbourDebuggerRemoteProcess(session, executionResult, debugPort);
-
-                System.out.println("🔧 HarbourDebuggerRemoteProcess created successfully");
                 return process;
             }
         });

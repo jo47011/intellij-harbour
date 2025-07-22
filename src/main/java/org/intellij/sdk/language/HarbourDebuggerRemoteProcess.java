@@ -134,35 +134,6 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Created remote debugger on port " + debugPort);
         
-        // Multiple output channels to ensure visibility
-        System.out.println("🚀 HARBOUR DEBUG PROCESS v1.0.265 CONSTRUCTOR CALLED!");
-        System.err.println("🚀 [STDERR] HARBOUR DEBUG PROCESS v1.0.265 CONSTRUCTOR CALLED!");
-        
-        // Write to file for absolute confirmation - try multiple locations
-        String[] logPaths = {
-            "harbour_debug_process_created.txt",
-            "C:\\temp\\harbour_debug_process_created.txt",
-            System.getProperty("user.home") + "\\harbour_debug_process_created.txt",
-            System.getProperty("java.io.tmpdir") + "\\harbour_debug_process_created.txt"
-        };
-        
-        for (String path : logPaths) {
-            try {
-                java.io.FileWriter fw = new java.io.FileWriter(path);
-                fw.write("HarbourDebuggerRemoteProcess v1.0.265 constructor called\n");
-                fw.write("Debug port: " + debugPort + "\n");
-                fw.write("OS: " + System.getProperty("os.name") + "\n");
-                fw.write("Time: " + java.time.LocalDateTime.now() + "\n");
-                fw.write("User Home: " + System.getProperty("user.home") + "\n");
-                fw.write("Working Dir: " + System.getProperty("user.dir") + "\n");
-                fw.write("Java Temp Dir: " + System.getProperty("java.io.tmpdir") + "\n");
-                fw.close();
-                System.out.println("🚀 Debug process file written to: " + path);
-                break;
-            } catch (Exception e) {
-                System.err.println("Failed to write debug process file to " + path + ": " + e.getMessage());
-            }
-        }
         
         // Add shutdown hook to ensure cleanup even if normal shutdown fails
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -222,42 +193,26 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Start debug server listening immediately in constructor to ensure it's ready before Harbour execution
         try {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "=== PYCHARM DEBUG SERVER STARTUP v1.0.260 ===");
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "IMMEDIATE DEBUG SERVER STARTUP - CREATING SOCKET ON PORT " + debugPort);
-            
-            // Print to console as well for immediate visibility
-            System.out.println("🚀 STARTING PYCHARM DEBUG SERVER v1.0.260 ON PORT " + debugPort);
-            System.out.println("⏰ Timestamp: " + java.time.LocalDateTime.now());
-            System.out.println("🔧 Thread: " + Thread.currentThread().getName());
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Starting debug server on port " + debugPort);
             
             // Start listening immediately in constructor - this is synchronous and fast
             boolean serverStarted = connection.startListening();
             
             if (serverStarted) {
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                    "✅ SUCCESS: DEBUG SERVER IS NOW LISTENING ON PORT " + debugPort + " - READY FOR HARBOUR CONNECTIONS!");
-                System.out.println("✅ SUCCESS: PYCHARM DEBUG SERVER IS NOW LISTENING ON PORT " + debugPort);
-                System.out.println("🔗 Server Address: 127.0.0.1:" + debugPort);
-                System.out.println("⚡ READY FOR HARBOUR CONNECTIONS - NO MORE CONNECTION REFUSED ERRORS!");
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug server listening on port " + debugPort);
             } else {
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                    "❌ CRITICAL FAILURE: COULD NOT START DEBUG SERVER ON PORT " + debugPort);
-                System.out.println("❌ CRITICAL FAILURE: COULD NOT START DEBUG SERVER ON PORT " + debugPort);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to start debug server on port " + debugPort);
             }
             
             // Now start accepting connections asynchronously (this will block until connection arrives)
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 try {
                     HarbourLogger.log("HarbourDebuggerRemoteProcess", "Waiting for Harbour program to connect...");
-                    System.out.println("⏳ WAITING FOR HARBOUR PROGRAM TO CONNECT ON PORT " + debugPort + "...");
-                    System.out.println("🔍 PyCharm is now listening and ready to accept connections");
                     
                     isConnected = connection.acceptConnection(this::handleDebugMessage);
                 
                     if (isConnected) {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "✅ HARBOUR CONNECTION ESTABLISHED!");
-                        System.out.println("✅ HARBOUR CONNECTION ESTABLISHED!");
-                        System.out.println("🎉 DEBUG SESSION ACTIVE - CONNECTION SUCCESSFUL!");
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Harbour connection established");
                         updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
                         
                         // Record connection start time to prevent premature shutdown
@@ -279,8 +234,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                     "Waiting for proper session initialization");
                         }
                     } else {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "❌ Failed to establish debug connection");
-                        System.out.println("❌ FAILED TO ESTABLISH DEBUG CONNECTION");
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to establish debug connection");
                         updateDebuggerState(DebuggerState.DISCONNECTED, false);
                     }
                 } catch (IOException e) {
@@ -1231,9 +1185,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 return true;
             }
             
-            // Check if the debug session is null (PyCharm crashed)
+            // Check if the debug session is null (IDE disconnected)
             if (getSession() == null && isConnected) {
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session is null - PyCharm may have crashed");
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session is null - IDE may have disconnected");
                 return true;
             }
             
