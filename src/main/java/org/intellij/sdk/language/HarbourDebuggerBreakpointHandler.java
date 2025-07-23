@@ -38,16 +38,34 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             int line = breakpoint.getSourcePosition().getLine() + 1; // 0-based to 1-based
             String breakpointId = filePath + ":" + line;
 
+            // Check if breakpoint is enabled AND not globally muted
+            boolean globallyMuted = debugProcess.getSession().areBreakpointsMuted();
+            boolean individuallyEnabled = breakpoint.isEnabled();
+            boolean isEnabled = !globallyMuted && individuallyEnabled;
+            
             HarbourLogger.log(project, "HarbourDebugger",
-                    "Registering breakpoint at " + filePath + ":" + line);
-
+                    "=== REGISTERING BREAKPOINT ===");
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Location: " + filePath + ":" + line);
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Globally Muted: " + globallyMuted);
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Individually Enabled: " + individuallyEnabled);
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Final Enabled State: " + isEnabled);
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Is Remote Debugger: " + isRemoteDebugger);
+            
+            // Always add to registered list so we can track state changes
             registeredBreakpoints.add(breakpoint);
             breakpointIds.put(breakpoint, breakpointId);
 
-            // Send breakpoint to remote debugger if using remote debugging
-            if (isRemoteDebugger) {
+            // Only send enabled breakpoints to remote debugger
+            if (isRemoteDebugger && isEnabled) {
                 HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
                 if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                    HarbourLogger.log(project, "HarbourDebugger",
+                            "Connection is active, sending breakpoint immediately");
                     String fileName = breakpoint.getSourcePosition().getFile().getName();
                     
                     // Build breakpoint command with conditional support following harbourCodeExtension protocol
@@ -120,6 +138,17 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
                     
                     HarbourLogger.log(project, "HarbourDebugger", 
                             "Sent breakpoint command: " + breakpointCommand.toString());
+                } else {
+                    HarbourLogger.log(project, "HarbourDebugger",
+                            "Connection not ready - breakpoint will be sent later via sendAllBreakpoints()");
+                }
+            } else {
+                if (!isRemoteDebugger) {
+                    HarbourLogger.log(project, "HarbourDebugger",
+                            "Not a remote debugger - breakpoint not sent");
+                } else {
+                    HarbourLogger.log(project, "HarbourDebugger",
+                            "Breakpoint is disabled/muted - not sending");
                 }
             }
         }
@@ -168,7 +197,8 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             for (XBreakpoint<?> bp : breakpointManager.getAllBreakpoints()) {
                 if (bp instanceof XLineBreakpoint &&
                         bp.getType() instanceof HarbourDebuggerLineBreakpointType &&
-                        bp.getSourcePosition() != null) {
+                        bp.getSourcePosition() != null &&
+                        !debugProcess.getSession().areBreakpointsMuted() && bp.isEnabled()) { // Only include enabled and not globally muted breakpoints
 
                     VirtualFile file2 = bp.getSourcePosition().getFile();
                     String fileName = file2.getName();
@@ -220,9 +250,37 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
     public void sendAllBreakpoints() {
         if (isRemoteDebugger) {
             Project project = debugProcess.getSession().getProject();
+            boolean globallyMuted = debugProcess.getSession().areBreakpointsMuted();
+            
+            HarbourLogger.log(project, "HarbourDebugger", 
+                    "=== SENDING ALL BREAKPOINTS ===");
+            HarbourLogger.log(project, "HarbourDebugger", 
+                    "Global mute state: " + globallyMuted);
+            HarbourLogger.log(project, "HarbourDebugger", 
+                    "Total registered breakpoints: " + registeredBreakpoints.size());
+            
+            int enabledCount = 0;
+            int disabledCount = 0;
             
             for (XLineBreakpoint<HarbourDebuggerBreakpointProperties> breakpoint : registeredBreakpoints) {
                 if (breakpoint.getSourcePosition() != null) {
+                    boolean individuallyEnabled = breakpoint.isEnabled();
+                    boolean isEnabled = !globallyMuted && individuallyEnabled;
+                    if (isEnabled) {
+                        enabledCount++;
+                    } else {
+                        disabledCount++;
+                    }
+                    
+                    HarbourLogger.log(project, "HarbourDebugger", 
+                            "Breakpoint at " + breakpoint.getSourcePosition().getFile().getName() + 
+                            ":" + (breakpoint.getSourcePosition().getLine() + 1) + 
+                            " - globally muted: " + globallyMuted + 
+                            ", individually enabled: " + individuallyEnabled + 
+                            ", final enabled: " + isEnabled);
+                }
+                
+                if (breakpoint.getSourcePosition() != null && !debugProcess.getSession().areBreakpointsMuted() && breakpoint.isEnabled()) {
                     String fileName = breakpoint.getSourcePosition().getFile().getName();
                     int line = breakpoint.getSourcePosition().getLine() + 1;
                     
@@ -263,6 +321,11 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
                             "Sent breakpoint (all): " + breakpointCommand.toString());
                 }
             }
+            
+            HarbourLogger.log(project, "HarbourDebugger", 
+                    "=== BREAKPOINTS SUMMARY ===");
+            HarbourLogger.log(project, "HarbourDebugger", 
+                    "Enabled: " + enabledCount + ", Disabled: " + disabledCount);
         }
     }
 }

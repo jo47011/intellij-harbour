@@ -11,3 +11,10 @@ FEEDBACK.txt
 SUMMARY.md
 VERSION_HISTORY.md
 /.claude/
+caches
+daemon
+native
+temp2
+wrapper
+.tmp
+/src/main/resources/debug/.hbmk/linux/gcc/

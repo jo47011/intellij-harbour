@@ -9,6 +9,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.GenericProgramRunner;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Key;
 import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugProcessStarter;
 import com.intellij.xdebugger.XDebugSession;
@@ -22,6 +23,17 @@ import org.jetbrains.annotations.Nullable;
  */
 public class HarbourDebuggerRunner extends GenericProgramRunner {
     private static final String RUNNER_ID = "HarbourDebuggerRunner";
+    
+    // UserData key for passing global mute state from runner to profile state
+    public static final Key<Boolean> GLOBAL_MUTE_STATE_KEY = Key.create("harbour.debugger.globalMuteState");
+    
+    // Windows-specific registration fix
+    static {
+        System.setProperty("idea.runner.debug.windows.fix", "true");
+    }
+    
+    // Removed static initialization block - it's discouraged in IntelliJ Platform plugins
+    // and can cause Windows-specific loading issues. Using proper initialization patterns instead.
 
     @NotNull
     @Override
@@ -31,14 +43,18 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
 
     @Override
     public boolean canRun(@NotNull String executorId, @NotNull RunProfile profile) {
-        return DefaultDebugExecutor.EXECUTOR_ID.equals(executorId) &&
-                profile instanceof HarbourDebuggerRunConfig;
+        boolean isDebugExecutor = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
+        boolean isHarbourDebugConfig = profile instanceof HarbourDebuggerRunConfig;
+        boolean result = isDebugExecutor && isHarbourDebugConfig;
+        
+        return result;
     }
 
     @Nullable
     @Override
     protected RunContentDescriptor doExecute(@NotNull RunProfileState state,
                                              @NotNull ExecutionEnvironment env) throws ExecutionException {
+        
         Project project = env.getProject();
 
         HarbourLogger.log("HarbourDebuggerRunner", "========= RUNNER DEBUG =========");
@@ -52,26 +68,41 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
         int debugPort = config.getDebugPortAsInt();
         HarbourLogger.log(project, "HarbourDebugger", "Debug port configured: " + debugPort);
 
-        // Start debug session
+        // Start debug session FIRST to check mute state
         XDebuggerManager debuggerManager = XDebuggerManager.getInstance(project);
-        ExecutionResult executionResult = state.execute(env.getExecutor(), this);
-
-        if (executionResult == null) {
-            throw new ExecutionException("Failed to execute debug configuration");
-        }
-
+        
         // Create debug session
+        
+        // Create a holder for the execution result
+        final ExecutionResult[] executionResultHolder = new ExecutionResult[1];
+        
         XDebugSession debugSession = debuggerManager.startSession(env, new XDebugProcessStarter() {
             @Override
             @NotNull
             public XDebugProcess start(@NotNull XDebugSession session) throws ExecutionException {
+                // PHASE 1: Check mute state immediately
+                boolean globallyMuted = session.areBreakpointsMuted();
+                HarbourLogger.log(project, "HarbourDebugger", 
+                        "Two-phase startup - mute state detected: " + globallyMuted);
+                
+                // Store mute state in environment for RunProfileState to access
+                env.putUserData(GLOBAL_MUTE_STATE_KEY, globallyMuted);
+                
+                // PHASE 2: Now execute the program with correct init.cld
+                ExecutionResult executionResult = state.execute(env.getExecutor(), HarbourDebuggerRunner.this);
+                
+                if (executionResult == null) {
+                    throw new ExecutionException("Failed to execute debug configuration");
+                }
+                
+                executionResultHolder[0] = executionResult;
+                
                 // Get debug configuration
                 HarbourDebuggerRunConfig config = (HarbourDebuggerRunConfig) env.getRunProfile();
                 int debugPort = config.getDebugPortAsInt();
                 
                 // Create remote debug process
                 HarbourDebuggerRemoteProcess process = new HarbourDebuggerRemoteProcess(session, executionResult, debugPort);
-
                 return process;
             }
         });

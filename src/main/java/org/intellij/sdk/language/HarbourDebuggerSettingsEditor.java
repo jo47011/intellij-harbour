@@ -60,8 +60,8 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     workingDirChooser,
                     null,
-                    null,
-                    file -> workingDirField.setText(file.getPath())
+                    HarbourFileUtils.getVirtualFileFromPath(workingDirField.getText()),
+                    file -> workingDirField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         commonPanel.add(createLabeledField("Working Directory:", workingDirField), c);
@@ -94,8 +94,8 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     hbmk2Chooser,
                     null,
-                    null,
-                    file -> hbmk2PathField.setText(file.getPath())
+                    HarbourFileUtils.getVirtualFileFromPath(hbmk2PathField.getText()),
+                    file -> hbmk2PathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         compilePanel.add(createLabeledField("hbmk2 Path:", hbmk2PathField), c);
@@ -107,8 +107,8 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     sourceFileDesc,
                     null,
-                    null,
-                    file -> sourceFileField.setText(file.getPath())
+                    HarbourFileUtils.getVirtualFileFromPath(sourceFileField.getText()),
+                    file -> sourceFileField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         compilePanel.add(createLabeledField("Source File:", sourceFileField), c);
@@ -127,8 +127,8 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     exeChooser,
                     null,
-                    null,
-                    file -> executablePathField.setText(file.getPath())
+                    HarbourFileUtils.getVirtualFileFromPath(executablePathField.getText()),
+                    file -> executablePathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
         directPanel.add(createLabeledField("Executable Path:", executablePathField), c);

@@ -108,8 +108,8 @@ public class HarbourSettingsConfigurable implements Configurable {
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     dirChooser,
                     myProject,
-                    null, // Initial file, can be null
-                    file -> myDebugLogPathField.setText(file.getPath())
+                    HarbourFileUtils.getVirtualFileFromPath(myDebugLogPathField.getText()), // Initial file from current path
+                    file -> myDebugLogPathField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
             );
         });
 

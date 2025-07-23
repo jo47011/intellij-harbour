@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.204</version>
+    <version>1.0.384</version>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
@@ -74,8 +74,12 @@
 
         <!-- Debug Support -->
         <configurationType implementation="org.intellij.sdk.language.HarbourDebuggerConfigType"/>
-        <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner"/>
+        <programRunner implementation="org.intellij.sdk.language.HarbourDebuggerRunner" id="HarbourDebuggerRunner" order="first"/>
         <xdebugger.breakpointType implementation="org.intellij.sdk.language.HarbourDebuggerLineBreakpointType"/>
+        
+        <!-- Windows-specific registration fix -->
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerRegistration"/>
+        
         
         <!-- Formatting -->
         <lang.formatter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFormattingModelBuilder"/>
@@ -89,7 +93,7 @@
         <enterHandlerDelegate implementation="org.intellij.sdk.language.HarbourEnterHandler"/>
         
         <!-- Notification Group -->
-        <notificationGroup id="Harbour Debugger" displayType="BALLOON" isLogByDefault="true"/>
+        <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
     </extensions>
 
     <actions>
@@ -106,5 +110,7 @@
                 text="Next Harbour Error" description="Go to next Harbour error">
             <add-to-group group-id="CodeMenu" anchor="last"/>
         </action>
+
+        <!-- REMOVED: HarbourTestErrorAction - obsolete since error handling now works properly -->
     </actions>
 </idea-plugin>

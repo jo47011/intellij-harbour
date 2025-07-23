@@ -1,11 +1,11 @@
 plugins {
     id 'java'
-    id 'org.jetbrains.intellij.platform' version '2.6.0'
+    id 'org.jetbrains.intellij.platform' version '2.1.0'
     id 'org.jetbrains.grammarkit' version '2022.3.2.1'
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.219'
+version = '1.0.418'
 
 repositories {
     mavenCentral()
@@ -24,6 +24,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity('2024.3.4')
         bundledPlugin('com.intellij.java')
+        // Note: execution and debugging modules are provided by module dependencies in plugin.xml
         pluginVerifier()
         zipSigner()
         instrumentationTools()
@@ -41,6 +42,10 @@ intellijPlatform {
 
     pluginConfiguration {
         version.set(project.version)
+        ideaVersion {
+            sinceBuild.set("233")
+            untilBuild.set("251.*")
+        }
     }
 
     pluginVerification {

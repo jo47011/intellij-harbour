@@ -2,6 +2,8 @@
 
 ## Starting Out (Late 2024)
 
+Intentionally a hands-off project, vibe-coding
+
 I began working on the Harbour plugin project at the end of 2024, initially using **O1 Pro**. At the time, it was a
 solid approach and served me well. However, everything changed when **Cloud Sonnet 3.7** was released — I immediately
 switched over, and it turned out to be significantly better for programming tasks.
@@ -20,3 +22,4 @@ impacting my main system or data.
 
 This setup finally gave me the flexibility, safety, and integration I was missing before — paving the way for real
 progress on the Harbour plugin.
+
