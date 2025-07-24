@@ -39,7 +39,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
      * Constructor
      */
     public HarbourGoToDeclarationHandler() {
-        HarbourLogger.log(COMPONENT, "HarbourGoToDeclarationHandler initialized");
+        String osName = System.getProperty("os.name");
+        HarbourLogger.log(COMPONENT, "HarbourGoToDeclarationHandler initialized on " + osName);
     }
 
     /**
@@ -165,8 +166,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return null;
         }
 
-        HarbourLogger.log(COMPONENT, "Starting getGotoDeclarationTargets for " + element.getText() +
-                " class: " + element.getClass().getName() + " hashcode: " + element.hashCode());
+        String osName = System.getProperty("os.name");
+        HarbourLogger.log(COMPONENT, "MAIN HANDLER: Starting getGotoDeclarationTargets for '" + element.getText() + 
+                "' class: " + element.getClass().getName() + " on " + osName);
 
         // Check if this is in a Harbour file
         PsiFile file = element.getContainingFile();
@@ -449,9 +451,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // If we have no valid elements, return null
         if (definitionElements.isEmpty() && callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "No valid navigation elements found");
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName);
             return null;
         }
+
+        // If we only have calls but no definitions, this might be an external function
+        // Return null to let the external documentation handler take over
+        if (definitionElements.isEmpty() && !callElements.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: Only calls found for " + identifierName + 
+                            " (" + callElements.size() + " calls) on " + osName + " - delegating to external handler");
+            return null;
+        }
+
+        HarbourLogger.log(COMPONENT, "MAIN HANDLER: Found " + definitionElements.size() + 
+                        " definitions and " + callElements.size() + " calls for " + identifierName);
 
         // Sort definitions by filename and line number
         definitionElements.sort((e1, e2) -> {

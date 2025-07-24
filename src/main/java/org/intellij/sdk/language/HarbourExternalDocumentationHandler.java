@@ -19,6 +19,8 @@ import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -28,10 +30,19 @@ import java.util.regex.Pattern;
  * Only responds to actual ctrl+click (not hover) and only for external functions.
  */
 public class HarbourExternalDocumentationHandler implements GotoDeclarationHandler {
+    
+    public HarbourExternalDocumentationHandler() {
+        String osName = System.getProperty("os.name");
+        HarbourLogger.log("DocHandler", "HarbourExternalDocumentationHandler initialized on " + osName);
+    }
     // Using static variable since ThreadLocal wasn't working correctly
     private static boolean IS_CLICK_MODE = false;
     private static long LAST_CLICK_TIME = 0;
     private static AtomicInteger CALL_COUNTER = new AtomicInteger(0);
+    
+    // Cache to prevent duplicate browser openings within a short time window
+    private static final Map<String, Long> recentlyOpenedUrls = new HashMap<>();
+    private static final long DUPLICATE_PREVENTION_WINDOW_MS = 2000; // 2 seconds
 
     // Method to set click mode - called from mouse listener
     public static void setClickMode(boolean isClick) {
@@ -49,16 +60,20 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         int count = CALL_COUNTER.incrementAndGet();
 
         // Log this call for debugging
-        HarbourLogger.log("DocHandler", "getGotoDeclarationTargets called (count: " + count +
-                ", clickMode: " + IS_CLICK_MODE + ")");
+        String osName = System.getProperty("os.name");
+        HarbourLogger.log("DocHandler", "EXTERNAL HANDLER getGotoDeclarationTargets called (count: " + count +
+                ", clickMode: " + IS_CLICK_MODE + ", element: " + 
+                (element != null ? element.getText() : "null") + ") on " + osName);
 
         if (element == null) {
             HarbourLogger.log("DocHandler", "Element is null");
             return null;
         }
+        
 
         // Check if this is a Harbour file
-        if (!(element.getContainingFile() instanceof HarbourFile)) {
+        PsiFile containingFile = element.getContainingFile();
+        if (!(containingFile instanceof HarbourFile)) {
             HarbourLogger.log("DocHandler", "Not a Harbour file");
             return null;
         }
@@ -143,18 +158,13 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // It's an external function
         HarbourLogger.log("DocHandler", "External function detected: " + functionName);
 
-        // Always return a dummy target for external functions
-        // This makes the cursor change on ctrl+hover
-        PsiElement dummyTarget = new HarbourDummyPsiElement(element, true);
-
-        // Only open documentation on actual click
-        if (IS_CLICK_MODE) {
-            HarbourLogger.log("DocHandler", "Click mode active, opening documentation for: " + functionName);
-            openExternalDocumentation(project, functionName);
-            IS_CLICK_MODE = false;
-        }
-
-        return new PsiElement[] { dummyTarget };
+        // For external functions, always open browser and return null to prevent popup
+        // This is better UX than showing a confusing popup for external functions
+        HarbourLogger.log("DocHandler", "Opening documentation for external function: " + functionName);
+        openExternalDocumentation(project, functionName);
+        
+        // Return null to prevent any popup - browser opening is the desired action
+        return null;
     }
 
     /**
@@ -338,26 +348,60 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
      * Opens documentation in a browser
      */
     private void openExternalDocumentation(Project project, String functionName) {
+        HarbourLogger.log("DocHandler", "openExternalDocumentation called for: " + functionName + 
+                         " in project: " + (project != null ? project.getName() : "null"));
+        
         HarbourSettings settings = HarbourSettings.getInstance(project);
-        if (settings == null || settings.getDocumentationBaseUrl() == null ||
-                settings.getDocumentationBaseUrl().isEmpty()) {
-            HarbourLogger.log("DocHandler", "Documentation base URL not configured");
+        HarbourLogger.log("DocHandler", "Settings instance: " + (settings != null ? "found" : "null"));
+        
+        if (settings == null) {
+            HarbourLogger.log("DocHandler", "ERROR: HarbourSettings instance is null");
             return;
         }
-
+        
         String baseUrl = settings.getDocumentationBaseUrl();
+        HarbourLogger.log("DocHandler", "Base URL from settings: '" + baseUrl + "'");
+        
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            HarbourLogger.log("DocHandler", "ERROR: Documentation base URL not configured - using default");
+            baseUrl = "https://harbour.github.io/doc/clc53.html";
+        }
+
         if (!baseUrl.endsWith("#") && !baseUrl.endsWith("/")) {
             baseUrl = baseUrl + "#";
         }
 
         String docUrl = baseUrl + functionName;
-        HarbourLogger.log("DocHandler", "Opening URL: " + docUrl);
+        HarbourLogger.log("DocHandler", "Final URL to open: " + docUrl);
+
+        // Check if we've recently opened this URL to prevent duplicates
+        long currentTime = System.currentTimeMillis();
+        Long lastOpenTime = recentlyOpenedUrls.get(docUrl);
+        
+        if (lastOpenTime != null && (currentTime - lastOpenTime) < DUPLICATE_PREVENTION_WINDOW_MS) {
+            HarbourLogger.log("DocHandler", "Skipping duplicate URL opening: " + docUrl + 
+                            " (opened " + (currentTime - lastOpenTime) + "ms ago)");
+            return;
+        }
+
+        // Clean up old entries from the cache (older than 10 seconds)
+        recentlyOpenedUrls.entrySet().removeIf(entry -> 
+            (currentTime - entry.getValue()) > 10000);
 
         try {
+            // Add platform-specific logging
+            String osName = System.getProperty("os.name");
+            HarbourLogger.log("DocHandler", "OS detected: " + osName + " - attempting to open: " + docUrl);
+            
             BrowserUtil.browse(docUrl);
-            HarbourLogger.log("DocHandler", "Browser opened successfully for: " + docUrl);
+            
+            // Record this URL opening to prevent duplicates
+            recentlyOpenedUrls.put(docUrl, currentTime);
+            
+            HarbourLogger.log("DocHandler", "BrowserUtil.browse() called successfully for: " + docUrl);
         } catch (Exception e) {
-            HarbourLogger.log("DocHandler", "Error opening browser: " + e.getMessage());
+            HarbourLogger.log("DocHandler", "ERROR opening browser: " + e.getMessage());
+            HarbourLogger.log("DocHandler", "Exception stack trace: " + java.util.Arrays.toString(e.getStackTrace()));
         }
     }
 }

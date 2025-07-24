@@ -3,8 +3,11 @@ package org.intellij.sdk.language;
 import com.intellij.execution.RunnerRegistry;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.startup.StartupActivity;
+import com.intellij.openapi.startup.ProjectActivity;
+import kotlin.Unit;
+import kotlin.coroutines.Continuation;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -14,10 +17,11 @@ import java.time.LocalDateTime;
  * Windows-specific registration component for HarbourDebuggerRunner.
  * This ensures the runner is properly registered and provides debugging information.
  */
-public class HarbourDebuggerRunnerRegistration implements StartupActivity {
+public class HarbourDebuggerRunnerRegistration implements ProjectActivity {
 
+    @Nullable
     @Override
-    public void runActivity(@NotNull Project project) {
+    public Object execute(@NotNull Project project, @NotNull Continuation<? super Unit> continuation) {
         System.out.println("🔧 HarbourDebuggerRunnerRegistration v1.0.265 - STARTUP ACTIVITY");
         System.out.println("🔧 OS: " + System.getProperty("os.name"));
         System.out.println("🔧 Project: " + project.getName());
@@ -53,5 +57,7 @@ public class HarbourDebuggerRunnerRegistration implements StartupActivity {
         
         // Simply log that the startup activity ran
         System.out.println("🔧 Startup activity completed - HarbourDebuggerRunner class loading attempted");
+        
+        return Unit.INSTANCE;
     }
 }
