@@ -118,10 +118,9 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         if (!isFunctionCall(((LeafPsiElement) element))) {
             // Check if this is a function declaration
             if (isFunctionDeclaration(((LeafPsiElement) element))) {
-                HarbourLogger.log("DocHandler", "Function declaration detected: " + functionName);
-                // Return a dummy element to prevent "cannot find declaration" message
-                PsiElement dummyTarget = new HarbourDummyPsiElement(element, false, "Function Declaration");
-                return new PsiElement[] { dummyTarget };
+                HarbourLogger.log("DocHandler", "Function declaration detected: " + functionName + ", letting normal handlers take over");
+                // Return null to let normal IntelliJ handlers (Find Usages, etc.) take over
+                return null;
             }
             HarbourLogger.log("DocHandler", "Not a function call: " + functionName);
             return null;

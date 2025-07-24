@@ -55,8 +55,8 @@
                                       implementationClass="org.intellij.sdk.language.HarbourStructureViewFactory"/>
 
         <!-- Go to Declaration -->
-        <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourGoToDeclarationHandler"/>
         <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourExternalDocumentationHandler"/>
+        <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourGoToDeclarationHandler"/>
 
         <!-- Documentation Provider -->
         <lang.documentationProvider language="Harbour"

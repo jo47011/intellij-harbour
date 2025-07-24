@@ -15,18 +15,9 @@ import org.jetbrains.annotations.NotNull;
 public class HarbourAnnotator implements Annotator {
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
-        // Handle function calls
-        if (element instanceof FunctionCall) {
-            FunctionCall functionCall = (FunctionCall) element;
-            PsiElement nameIdentifier = functionCall.getNameIdentifier();
-
-            if (nameIdentifier != null) {
-                // Highlight function names
-                holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                        .range(nameIdentifier.getTextRange())
-                        .textAttributes(DefaultLanguageHighlighterColors.FUNCTION_CALL)
-                        .create();
-            }
-        }
+        // Function call highlighting is now handled by HarbourFunctionCallAnnotator
+        // which provides internal/external function distinction
+        
+        // Add other annotations here if needed in the future
     }
 }

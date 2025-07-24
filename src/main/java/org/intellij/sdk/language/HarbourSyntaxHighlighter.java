@@ -41,12 +41,26 @@ public class HarbourSyntaxHighlighter extends com.intellij.openapi.fileTypes.Syn
           "HARBOUR_AMPERSAND", DefaultLanguageHighlighterColors.OPERATION_SIGN
   );
 
-  // 3) Function colors - use different defaults so they can be configured independently
+  // Create a custom TextAttributes for local functions (blue with configurable underline)
+  private static final TextAttributes LOCAL_FUNCTION_ATTRIBUTES = new TextAttributes();
+  static {
+    LOCAL_FUNCTION_ATTRIBUTES.setForegroundColor(new Color(0, 102, 204)); // Blue (#0066CC)
+    // Note: Don't set effect type or effect color by default - let the color scheme handle it
+  }
+
+  // Create a custom TextAttributes for external functions
+  private static final TextAttributes EXTERNAL_FUNCTION_ATTRIBUTES = new TextAttributes();
+  static {
+    EXTERNAL_FUNCTION_ATTRIBUTES.setForegroundColor(new Color(0x97, 0xB3, 0xE8)); // Light blue (#97B3E8)
+    // Note: Don't set effect type or effect color by default - let the color scheme handle it
+  }
+
+  // 3) Function colors with custom defaults
   public static final TextAttributesKey LOCAL_FUNCTION = createTextAttributesKey(
-          "HARBOUR_LOCAL_FUNCTION", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION
+          "HARBOUR_LOCAL_FUNCTION", LOCAL_FUNCTION_ATTRIBUTES
   );
   public static final TextAttributesKey EXTERNAL_FUNCTION = createTextAttributesKey(
-          "HARBOUR_EXTERNAL_FUNCTION", DefaultLanguageHighlighterColors.FUNCTION_CALL
+          "HARBOUR_EXTERNAL_FUNCTION", EXTERNAL_FUNCTION_ATTRIBUTES
   );
 
   // Return them in arrays

@@ -414,7 +414,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         }
 
                         // Skip if this is the current location (where the user clicked)
-                        if (locationKey.equals(currentLocationKey)) {
+                        // BUT don't skip if we're looking for function usages from a declaration
+                        boolean isDeclarationClick = isDefinitionElement(element, getElementContext(element));
+                        if (locationKey.equals(currentLocationKey) && !isDeclarationClick) {
                             HarbourLogger.log(COMPONENT, "Skipping current location: " + locationKey);
                             continue;
                         }
