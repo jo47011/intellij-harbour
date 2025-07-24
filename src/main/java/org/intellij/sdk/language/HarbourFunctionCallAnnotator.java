@@ -23,20 +23,13 @@ import java.util.List;
 
 /**
  * Annotator for Harbour function calls.
- * This highlights function calls in different colors based on whether they are local (defined in project)
- * or external (not defined in project).
+ * This highlights function calls in different colors based on whether they are internal (defined in project)
+ * or external (not defined in project) using dynamic classification.
  */
 public class HarbourFunctionCallAnnotator implements Annotator {
     private static final Logger LOG = Logger.getInstance(HarbourFunctionCallAnnotator.class);
 
-    // List of standard functions that should be considered external
-    private static final String[] STANDARD_FUNCTIONS = {
-            "chr", "upper", "lower", "trim", "ltrim", "rtrim", "valtype", "transform",
-            "empty", "alias", "aadd", "ascan", "asize", "atail", "len", "eval",
-            "db_info", "dbf", "recno", "ordname", "str", "substr", "left", "right",
-            "val", "int", "dtos", "stod", "day", "month", "year", "date",
-            "time", "round", "ceiling", "floor", "max", "min", "abs", "sqrt"
-    };
+    // No hardcoded functions - use dynamic classification service
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
@@ -62,14 +55,23 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                         EditorColorsManager colorsManager = EditorColorsManager.getInstance();
                         EditorColorsScheme scheme = colorsManager.getGlobalScheme();
 
-                        // Check if the function is defined in the project
-                        boolean isLocalFunction = isFunctionDeclaredInProject(functionName, project);
+                        // Use dynamic classification to determine if function is internal or external
+                        HarbourFunctionClassificationService classificationService = 
+                            HarbourFunctionClassificationService.getInstance(project);
+                        
+                        boolean isInternalFunction = classificationService.isInternalFunction(functionName);
+                        
+                        // Debug logging to understand the issue
+                        HarbourLogger.log("FunctionAnnotator", "CLASSIFY: " + functionName + 
+                            " -> isInternal=" + isInternalFunction + 
+                            ", serviceInitialized=" + classificationService.isInitialized() +
+                            ", totalInternal=" + classificationService.getInternalFunctionCount());
 
                         TextAttributesKey attributesKey;
-                        if (isLocalFunction && !isStandardFunction(functionName)) {
-                            // Local function - use blue color from scheme
+                        if (isInternalFunction) {
+                            // Internal function - use blue color from scheme
                             attributesKey = HarbourSyntaxHighlighter.LOCAL_FUNCTION;
-                            HarbourLogger.log("FunctionAnnotator", "DEBUG: Local function: " + functionName);
+                            HarbourLogger.log("FunctionAnnotator", "DEBUG: Internal function: " + functionName);
                         } else {
                             // External function - use red color from scheme
                             attributesKey = HarbourSyntaxHighlighter.EXTERNAL_FUNCTION;
@@ -96,58 +98,9 @@ public class HarbourFunctionCallAnnotator implements Annotator {
         }
     }
 
-    /**
-     * Check if a function name is a standard function
-     * @param functionName The function name to check
-     * @return true if it's a standard function
-     */
-    private boolean isStandardFunction(String functionName) {
-        // Use the fast cache for standard function lookup
-        return HarbourStandardFunctionCache.isStandardFunction(functionName);
-    }
+    // Removed hardcoded standard function check - now using dynamic classification
 
-    /**
-     * Check if the function is declared somewhere in the project using ReferenceService
-     * @param functionName The function name to check
-     * @param project The current project
-     * @return true if the function is declared in the project, false otherwise
-     */
-    private boolean isFunctionDeclaredInProject(String functionName, Project project) {
-        // First check if it's a well-known standard function that should be treated as external
-        if (isStandardFunction(functionName)) {
-            HarbourLogger.log("FunctionAnnotator", "Standard function detected: " + functionName + " - treating as external");
-            return false;
-        }
-
-        // Check if we already know the status of this function from previous lookups
-        if (HarbourFunctionUsageTracker.isFrequentlyUsed(project, functionName)) {
-            // For frequently used functions, assume they're local during initial rendering
-            // This prevents flickering during initial load
-            boolean isLocal = HarbourFunctionUsageTracker.isFunctionLocal(project, functionName);
-            HarbourLogger.log("FunctionAnnotator", "Frequently used function: " + functionName +
-                    ", known status: " + (isLocal ? "LOCAL" : "status unknown, assuming LOCAL"));
-            return true;
-        }
-
-        // Use the reference service for actual lookup
-        try {
-            HarbourReferenceService referenceService = HarbourReferenceService.getInstance(project);
-            List<PsiElement> declarations = referenceService.findFunctions(functionName);
-
-            boolean found = !declarations.isEmpty();
-
-            // Store the result for future lookups
-            HarbourFunctionUsageTracker.updateFunctionStatus(project, functionName, found);
-
-            HarbourLogger.log("FunctionAnnotator", "Found " + declarations.size() + " declarations for: " + functionName);
-            return found;
-        } catch (ProcessCanceledException e) {
-            throw e;
-        } catch (Exception e) {
-            HarbourLogger.log("FunctionAnnotator", "Error checking if function exists: " + e.getMessage());
-            return false;
-        }
-    }
+    // Removed complex function declaration check - now using simple dynamic classification service
 
     /**
      * Check if an element is followed by parenthesis, which would indicate a function call.

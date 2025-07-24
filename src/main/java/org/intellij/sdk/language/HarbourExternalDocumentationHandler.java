@@ -116,6 +116,13 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
 
         // Check if this is part of a function call
         if (!isFunctionCall(((LeafPsiElement) element))) {
+            // Check if this is a function declaration
+            if (isFunctionDeclaration(((LeafPsiElement) element))) {
+                HarbourLogger.log("DocHandler", "Function declaration detected: " + functionName);
+                // Return a dummy element to prevent "cannot find declaration" message
+                PsiElement dummyTarget = new HarbourDummyPsiElement(element, false, "Function Declaration");
+                return new PsiElement[] { dummyTarget };
+            }
             HarbourLogger.log("DocHandler", "Not a function call: " + functionName);
             return null;
         }
@@ -123,36 +130,21 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // First check if this is a class method call (e.g., User():new())
         boolean isClassMethod = isClassMethodCall((LeafPsiElement) element);
         if (isClassMethod) {
-            HarbourLogger.log("DocHandler", "Detected as class method call: " + functionName);
-            // For tooltips, we want to show this as internal
-            PsiElement dummyTarget = new HarbourDummyPsiElement(element, false, "Internal (Class Method)");
-
-            // Let the class method reference handler handle this if it's clicked
-            if (IS_CLICK_MODE) {
-                HarbourLogger.log("DocHandler", "Click mode active for class method: " + functionName);
-                return null;
-            }
-
-            return new PsiElement[] { dummyTarget };
+            HarbourLogger.log("DocHandler", "Detected as class method call: " + functionName + ", not handling");
+            // Don't interfere with class methods - let the class method handlers work
+            return null;
         }
 
-        // Check if it has internal declarations
+        // Check if it has internal declarations using the new classification service
         Project project = element.getProject();
-        boolean isInternal = hasInternalDeclaration(project, functionName);
+        HarbourFunctionClassificationService classificationService = 
+            HarbourFunctionClassificationService.getInstance(project);
+        boolean isInternal = classificationService.isInternalFunction(functionName);
 
         if (isInternal) {
-            HarbourLogger.log("DocHandler", "Internal function detected: " + functionName);
-
-            // Always provide a dummy target for tooltip
-            PsiElement dummyTarget = new HarbourDummyPsiElement(element, false);
-
-            // Let the normal declaration handler work for navigation
-            if (IS_CLICK_MODE) {
-                HarbourLogger.log("DocHandler", "Click mode active for internal function: " + functionName);
-                return null;
-            }
-
-            return new PsiElement[] { dummyTarget };
+            HarbourLogger.log("DocHandler", "Internal function detected: " + functionName + ", not handling");
+            // Don't interfere with internal functions - let the normal handlers work
+            return null;
         }
 
         // It's an external function
@@ -403,5 +395,26 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             HarbourLogger.log("DocHandler", "ERROR opening browser: " + e.getMessage());
             HarbourLogger.log("DocHandler", "Exception stack trace: " + java.util.Arrays.toString(e.getStackTrace()));
         }
+    }
+    
+    /**
+     * Check if an element is part of a function declaration.
+     * @param element The element to check
+     * @return true if this element is in a function declaration line
+     */
+    private boolean isFunctionDeclaration(LeafPsiElement element) {
+        // Get the line text
+        String lineText = getLineText(element);
+        if (lineText == null) {
+            return false;
+        }
+        
+        // Check if the line contains FUNCTION or PROCEDURE declaration
+        String functionName = element.getText();
+        Pattern pattern = Pattern.compile("(?i)\\b(FUNCTION|PROCEDURE)\\s+" + Pattern.quote(functionName) + "\\b");
+        boolean isDeclaration = pattern.matcher(lineText).find();
+        
+        HarbourLogger.log("DocHandler", "Checking if declaration for " + functionName + ": " + isDeclaration);
+        return isDeclaration;
     }
 }

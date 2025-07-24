@@ -10,33 +10,48 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Fast cache for standard Harbour functions to improve rendering performance.
- * This cache is initialized during plugin startup before editors are opened.
+ * Fast cache for Harbour function classification to improve rendering performance.
+ * This cache uses dynamic classification instead of hardcoded function lists.
  */
 public class HarbourStandardFunctionCache {
     private static final Logger LOG = Logger.getInstance(HarbourStandardFunctionCache.class);
-    private static final Map<String, Boolean> STANDARD_FUNCTION_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Boolean> FUNCTION_CLASSIFICATION_CACHE = new ConcurrentHashMap<>();
     private static volatile boolean initialized = false;
 
     /**
-     * Checks if a function is a standard function without expensive lookups.
+     * Checks if a function is an external function (not defined in project) using dynamic classification.
      *
      * @param functionName The function name to check
-     * @return true if it's a standard function
+     * @return true if it's an external function
      */
     public static boolean isStandardFunction(@NotNull String functionName) {
-        if (!initialized) {
-            // Fallback to direct check if not initialized
-            return HarbourStandardFunctionsProvider.isStandardFunction(functionName);
-        }
-
         String normalizedName = functionName.toLowerCase();
-        Boolean result = STANDARD_FUNCTION_CACHE.get(normalizedName);
-        return result != null && result;
+        
+        // Check cache first
+        Boolean cachedResult = FUNCTION_CLASSIFICATION_CACHE.get(normalizedName);
+        if (cachedResult != null) {
+            return cachedResult;
+        }
+        
+        // If not in cache, use dynamic classification
+        // Try to get from any open project (limitation of static method)
+        boolean isExternal = true; // Default to external for safety
+        for (Project openProject : com.intellij.openapi.project.ProjectManager.getInstance().getOpenProjects()) {
+            HarbourFunctionClassificationService classificationService = 
+                HarbourFunctionClassificationService.getInstance(openProject);
+            if (classificationService.isInitialized()) {
+                isExternal = classificationService.isExternalFunction(functionName);
+                break;
+            }
+        }
+        
+        // Cache the result
+        FUNCTION_CLASSIFICATION_CACHE.put(normalizedName, isExternal);
+        return isExternal;
     }
 
     /**
-     * Initialize the cache with standard functions.
+     * Initialize the cache for dynamic classification.
      * This is called during plugin startup.
      */
     private static void initializeCache() {
@@ -44,54 +59,47 @@ public class HarbourStandardFunctionCache {
             return;
         }
 
-        LOG.info("Initializing standard function cache");
-
-        // Add commonly used functions from annotator
-        String[] commonFunctions = {
-                "chr", "upper", "lower", "trim", "ltrim", "rtrim", "valtype", "transform",
-                "empty", "alias", "aadd", "ascan", "asize", "atail", "len", "eval",
-                "db_info", "dbf", "recno", "ordname", "str", "substr", "left", "right",
-                "val", "int", "dtos", "stod", "day", "month", "year", "date",
-                "time", "round", "ceiling", "floor", "max", "min", "abs", "sqrt"
-        };
-
-        for (String func : commonFunctions) {
-            STANDARD_FUNCTION_CACHE.put(func.toLowerCase(), true);
-        }
-
-        // Mark as initialized
+        LOG.info("Initializing function classification cache (dynamic mode)");
+        
+        // No hardcoded functions to initialize - cache will be populated dynamically
         initialized = true;
-        LOG.info("Standard function cache initialized with " + STANDARD_FUNCTION_CACHE.size() + " functions");
+        LOG.info("Function classification cache initialized in dynamic mode");
     }
 
     /**
-     * Initialize the full cache with all standard functions.
-     * This is called at a later stage to ensure all standard functions are cached.
+     * Initialize the full cache with dynamic classification.
+     * This is called at a later stage to ensure the classification service is ready.
      */
     public static void initializeFullCache(Project project) {
-        LOG.info("Initializing full standard function cache");
+        LOG.info("Initializing full function classification cache");
 
         // Ensure provider is initialized
         HarbourStandardFunctionsProvider.initialize(project);
-
-        // Add all standard functions from provider (which has the complete list)
-        Set<String> standardFunctions = HarbourStandardFunctionsProvider.getAllStandardFunctions();
-        for (String func : standardFunctions) {
-            if (!STANDARD_FUNCTION_CACHE.containsKey(func.toLowerCase())) {
-                STANDARD_FUNCTION_CACHE.put(func.toLowerCase(), true);
-            }
-        }
-
-        LOG.info("Full standard function cache initialized with " + STANDARD_FUNCTION_CACHE.size() + " functions");
+        
+        // Ensure classification service is initialized
+        HarbourFunctionClassificationService classificationService = 
+            HarbourFunctionClassificationService.getInstance(project);
+        
+        LOG.info("Full function classification cache ready with dynamic classification");
     }
 
     /**
-     * Add a function to the standard function cache.
+     * Add a function classification result to the cache.
      *
-     * @param functionName The function name to add
+     * @param functionName The function name to cache
+     * @param isExternal Whether the function is external (true) or internal (false)
      */
-    public static void addStandardFunction(@NotNull String functionName) {
-        STANDARD_FUNCTION_CACHE.put(functionName.toLowerCase(), true);
+    public static void cacheFunctionClassification(@NotNull String functionName, boolean isExternal) {
+        FUNCTION_CLASSIFICATION_CACHE.put(functionName.toLowerCase(), isExternal);
+    }
+    
+    /**
+     * Clear the classification cache to force re-evaluation.
+     * This should be called when project files change significantly.
+     */
+    public static void clearCache() {
+        FUNCTION_CLASSIFICATION_CACHE.clear();
+        LOG.info("Function classification cache cleared");
     }
 
     /**
@@ -109,6 +117,8 @@ public class HarbourStandardFunctionCache {
             HarbourPerformanceOptimizer.submitBackgroundTask(() -> {
                 initializeFullCache(project);
             });
+            
+            LOG.info("Function classification cache initializer completed");
         }
     }
 }

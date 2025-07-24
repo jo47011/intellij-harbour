@@ -67,6 +67,12 @@
         
         <!-- Breakpoint Properties Storage Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
+        
+        <!-- Function Classification Service -->
+        <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
+        
+        <!-- Startup Activities -->
+        <startupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"
