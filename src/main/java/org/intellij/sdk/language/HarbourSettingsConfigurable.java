@@ -618,6 +618,14 @@ public class HarbourSettingsConfigurable implements Configurable {
         if (service != null) {
             service.refreshExclusions();
         }
+        
+        // Ensure function classification service is initialized  
+        HarbourFunctionClassificationService classificationService = 
+            HarbourFunctionClassificationService.getInstance(myProject);
+        if (!classificationService.isInitialized()) {
+            HarbourLogger.log("Settings", "Triggering function classification scan on settings apply");
+            classificationService.rescanProject();
+        }
     }
 
     @Override

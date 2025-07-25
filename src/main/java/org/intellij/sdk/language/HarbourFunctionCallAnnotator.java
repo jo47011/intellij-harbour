@@ -7,7 +7,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
-import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
@@ -18,9 +17,6 @@ import com.intellij.psi.tree.IElementType;
 import org.intellij.sdk.language.psi.HarbourCustomTypes;
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.*;
-import java.util.List;
-
 /**
  * Annotator for Harbour function calls.
  * This highlights function calls in different colors based on whether they are internal (defined in project)
@@ -28,8 +24,6 @@ import java.util.List;
  */
 public class HarbourFunctionCallAnnotator implements Annotator {
     private static final Logger LOG = Logger.getInstance(HarbourFunctionCallAnnotator.class);
-
-    // No hardcoded functions - use dynamic classification service
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
@@ -73,7 +67,7 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                             attributesKey = HarbourSyntaxHighlighter.LOCAL_FUNCTION;
                             HarbourLogger.log("FunctionAnnotator", "DEBUG: Internal function: " + functionName);
                         } else {
-                            // External function - use red color from scheme
+                            // External function - use light blue color from scheme
                             attributesKey = HarbourSyntaxHighlighter.EXTERNAL_FUNCTION;
                             HarbourLogger.log("FunctionAnnotator", "DEBUG: External function: " + functionName);
                         }
@@ -98,9 +92,6 @@ public class HarbourFunctionCallAnnotator implements Annotator {
         }
     }
 
-    // Removed hardcoded standard function check - now using dynamic classification
-
-    // Removed complex function declaration check - now using simple dynamic classification service
 
     /**
      * Check if an element is followed by parenthesis, which would indicate a function call.

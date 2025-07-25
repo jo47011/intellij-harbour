@@ -44,14 +44,14 @@ public class HarbourSyntaxHighlighter extends com.intellij.openapi.fileTypes.Syn
   // Create a custom TextAttributes for local functions (blue with configurable underline)
   private static final TextAttributes LOCAL_FUNCTION_ATTRIBUTES = new TextAttributes();
   static {
-    LOCAL_FUNCTION_ATTRIBUTES.setForegroundColor(new Color(0, 102, 204)); // Blue (#0066CC)
+    LOCAL_FUNCTION_ATTRIBUTES.setForegroundColor(new Color(0, 102, 204)); // Blue
     // Note: Don't set effect type or effect color by default - let the color scheme handle it
   }
 
   // Create a custom TextAttributes for external functions
   private static final TextAttributes EXTERNAL_FUNCTION_ATTRIBUTES = new TextAttributes();
   static {
-    EXTERNAL_FUNCTION_ATTRIBUTES.setForegroundColor(new Color(0x97, 0xB3, 0xE8)); // Light blue (#97B3E8)
+    EXTERNAL_FUNCTION_ATTRIBUTES.setForegroundColor(new Color(0x97, 0xB3, 0xE8)); // Changed to #97B3E8
     // Note: Don't set effect type or effect color by default - let the color scheme handle it
   }
 

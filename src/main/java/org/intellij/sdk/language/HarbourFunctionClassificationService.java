@@ -65,6 +65,27 @@ public final class HarbourFunctionClassificationService {
             "(?i)\\bPROCEDURE\\s+(\\w+)\\s*\\(", Pattern.CASE_INSENSITIVE);
     private static final Pattern CLASS_PATTERN = Pattern.compile(
             "(?i)\\bCLASS\\s+(\\w+)\\b", Pattern.CASE_INSENSITIVE);
+    
+    // Common Harbour standard functions that are always external
+    private static final Set<String> KNOWN_EXTERNAL_FUNCTIONS = Set.of(
+            "chr", "asc", "len", "substr", "str", "val", "upper", "lower",
+            "alltrim", "ltrim", "rtrim", "space", "replicate", "transform",
+            "date", "time", "dtoc", "ctod", "dtos", "year", "month", "day",
+            "at", "rat", "left", "right", "stuff", "padr", "padl", "padc",
+            "iif", "if", "empty", "eof", "bof", "recno", "lastrec", "fcount",
+            "fieldname", "fieldget", "fieldput", "dbf", "alias", "select",
+            "use", "close", "append", "delete", "recall", "pack", "zap",
+            "seek", "found", "skip", "goto", "gotop", "gobottom",
+            "index", "reindex", "set", "get", "readmodal", "clear",
+            "qout", "qqout", "devpos", "devout", "setpos", "row", "col",
+            "inkey", "lastkey", "readkey", "tone", "alert", "msginfo",
+            "file", "ferase", "frename", "fcreate", "fopen", "fclose",
+            "fread", "fwrite", "fseek", "ferror", "directory", "adir",
+            "type", "valtype", "array", "aadd", "adel", "ains", "asort",
+            "ascan", "asize", "aclone", "afill", "acopy", "eval", "fieldblock",
+            "memvar", "public", "private", "parameters", "pcount", "procname",
+            "procline", "errorblock", "break", "errorlevel", "altd"
+    );
 
     /**
      * Get the instance of the service for the given project.
@@ -87,20 +108,27 @@ public final class HarbourFunctionClassificationService {
      * @return true if the function is declared in the project, false otherwise
      */
     public boolean isInternalFunction(@NotNull String functionName) {
+        String normalizedName = functionName.toLowerCase();
+        
+        // Quick check for known external functions
+        if (KNOWN_EXTERNAL_FUNCTIONS.contains(normalizedName)) {
+            return false;
+        }
+        
         if (!initialized && !scanning) {
             // If not initialized yet, trigger initialization
             initializeWithProgress();
-            // Return true for unknown functions during initial load to avoid red highlighting
-            // This prevents the "all functions are red" issue during startup
-            return true;
+            // Return true (internal) as default during initialization
+            // This prevents the "all functions light blue" issue during startup
+            return !KNOWN_EXTERNAL_FUNCTIONS.contains(normalizedName);
         }
         
         if (!initialized) {
-            // Still scanning - assume internal to avoid red highlighting
-            return true;
+            // Still scanning - for known external functions return false, otherwise true
+            // This prevents flickering and ensures better UX during startup
+            return !KNOWN_EXTERNAL_FUNCTIONS.contains(normalizedName);
         }
         
-        String normalizedName = functionName.toLowerCase();
         return internalFunctions.contains(normalizedName) || 
                internalProcedures.contains(normalizedName) ||
                internalClasses.contains(normalizedName);
@@ -145,6 +173,15 @@ public final class HarbourFunctionClassificationService {
      */
     public boolean isInitialized() {
         return initialized;
+    }
+    
+    /**
+     * Check if the service is currently scanning.
+     * 
+     * @return true if scanning is in progress
+     */
+    public boolean isScanning() {
+        return scanning;
     }
 
     /**
