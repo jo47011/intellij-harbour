@@ -1019,6 +1019,7 @@ public final class HarbourReferenceService {
     public static class HarbourReferenceServiceInitializer implements StartupActivity.DumbAware {
         @Override
         public void runActivity(@NotNull Project project) {
+            System.err.println("*** HARBOUR REFERENCE SERVICE INITIALIZER CALLED ***");
             HarbourLogger.log("ReferenceService", "Registering class method reference provider");
 
             // Initialize the service
@@ -1033,8 +1034,10 @@ public final class HarbourReferenceService {
                     HarbourMouseListener listener = new HarbourMouseListener();
                     EditorFactory.getInstance().getEventMulticaster().addEditorMouseListener(listener, project);
                     EditorFactory.getInstance().getEventMulticaster().addEditorMouseMotionListener(listener, project);
+                    System.err.println("*** HARBOUR MOUSE LISTENER REGISTERED SUCCESSFULLY ***");
                     HarbourLogger.log("ReferenceService", "Harbour mouse listener registered successfully");
                 } catch (Exception e) {
+                    System.err.println("*** FAILED TO REGISTER MOUSE LISTENER: " + e.getMessage());
                     HarbourLogger.log("ReferenceService", "Failed to register Harbour mouse listener: " + e.getMessage());
                 }
             });

@@ -39,6 +39,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
     private static boolean IS_CLICK_MODE = false;
     private static long LAST_CLICK_TIME = 0;
     private static AtomicInteger CALL_COUNTER = new AtomicInteger(0);
+    private static boolean MOUSE_LISTENER_REGISTERED = false;
     
     // Cache to prevent duplicate browser openings within a short time window
     private static final Map<String, Long> recentlyOpenedUrls = new HashMap<>();
@@ -59,14 +60,25 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // Count calls
         int count = CALL_COUNTER.incrementAndGet();
 
+        // Ensure mouse listener is registered on first call
+        if (!MOUSE_LISTENER_REGISTERED && element != null) {
+            ensureMouseListenerRegistered(element.getProject());
+        }
+
         // Log this call for debugging
         String osName = System.getProperty("os.name");
-        HarbourLogger.log("DocHandler", "EXTERNAL HANDLER getGotoDeclarationTargets called (count: " + count +
-                ", clickMode: " + IS_CLICK_MODE + ", element: " + 
-                (element != null ? element.getText() : "null") + ") on " + osName);
+        long timeSinceClick = System.currentTimeMillis() - LAST_CLICK_TIME;
+        boolean isRecentClick = timeSinceClick < 500;
+        
+        HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER START === (count: " + count +
+                ", clickMode: " + IS_CLICK_MODE + 
+                ", timeSinceClick: " + timeSinceClick + "ms" +
+                ", isRecentClick: " + isRecentClick +
+                ", element: " + (element != null ? element.getText() : "null") + 
+                ") on " + osName);
 
         if (element == null) {
-            HarbourLogger.log("DocHandler", "Element is null");
+            HarbourLogger.log("DocHandler", "=== EARLY EXIT === Element is null, returning null");
             return null;
         }
         
@@ -74,7 +86,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // Check if this is a Harbour file
         PsiFile containingFile = element.getContainingFile();
         if (!(containingFile instanceof HarbourFile)) {
-            HarbourLogger.log("DocHandler", "Not a Harbour file");
+            HarbourLogger.log("DocHandler", "=== EARLY EXIT === Not a Harbour file, returning null");
             return null;
         }
 
@@ -141,21 +153,36 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         boolean isInternal = classificationService.isInternalFunction(functionName);
 
         if (isInternal) {
-            HarbourLogger.log("DocHandler", "Internal function detected: " + functionName + ", not handling");
+            HarbourLogger.log("DocHandler", "=== EARLY EXIT === Internal function detected: " + functionName + ", returning null");
             // Don't interfere with internal functions - let the normal handlers work
             return null;
         }
 
         // It's an external function
-        HarbourLogger.log("DocHandler", "External function detected: " + functionName);
+        HarbourLogger.log("DocHandler", "External function detected: " + functionName + 
+                         ", clickMode=" + IS_CLICK_MODE + 
+                         ", count=" + count + 
+                         ", timeSinceClick=" + timeSinceClick + "ms");
 
-        // For external functions, always open browser and return null to prevent popup
-        // This is better UX than showing a confusing popup for external functions
-        HarbourLogger.log("DocHandler", "Opening documentation for external function: " + functionName);
-        openExternalDocumentation(project, functionName);
+        // Check if we're in click mode OR within a short time window of a click
+        boolean shouldOpenBrowser = IS_CLICK_MODE || (timeSinceClick < 500); // 500ms window
         
-        // Return null to prevent any popup - browser opening is the desired action
-        return null;
+        if (shouldOpenBrowser) {
+            HarbourLogger.log("DocHandler", "Opening documentation for external function: " + functionName);
+            openExternalDocumentation(project, functionName);
+            
+            // Only reset click mode after the first call to prevent multiple resets
+            if (count == 1 || !IS_CLICK_MODE) {
+                setClickMode(false);
+            }
+        } else {
+            HarbourLogger.log("DocHandler", "Not opening browser - no recent click detected for: " + functionName);
+        }
+        
+        // Return empty array to prevent other handlers from running and showing "Cannot find declaration" popup
+        // This is important - returning null allows other handlers to run, empty array stops the chain
+        HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Returning EMPTY_ARRAY to prevent popup for: " + functionName);
+        return PsiElement.EMPTY_ARRAY;
     }
 
     /**
@@ -415,5 +442,27 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         
         HarbourLogger.log("DocHandler", "Checking if declaration for " + functionName + ": " + isDeclaration);
         return isDeclaration;
+    }
+
+    /**
+     * Ensure the mouse listener is registered for this project
+     */
+    private static synchronized void ensureMouseListenerRegistered(Project project) {
+        if (MOUSE_LISTENER_REGISTERED || project == null) {
+            return;
+        }
+        
+        try {
+            HarbourMouseListener listener = new HarbourMouseListener();
+            com.intellij.openapi.editor.EditorFactory.getInstance().getEventMulticaster()
+                .addEditorMouseListener(listener, project);
+            com.intellij.openapi.editor.EditorFactory.getInstance().getEventMulticaster()
+                .addEditorMouseMotionListener(listener, project);
+            
+            MOUSE_LISTENER_REGISTERED = true;
+            HarbourLogger.log("DocHandler", "Mouse listener registered successfully");
+        } catch (Exception e) {
+            HarbourLogger.log("DocHandler", "Failed to register mouse listener: " + e.getMessage());
+        }
     }
 }

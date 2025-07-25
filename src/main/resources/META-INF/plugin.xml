@@ -73,6 +73,7 @@
         
         <!-- Startup Activities -->
         <startupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
+        <startupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"
