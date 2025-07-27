@@ -248,6 +248,27 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             HarbourLogger.log(COMPONENT, "Processing identifier: " + identifierName);
         }
 
+        // Check if this is a class variable reference (::variable)
+        String currentLineText = getLineText(file, element);
+        if (currentLineText != null && currentLineText.contains("::" + identifierName)) {
+            HarbourLogger.log(COMPONENT, "Identified as class variable reference: ::" + identifierName);
+            PsiElement[] dataTargets = resolveClassVariableReference(leafElement, identifierName, currentLocationKey);
+            if (dataTargets != null && dataTargets.length > 0) {
+                HarbourLogger.log(COMPONENT, "Found " + dataTargets.length + " DATA field targets");
+                return dataTargets;
+            }
+        }
+
+        // Check if this is a DATA field definition that we want to make navigable
+        if (currentLineText != null && currentLineText.trim().toUpperCase().startsWith("DATA " + identifierName.toUpperCase())) {
+            HarbourLogger.log(COMPONENT, "Identified as DATA field definition: " + identifierName);
+            PsiElement[] dataUsages = resolveDataFieldUsages(leafElement, identifierName, currentLocationKey);
+            if (dataUsages != null && dataUsages.length > 0) {
+                HarbourLogger.log(COMPONENT, "Found " + dataUsages.length + " DATA field usage targets");
+                return dataUsages;
+            }
+        }
+
         // First check if this is a class reference
         if (isClassReference(leafElement)) {
             HarbourLogger.log(COMPONENT, "Identified as class reference: " + identifierName);
@@ -1610,5 +1631,248 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
 
         return new int[]{scopeStart, scopeEnd};
+    }
+
+    /**
+     * Resolves class variable reference (::variable) to DATA field definition
+     */
+    private PsiElement[] resolveClassVariableReference(PsiElement element, String variableName, String currentLocationKey) {
+        HarbourLogger.log(COMPONENT, "Resolving class variable reference: ::" + variableName);
+        
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return null;
+        }
+
+        // First, find the class that contains this element
+        String className = findContainingClassName(element);
+        if (className == null) {
+            HarbourLogger.log(COMPONENT, "Could not find containing class for variable: " + variableName);
+            return null;
+        }
+
+        HarbourLogger.log(COMPONENT, "Found containing class: " + className + " for variable: " + variableName);
+
+        // Now search for the DATA field definition in this class
+        List<PsiElement> dataFields = findDataFieldsInClass(file, className, variableName);
+        
+        if (dataFields.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "No DATA field found for: " + variableName + " in class: " + className);
+            return null;
+        }
+
+        // Create navigation elements for the DATA fields
+        List<PsiElement> navigationElements = new ArrayList<>();
+        for (PsiElement dataField : dataFields) {
+            VirtualFile dataFile = dataField.getContainingFile().getVirtualFile();
+            if (dataFile != null) {
+                String filePath = dataFile.getPath();
+                int lineNumber = HarbourLogger.calculateLineNumber(dataField);
+                String locationKey = filePath + ":" + lineNumber;
+
+                // Skip if this is the same location as the current click
+                if (!locationKey.equals(currentLocationKey)) {
+                    navigationElements.add(new HarbourNavigationElement(
+                        dataField,
+                        "DATA " + variableName,
+                        filePath,
+                        lineNumber,
+                        "Class variable definition"
+                    ));
+                }
+            }
+        }
+
+        if (navigationElements.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "No valid navigation targets found for DATA field: " + variableName);
+            return null;
+        }
+
+        HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " DATA field targets for: " + variableName);
+        return navigationElements.toArray(new PsiElement[0]);
+    }
+
+    /**
+     * Find the class name that contains the given element
+     */
+    private String findContainingClassName(PsiElement element) {
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return null;
+        }
+
+        String fileText = file.getText();
+        if (fileText == null) {
+            return null;
+        }
+
+        String[] lines = fileText.split("\n");
+        int elementLine = HarbourLogger.calculateLineNumber(element) - 1; // Convert to 0-based
+
+        // Search backwards from the current line to find the CLASS declaration
+        for (int i = elementLine; i >= 0; i--) {
+            String line = lines[i].trim().toUpperCase();
+            if (line.startsWith("CLASS ")) {
+                // Extract class name
+                String[] parts = line.split("\\s+");
+                if (parts.length >= 2) {
+                    String className = parts[1];
+                    HarbourLogger.log(COMPONENT, "Found containing class: " + className + " at line " + (i + 1));
+                    return className;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find DATA field definitions in the specified class
+     */
+    private List<PsiElement> findDataFieldsInClass(PsiFile file, String className, String fieldName) {
+        List<PsiElement> dataFields = new ArrayList<>();
+        
+        String fileText = file.getText();
+        if (fileText == null) {
+            return dataFields;
+        }
+
+        String[] lines = fileText.split("\n");
+        boolean inClass = false;
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            String upperLine = line.toUpperCase();
+
+            // Check if we're entering the target class
+            if (upperLine.startsWith("CLASS " + className.toUpperCase())) {
+                inClass = true;
+                HarbourLogger.log(COMPONENT, "Entered class " + className + " at line " + (i + 1));
+                continue;
+            }
+
+            // Check if we're leaving the class
+            if (inClass && (upperLine.startsWith("CLASS ") || upperLine.startsWith("ENDCLASS"))) {
+                if (upperLine.startsWith("CLASS ") && !upperLine.startsWith("CLASS " + className.toUpperCase())) {
+                    inClass = false;
+                    HarbourLogger.log(COMPONENT, "Left class " + className + " at line " + (i + 1));
+                }
+                continue;
+            }
+
+            // If we're in the target class, look for DATA fields
+            if (inClass && upperLine.startsWith("DATA " + fieldName.toUpperCase())) {
+                // Create a PsiElement representing this DATA field
+                int offset = 0;
+                for (int j = 0; j < i; j++) {
+                    offset += lines[j].length() + 1; // +1 for newline
+                }
+                offset += line.indexOf(fieldName); // Position to the field name
+
+                PsiElement dataElement = file.findElementAt(offset);
+                if (dataElement != null) {
+                    HarbourLogger.log(COMPONENT, "Found DATA field " + fieldName + " at line " + (i + 1));
+                    dataFields.add(dataElement);
+                }
+            }
+        }
+
+        return dataFields;
+    }
+
+    /**
+     * Resolves DATA field definition to its usages (::variable references)
+     */
+    private PsiElement[] resolveDataFieldUsages(PsiElement element, String fieldName, String currentLocationKey) {
+        HarbourLogger.log(COMPONENT, "Resolving DATA field usages for: " + fieldName);
+        
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return null;
+        }
+
+        // Find the class that contains this DATA field
+        String className = findContainingClassName(element);
+        if (className == null) {
+            HarbourLogger.log(COMPONENT, "Could not find containing class for DATA field: " + fieldName);
+            return null;
+        }
+
+        HarbourLogger.log(COMPONENT, "Found containing class: " + className + " for DATA field: " + fieldName);
+
+        // Search for usages of this DATA field (::fieldName patterns)
+        List<PsiElement> usages = findDataFieldUsages(file, fieldName);
+        
+        if (usages.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "No usages found for DATA field: " + fieldName);
+            return null;
+        }
+
+        // Create navigation elements for the usages
+        List<PsiElement> navigationElements = new ArrayList<>();
+        for (PsiElement usage : usages) {
+            VirtualFile usageFile = usage.getContainingFile().getVirtualFile();
+            if (usageFile != null) {
+                String filePath = usageFile.getPath();
+                int lineNumber = HarbourLogger.calculateLineNumber(usage);
+                String locationKey = filePath + ":" + lineNumber;
+
+                // Skip if this is the same location as the current click (the DATA definition itself)
+                if (!locationKey.equals(currentLocationKey)) {
+                    navigationElements.add(new HarbourNavigationElement(
+                        usage,
+                        "::" + fieldName,
+                        filePath,
+                        lineNumber,
+                        "Class variable usage"
+                    ));
+                }
+            }
+        }
+
+        if (navigationElements.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "No valid navigation targets found for DATA field usages: " + fieldName);
+            return null;
+        }
+
+        HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " usage targets for DATA field: " + fieldName);
+        return navigationElements.toArray(new PsiElement[0]);
+    }
+
+    /**
+     * Find all usages of a DATA field (::fieldName patterns) in the file
+     */
+    private List<PsiElement> findDataFieldUsages(PsiFile file, String fieldName) {
+        List<PsiElement> usages = new ArrayList<>();
+        
+        String fileText = file.getText();
+        if (fileText == null) {
+            return usages;
+        }
+
+        String[] lines = fileText.split("\n");
+        String searchPattern = "::" + fieldName;
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            int index = line.indexOf(searchPattern);
+            
+            if (index >= 0) {
+                // Calculate the offset to the field name (after ::)
+                int offset = 0;
+                for (int j = 0; j < i; j++) {
+                    offset += lines[j].length() + 1; // +1 for newline
+                }
+                offset += index + 2; // +2 to skip "::" and point to the field name
+
+                PsiElement usageElement = file.findElementAt(offset);
+                if (usageElement != null) {
+                    HarbourLogger.log(COMPONENT, "Found usage of " + fieldName + " at line " + (i + 1));
+                    usages.add(usageElement);
+                }
+            }
+        }
+
+        return usages;
     }
 }
