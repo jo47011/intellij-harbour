@@ -256,12 +256,10 @@ public final class HarbourReferenceService {
      * @return A list of PSI elements for the class methods
      */
     public List<PsiElement> findClassMethods(String className, String methodName) {
-        System.err.println("*** findClassMethods called: className='" + className + "', methodName='" + methodName + "'");
         HarbourLogger.log("ReferenceService", "Searching for methods of class: " + className +
                 (methodName != null ? " with name: " + methodName : ""));
 
         if (className == null || className.isEmpty()) {
-            System.err.println("*** findClassMethods: className is null or empty");
             return Collections.emptyList();
         }
 
@@ -271,85 +269,62 @@ public final class HarbourReferenceService {
         // Get class declarations first
         List<PsiElement> classDeclarations = findClasses(className);
 
-        System.err.println("*** findClassMethods: Found " + classDeclarations.size() + " class declarations for: " + className);
         HarbourLogger.log("ReferenceService", "Found " + classDeclarations.size() + " class declarations for: " + className);
 
         // If we have class declarations, look for methods within them
         for (PsiElement classDecl : classDeclarations) {
-            System.err.println("*** findClassMethods: Checking classDecl type: " + classDecl.getClass().getName());
-            
             // Handle both ClassDeclaration and raw elements
             PsiFile containingFile = classDecl.getContainingFile();
             if (containingFile == null) {
-                System.err.println("*** findClassMethods: No containing file for class element");
                 continue;
             }
             
             // Add the file to search for methods
             if (containingFile instanceof HarbourFile) {
                 classFiles.add(containingFile);
-                System.err.println("*** findClassMethods: Added file to search: " + containingFile.getName());
             }
             
             if (classDecl instanceof ClassDeclaration) {
                 ClassDeclaration declaration = (ClassDeclaration) classDecl;
                 // Scan for METHOD declarations within the class
                 String classText = declaration.getText();
-                System.err.println("*** findClassMethods: Searching in class text (length=" + classText.length() + ")");
 
                 // Use regex to find METHOD declarations
                 Pattern methodPattern = methodName != null
                         ? Pattern.compile("(?i)\\bMETHOD\\s+" + Pattern.quote(methodName) + "\\b")
                         : Pattern.compile("(?i)\\bMETHOD\\s+\\w+");
-                
-                System.err.println("*** findClassMethods: Using pattern: " + methodPattern.pattern());
 
                 Matcher matcher = methodPattern.matcher(classText);
-                int matchCount = 0;
                 while (matcher.find()) {
-                    matchCount++;
                     int offset = matcher.start() + classDecl.getTextOffset();
                     PsiElement methodElement = classDecl.getContainingFile().findElementAt(offset);
 
                     if (methodElement != null) {
                         result.add(methodElement);
-                        System.err.println("*** findClassMethods: Found method match #" + matchCount + ": " + methodElement.getText());
                         HarbourLogger.log("ReferenceService", "Found method declaration in class " + className + ": " + methodElement.getText());
                     }
                 }
-                System.err.println("*** findClassMethods: Total matches in class text: " + matchCount);
             }
         }
 
-        // Also search in the files containing these class declarations (already populated above)
-
-        System.err.println("*** findClassMethods: Searching in " + classFiles.size() + " class files");
-        
+        // Also search in the files containing these class declarations
         for (PsiFile file : classFiles) {
-            System.err.println("*** findClassMethods: Searching methods in file: " + file.getName());
-            
             // Direct text search for METHOD declarations in the file
             String fileText = file.getText();
             Pattern methodPattern = methodName != null
                     ? Pattern.compile("(?i)\\bMETHOD\\s+" + Pattern.quote(methodName) + "\\b")
                     : Pattern.compile("(?i)\\bMETHOD\\s+\\w+");
             
-            System.err.println("*** findClassMethods: Searching with pattern: " + methodPattern.pattern() + " in file text length=" + fileText.length());
-            
             Matcher matcher = methodPattern.matcher(fileText);
-            int fileMatchCount = 0;
             while (matcher.find()) {
-                fileMatchCount++;
                 int offset = matcher.start();
                 PsiElement methodElement = file.findElementAt(offset);
                 
                 if (methodElement != null) {
                     result.add(methodElement);
-                    System.err.println("*** findClassMethods: Found method in file #" + fileMatchCount + " at offset " + offset + ": " + methodElement.getText());
                     HarbourLogger.log("ReferenceService", "Found method declaration in file for class " + className + " at offset " + offset);
                 }
             }
-            System.err.println("*** findClassMethods: Total method matches in file: " + fileMatchCount);
         }
 
         // Search for all variations of METHOD declarations:
@@ -416,7 +391,6 @@ public final class HarbourReferenceService {
             }
         }
 
-        System.err.println("*** findClassMethods: Returning " + result.size() + " methods for class: " + className);
         HarbourLogger.log("ReferenceService", "Found " + result.size() + " methods for class: " + className);
         return result;
     }
@@ -1052,7 +1026,6 @@ public final class HarbourReferenceService {
     public static class HarbourReferenceServiceInitializer implements StartupActivity.DumbAware {
         @Override
         public void runActivity(@NotNull Project project) {
-            System.err.println("*** HARBOUR REFERENCE SERVICE INITIALIZER CALLED ***");
             HarbourLogger.log("ReferenceService", "Registering class method reference provider");
 
             // Initialize the service
@@ -1067,10 +1040,8 @@ public final class HarbourReferenceService {
                     HarbourMouseListener listener = new HarbourMouseListener();
                     EditorFactory.getInstance().getEventMulticaster().addEditorMouseListener(listener, project);
                     EditorFactory.getInstance().getEventMulticaster().addEditorMouseMotionListener(listener, project);
-                    System.err.println("*** HARBOUR MOUSE LISTENER REGISTERED SUCCESSFULLY ***");
                     HarbourLogger.log("ReferenceService", "Harbour mouse listener registered successfully");
                 } catch (Exception e) {
-                    System.err.println("*** FAILED TO REGISTER MOUSE LISTENER: " + e.getMessage());
                     HarbourLogger.log("ReferenceService", "Failed to register Harbour mouse listener: " + e.getMessage());
                 }
             });

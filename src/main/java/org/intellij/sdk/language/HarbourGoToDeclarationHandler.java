@@ -245,7 +245,6 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             identifierName = identifierName.replace("\"", "").replace("'", "");
             HarbourLogger.log(COMPONENT, "Processing string literal: " + identifierName);
         } else {
-            System.err.println("*** MAIN HANDLER: Processing identifier: " + identifierName);
             HarbourLogger.log(COMPONENT, "Processing identifier: " + identifierName);
         }
 
@@ -293,14 +292,12 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             
             // Always check for method reference
             isMethod = isMethodReference(leafElement);
-            System.err.println("*** CHECKING IF " + identifierName + " IS METHOD REFERENCE: " + isMethod + 
-                             " (hasColonBefore: " + hasColonBefore + ", line: '" + lineText + "')");
         } else {
             isMethod = isMethodReference(leafElement);
-            System.err.println("*** CHECKING IF " + identifierName + " IS METHOD REFERENCE: " + isMethod);
         }
 
         if (isMethod) {
+            System.err.println("*** DEBUG: IDENTIFIED AS METHOD REFERENCE: " + identifierName + " - using method resolution");
             HarbourLogger.log(COMPONENT, "Identified as method reference: " + identifierName);
             PsiElement[] methodTargets = resolveMethodReference(leafElement, currentLocationKey);
             if (methodTargets != null && methodTargets.length > 0) {
@@ -369,31 +366,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 }
             }
         } else {
+            System.err.println("*** DEBUG: IDENTIFIED AS VARIABLE: " + identifierName + " - using file-based scoping");
             HarbourLogger.log(COMPONENT, "Searching for variable/symbol: " + identifierName);
 
-            // Find ALL occurrences first
-            List<PsiElement> allElements = service.findSymbol(identifierName);
-
-            // If this is a variable, filter to current procedure/function scope
-            int[] scope = getProcedureFunctionScope(element);
-            if (scope != null) {
-                HarbourLogger.log(COMPONENT, "Filtering variables to scope: " + scope[0] + "-" + scope[1]);
-
-                // Create filtered list with only elements in the same scope
-                foundElements = new ArrayList<>();
-                for (PsiElement found : allElements) {
-                    if (found != null && found.isValid()) {
-                        int foundLine = HarbourLogger.calculateLineNumber(found);
-                        if (foundLine >= scope[0] && foundLine <= scope[1]) {
-                            foundElements.add(found);
-                            HarbourLogger.log(COMPONENT, "Adding in-scope variable at line: " + foundLine);
-                        }
-                    }
-                }
-            } else {
-                // If we couldn't determine scope, use all results
-                foundElements = allElements;
-            }
+            // For variables: Use simple file-based search with line-based scoping
+            // Variables cannot be used outside their declaration file unless PRIVATE/STATIC
+            foundElements = findVariableInCurrentFileWithScope(element, identifierName);
+            System.err.println("*** DEBUG: Found " + foundElements.size() + " file-scoped occurrences of variable " + identifierName);
         }
 
         HarbourLogger.log(COMPONENT, "Found " + foundElements.size() + " elements for: " + identifierName);
@@ -468,18 +447,19 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        // If we have no valid elements, return null
+        // If we have no valid elements, return empty array to prevent default handlers
         if (definitionElements.isEmpty() && callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName);
-            return null;
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning empty array to prevent default handlers");
+            return new PsiElement[0];
         }
 
-        // If we only have calls but no definitions, this might be an external function
-        // Return null to let the external documentation handler take over
+        // If we only have calls but no definitions, show the calls (for variables, these are references)
+        // Don't return null to prevent default handlers from running
         if (definitionElements.isEmpty() && !callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "MAIN HANDLER: Only calls found for " + identifierName + 
-                            " (" + callElements.size() + " calls) on " + osName + " - delegating to external handler");
-            return null;
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: Only calls/references found for " + identifierName + 
+                            " (" + callElements.size() + " calls) - showing them instead of delegating to prevent default handlers");
+            System.err.println("*** DEBUG: Returning " + callElements.size() + " call/reference elements for " + identifierName);
+            return callElements.toArray(new PsiElement[0]);
         }
 
         HarbourLogger.log(COMPONENT, "MAIN HANDLER: Found " + definitionElements.size() + 
@@ -549,6 +529,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
 
         HarbourLogger.log(COMPONENT, "Returning " + navigationElements.size() + " sorted navigation targets");
+        System.err.println("*** DEBUG: MAIN HANDLER FINAL RETURN: " + navigationElements.size() + " targets for " + identifierName);
         return navigationElements.toArray(new PsiElement[0]);
     }
 
@@ -688,15 +669,15 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
-        System.err.println("*** isMethodReference called for: " + text);
+        System.err.println("*** DEBUG: Checking if " + text + " is a method reference");
         HarbourLogger.log(COMPONENT, "Checking if " + text + " is a method reference");
+
 
         // Look for a colon or dot before this element directly in the PSI tree
         PsiElement prev = element.getPrevSibling();
         while (prev != null) {
-            System.err.println("*** Checking prev sibling: '" + prev.getText() + "' class: " + prev.getClass().getSimpleName());
             if (prev.getText().equals(":") || prev.getText().equals(".")) {
-                System.err.println("*** Found immediate colon/dot before element: " + text);
+                System.err.println("*** DEBUG: Found immediate colon/dot before element: " + text + " -> METHOD REFERENCE");
                 HarbourLogger.log(COMPONENT, "Found immediate colon/dot before element: " + text);
                 return true;
             }
@@ -714,27 +695,35 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Get the line text for full context
         String lineText = getLineText(element.getContainingFile(), element);
         if (lineText == null) {
-            System.err.println("*** No line text found for element: " + text);
+            System.err.println("*** DEBUG: No line text found for " + text + " -> NOT METHOD REFERENCE");
             return false;
         }
-
-        System.err.println("*** Line text: '" + lineText + "'");
+        System.err.println("*** DEBUG: Line text for " + text + ": " + lineText.trim());
 
         // Find where our element appears in the line
         int pos = lineText.indexOf(text);
         if (pos <= 0) {
-            System.err.println("*** Element " + text + " not found in line or at position 0");
             return false;
         }
-
-        System.err.println("*** Element " + text + " found at position " + pos + " in line");
 
         // Check for assignment operator `:=` which should not be confused with method reference
         int assignPos = lineText.lastIndexOf(":=", pos);
         if (assignPos >= 0 && pos - assignPos <= text.length() + 2) {
             // This is likely part of an assignment, not a method reference
+            System.err.println("*** DEBUG: Found := assignment operator, not a method reference: " + text);
             HarbourLogger.log(COMPONENT, "Found := assignment operator, not a method reference: " + text);
             return false;
+        }
+        
+        // Check for double colon :: (scope resolution/field assignment) which should not be confused with method reference
+        if (lineText.contains("::")) {
+            int doubleColonPos = lineText.indexOf("::");
+            // If our element appears after ::, it's likely a field assignment, not a method reference
+            if (doubleColonPos >= 0 && pos > doubleColonPos) {
+                System.err.println("*** DEBUG: Found :: scope resolution, not a method reference: " + text);
+                HarbourLogger.log(COMPONENT, "Found :: scope resolution, not a method reference: " + text);
+                return false;
+            }
         }
 
         // Check for different method reference patterns:
@@ -749,28 +738,42 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             colonPos = lineText.lastIndexOf(':', colonPos - 1);
         }
 
-        System.err.println("*** colonPos: " + colonPos + ", dotPos: " + dotPos + ", assignPos: " + assignPos);
-        
         if ((colonPos > 0 && colonPos != assignPos) || dotPos > 0) {
             // Make sure there's some character before the colon/dot (an object name)
             // and that it's not part of a comment
             int separatorPos = Math.max(colonPos, dotPos);
-            System.err.println("*** separatorPos: " + separatorPos);
             if (separatorPos > 0 &&
                     !lineText.substring(0, separatorPos).contains("//") &&
                     !lineText.substring(0, separatorPos).contains("/*")) {
-                System.err.println("*** Found method reference pattern with colon/dot: " + text);
                 HarbourLogger.log(COMPONENT, "Found method reference pattern with colon/dot: " + text);
                 return true;
             }
         }
 
         // 2. Check for METHOD keyword pattern (used in method declarations)
+        // BUT exclude method parameters - if we're inside parentheses after METHOD, it's a parameter
         if (lineText.toUpperCase().contains("METHOD") &&
                 lineText.toUpperCase().indexOf("METHOD") < pos) {
+            // Check if we're inside method parameter parentheses
+            int methodPos = lineText.toUpperCase().indexOf("METHOD");
+            String afterMethod = lineText.substring(methodPos);
+            int openParen = afterMethod.indexOf('(');
+            int closeParen = afterMethod.indexOf(')', openParen);
+            
+            if (openParen > 0 && closeParen > openParen) {
+                // Check if our element position is within the parentheses
+                int elementPosInAfterMethod = pos - methodPos;
+                if (elementPosInAfterMethod > openParen && elementPosInAfterMethod < closeParen) {
+                    // We're inside method parameter parentheses - this is a parameter, not a method reference
+                    System.err.println("*** DEBUG: " + text + " is inside METHOD parameter parentheses -> NOT METHOD REFERENCE");
+                    return false;
+                }
+            }
+            
             // Make sure it's not inside a comment
             String beforeMethod = lineText.substring(0, pos);
             if (!beforeMethod.contains("//") && !beforeMethod.contains("/*")) {
+                System.err.println("*** DEBUG: " + text + " found in METHOD declaration context -> METHOD REFERENCE");
                 HarbourLogger.log(COMPONENT, "Found method declaration for: " + text);
                 return true;
             }
@@ -786,9 +789,51 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        System.err.println("*** " + text + " is NOT a method reference");
+        System.err.println("*** DEBUG: " + text + " is NOT a method reference -> VARIABLE");
         HarbourLogger.log(COMPONENT, text + " is not a method reference");
         return false;
+    }
+
+    /**
+     * Get the containing class context for a method call
+     */
+    private String getContainingClassContext(PsiElement element) {
+        // Look for containing METHOD declaration
+        PsiElement current = element;
+        int depth = 0;
+        while (current != null && depth < 20) { // Limit depth to avoid infinite loops
+            String text = current.getText();
+            
+            if (text != null && text.toUpperCase().contains("METHOD")) {
+                // Try to extract class name from METHOD declaration
+                // Patterns: "METHOD name CLASS className" or "METHOD className:name"
+                String[] lines = text.split("\n");
+                for (String line : lines) {
+                    String upperLine = line.toUpperCase();
+                    if (upperLine.contains("METHOD")) {
+                        // Pattern: METHOD name CLASS className
+                        if (upperLine.contains("CLASS")) {
+                            String[] parts = upperLine.split("CLASS");
+                            if (parts.length > 1) {
+                                String className = parts[1].trim().split("\\s+")[0];
+                                return className;
+                            }
+                        }
+                        // Pattern: METHOD className:name
+                        if (upperLine.contains(":")) {
+                            String methodPart = upperLine.substring(upperLine.indexOf("METHOD") + 6).trim();
+                            if (methodPart.contains(":")) {
+                                String className = methodPart.split(":")[0].trim();
+                                return className;
+                            }
+                        }
+                    }
+                }
+            }
+            current = current.getParent();
+            depth++;
+        }
+        return null;
     }
 
     /**
@@ -797,23 +842,18 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     private String extractClassNameFromMethodCall(PsiElement methodElement) {
         String text = methodElement.getText();
         if (text == null || text.isEmpty()) {
-            System.err.println("*** extractClassNameFromMethodCall: text is null or empty");
             return null;
         }
 
         // Get the line text
         String lineText = getLineText(methodElement.getContainingFile(), methodElement);
         if (lineText == null) {
-            System.err.println("*** extractClassNameFromMethodCall: lineText is null");
             return null;
         }
-
-        System.err.println("*** extractClassNameFromMethodCall: text='" + text + "', lineText='" + lineText + "'");
 
         // Find method position in the line
         int methodPos = lineText.indexOf(text);
         if (methodPos <= 0) {
-            System.err.println("*** extractClassNameFromMethodCall: methodPos <= 0: " + methodPos);
             return null;
         }
 
@@ -822,11 +862,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         int dotPos = lineText.lastIndexOf('.', methodPos);
         int separatorPos = Math.max(colonPos, dotPos);
 
-        System.err.println("*** extractClassNameFromMethodCall: methodPos=" + methodPos + ", colonPos=" + colonPos + 
-                          ", dotPos=" + dotPos + ", separatorPos=" + separatorPos);
-
         if (separatorPos <= 0) {
-            System.err.println("*** extractClassNameFromMethodCall: separatorPos <= 0");
             return null;
         }
 
@@ -834,18 +870,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // The pattern should match at the end of beforeSeparator since we cut off at the colon
         Pattern classPattern = Pattern.compile("(\\w+)\\s*\\(\\s*\\)\\s*$");
         String beforeSeparator = lineText.substring(0, separatorPos);
-        System.err.println("*** extractClassNameFromMethodCall: beforeSeparator='" + beforeSeparator + "'");
         
         Matcher matcher = classPattern.matcher(beforeSeparator);
 
         if (matcher.find()) {
             // Found a class instantiation pattern
             String className = matcher.group(1);
-            System.err.println("*** extractClassNameFromMethodCall: FOUND className='" + className + "'");
             HarbourLogger.log(COMPONENT, "Found class name: " + className);
             return className;
-        } else {
-            System.err.println("*** extractClassNameFromMethodCall: Pattern did not match");
         }
 
         // Otherwise try to find nearest identifier before the separator
@@ -970,10 +1002,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // First try to find the class name for this method
         String className = extractClassNameFromMethodCall(element);
+        
+        // If no class found from method call pattern, try containing context
+        if (className == null) {
+            className = getContainingClassContext(element);
+        }
 
-        // Log both the method name and potential class name for debugging
-        System.err.println("*** EXTRACTING CLASS NAME FOR METHOD: " + methodName + 
-                          " -> FOUND CLASS: " + (className != null ? className : "NULL"));
+        // Debug output for method resolution
         HarbourLogger.log(COMPONENT, "Method " + methodName +
                 (className != null ? " with potential class: " + className : " with no class detected"));
 
@@ -983,22 +1018,18 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // Try class-specific search if we found a class name
         if (className != null) {
-            System.err.println("*** SEARCHING FOR CLASS METHODS: " + className + ":" + methodName);
             HarbourLogger.log(COMPONENT, "Searching for method " + methodName + " in class " + className);
             methodDeclarations = service.findClassMethods(className, methodName);
             
             // If we have a specific class, ONLY use those results - don't fall back to general search
             if (!methodDeclarations.isEmpty()) {
-                System.err.println("*** FOUND " + methodDeclarations.size() + " CLASS-SPECIFIC METHODS");
                 HarbourLogger.log(COMPONENT, "Found " + methodDeclarations.size() + 
                         " class-specific methods for " + className + ":" + methodName);
             } else {
-                System.err.println("*** NO CLASS-SPECIFIC METHODS FOUND, RETURNING EMPTY");
                 HarbourLogger.log(COMPONENT, "No methods found for " + className + ":" + methodName);
             }
         } else {
             // Only do general search if no class was identified
-            System.err.println("*** NO CLASS IDENTIFIED, DOING GENERAL SEARCH");
             HarbourLogger.log(COMPONENT, "No class identified, trying general method search");
 
             // Look for METHOD declarations with this name in all files
@@ -1006,7 +1037,6 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             List<PsiElement> directResults = findMethodsByDirectPattern(project, methodName);
 
             if (!directResults.isEmpty()) {
-                System.err.println("*** FOUND " + directResults.size() + " METHODS BY GENERAL SEARCH");
                 HarbourLogger.log(COMPONENT, "Found " + directResults.size() +
                         " methods by direct pattern search");
                 methodDeclarations.addAll(directResults);
@@ -1446,5 +1476,139 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         HarbourLogger.log(COMPONENT, "Created navigation element for: " + file.getPath());
         return new PsiElement[] { navElement };
+    }
+
+    /**
+     * Find variable occurrences in current file with simple line-based scoping
+     * As suggested by user: go up to find function/procedure/method/class definition,
+     * then go down to find the next one, and filter results to that range.
+     */
+    private List<PsiElement> findVariableInCurrentFileWithScope(PsiElement clickedElement, String variableName) {
+        List<PsiElement> results = new ArrayList<>();
+        
+        PsiFile file = clickedElement.getContainingFile();
+        if (!(file instanceof HarbourFile)) {
+            return results;
+        }
+
+        String fileText = file.getText();
+        if (fileText == null || fileText.isEmpty()) {
+            return results;
+        }
+
+        // Get the clicked element's line number
+        int clickedLine = HarbourLogger.calculateLineNumber(clickedElement);
+        System.err.println("*** DEBUG: Looking for variable " + variableName + " near clicked line " + clickedLine);
+        
+        // Split lines to check clicked line content
+        String[] fileLines = fileText.split("\n");
+        int clickedLineIndex = clickedLine - 1;
+        System.err.println("*** DEBUG: Clicked line index (0-based): " + clickedLineIndex);
+        if (clickedLineIndex >= 0 && clickedLineIndex < fileLines.length) {
+            System.err.println("*** DEBUG: Clicked line content: " + fileLines[clickedLineIndex].trim());
+        }
+
+        // Find the scope boundaries (start and end lines)
+        int[] scopeLines = findSimpleScope(fileText, clickedLine);
+        if (scopeLines == null) {
+            System.err.println("*** DEBUG: Could not determine scope, searching entire file");
+            scopeLines = new int[]{0, fileText.split("\n").length};
+        }
+        
+        int scopeStart = scopeLines[0];
+        int scopeEnd = scopeLines[1];
+        System.err.println("*** DEBUG: Scope boundaries: lines " + scopeStart + " to " + scopeEnd);
+
+        // Search for the variable within the current file only
+        String[] lines = fileText.split("\n");
+        for (int lineNum = 0; lineNum < lines.length; lineNum++) {
+            String line = lines[lineNum];
+            
+            // Check if this line is within our scope
+            if (lineNum >= scopeStart && lineNum <= scopeEnd) {
+                // Simple regex to find the variable name as a whole word
+                if (line.matches(".*\\b" + variableName + "\\b.*")) {
+                    // Find all occurrences of the variable in this line
+                    int pos = 0;
+                    while ((pos = line.indexOf(variableName, pos)) >= 0) {
+                        // Check if it's a whole word (not part of another identifier)
+                        boolean isWholeWord = true;
+                        if (pos > 0 && Character.isLetterOrDigit(line.charAt(pos - 1))) {
+                            isWholeWord = false;
+                        }
+                        if (pos + variableName.length() < line.length() && 
+                            Character.isLetterOrDigit(line.charAt(pos + variableName.length()))) {
+                            isWholeWord = false;
+                        }
+                        
+                        if (isWholeWord) {
+                            // Calculate the offset in the file
+                            int lineStartOffset = 0;
+                            for (int i = 0; i < lineNum; i++) {
+                                lineStartOffset += lines[i].length() + 1; // +1 for newline
+                            }
+                            int elementOffset = lineStartOffset + pos;
+                            
+                            // Find the PsiElement at this offset
+                            PsiElement foundElement = file.findElementAt(elementOffset);
+                            if (foundElement != null && variableName.equals(foundElement.getText())) {
+                                results.add(foundElement);
+                                System.err.println("*** DEBUG: Found variable " + variableName + " at line " + (lineNum + 1) + ", position " + pos);
+                            }
+                        }
+                        pos += variableName.length();
+                    }
+                }
+            }
+        }
+
+        System.err.println("*** DEBUG: Found " + results.size() + " occurrences of " + variableName + " in scope");
+        return results;
+    }
+
+    /**
+     * Find simple scope boundaries using user's approach:
+     * Go up until function/procedure/method/class definition,
+     * then go down until the next function/procedure/method/class definition.
+     */
+    private int[] findSimpleScope(String fileText, int clickedLine) {
+        String[] lines = fileText.split("\n");
+        // Convert 1-based line number to 0-based array index
+        int clickedLineIndex = clickedLine - 1;
+        if (clickedLineIndex >= lines.length || clickedLineIndex < 0) {
+            return null;
+        }
+
+        System.err.println("*** DEBUG: Searching scope around line " + clickedLine + " (index " + clickedLineIndex + ")");
+
+        // Go up to find the start of current function/procedure/method/class
+        int scopeStart = 0;
+        for (int i = clickedLineIndex; i >= 0; i--) {
+            String line = lines[i].toUpperCase().trim();
+            if (line.startsWith("FUNCTION ") || line.startsWith("PROCEDURE ") || 
+                line.startsWith("METHOD ") || line.startsWith("CLASS ")) {
+                scopeStart = i;
+                System.err.println("*** DEBUG: Found scope start at line " + (i + 1) + ": " + lines[i].trim());
+                break;
+            }
+        }
+
+        // Go down to find the end (next function/procedure/method/class or end of file)
+        int scopeEnd = lines.length - 1;
+        for (int i = scopeStart + 1; i < lines.length; i++) {
+            String line = lines[i].toUpperCase().trim();
+            if (line.startsWith("FUNCTION ") || line.startsWith("PROCEDURE ") || 
+                line.startsWith("METHOD ") || line.startsWith("CLASS ")) {
+                scopeEnd = i - 1;
+                System.err.println("*** DEBUG: Found scope end at line " + (i + 1) + ": " + lines[i].trim());
+                break;
+            }
+        }
+        
+        if (scopeEnd == lines.length - 1) {
+            System.err.println("*** DEBUG: Scope extends to end of file");
+        }
+
+        return new int[]{scopeStart, scopeEnd};
     }
 }

@@ -130,19 +130,7 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 
 ## Debugging Improvements
 
-- **GUI Debugging Integration**: Integrate GUI debugging directly into IntelliJ (currently uses Harbour's internal debugger)
-- **Enhanced Breakpoint Sync**: Real-time updates between IntelliJ breakpoints and init.cld file
-
 - **Process Coupling**: Debugging process in PyCharm and running GUI should be coupled - if one ends or crashes, the other should be stopped
-- **Breakpoint Controls**: Fix mute breakpoints functionality - not currently working
-- **Cross-Platform Path Handling**: Fix Windows path display issues in config edit (should show backslashes instead of forward slashes)
-- **Debugging Test Coverage**: Test debugging in 4 scenarios:
-  1. Unix with GUI
-  2. Unix without GUI (console only)
-  3. Windows with GUI  
-  4. Windows without GUI (console only)
-
-## Language Features
 
 - **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
 
@@ -151,7 +139,10 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 - navigation
   - LOCAL GetList:={}, dateiName, shift := 0, gbsArt, anz_ls := 1
     not working
-  
+  - CLASS ArtikelInfo
+    => DATA artNr                 READONLY  not highlighted/clickable
+
+
 - Tab should have the same as indent (2 in my case)
 - indentation 
   - should be correct while you type / after return
