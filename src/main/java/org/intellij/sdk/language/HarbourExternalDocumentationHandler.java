@@ -165,17 +165,15 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
                          ", count=" + count + 
                          ", timeSinceClick=" + timeSinceClick + "ms");
 
-        // Check if we're in click mode OR within a short time window of a click
-        boolean shouldOpenBrowser = IS_CLICK_MODE || (timeSinceClick < 500); // 500ms window
+        // Check if we're in click mode - only open browser on actual clicks, not hover
+        boolean shouldOpenBrowser = IS_CLICK_MODE;
         
         if (shouldOpenBrowser) {
             HarbourLogger.log("DocHandler", "Opening documentation for external function: " + functionName);
             openExternalDocumentation(project, functionName);
             
-            // Only reset click mode after the first call to prevent multiple resets
-            if (count == 1 || !IS_CLICK_MODE) {
-                setClickMode(false);
-            }
+            // Always reset click mode immediately after opening browser
+            setClickMode(false);
         } else {
             HarbourLogger.log("DocHandler", "Not opening browser - no recent click detected for: " + functionName);
         }
