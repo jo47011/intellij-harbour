@@ -248,15 +248,10 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             return true;
         }
 
-        // Special check for common patterns like User():new(...)
-        if (elementText.equals("new") || elementText.equals("create") ||
-                elementText.equals("init") || elementText.equals("setup")) {
-
-            // Check if preceded by a colon and function call
-            if (beforeElement.endsWith(":") && beforeElement.contains("(") && beforeElement.contains(")")) {
-                HarbourLogger.log("DocHandler", "Found special class method pattern for: " + elementText);
-                return true;
-            }
+        // Generic check: any method after colon and parentheses pattern
+        if (beforeElement.endsWith(":") && beforeElement.contains("(") && beforeElement.contains(")")) {
+            HarbourLogger.log("DocHandler", "Found class method pattern for: " + elementText);
+            return true;
         }
 
         return false;

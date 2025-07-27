@@ -43,6 +43,9 @@ public final class HarbourFunctionClassificationService {
     
     // Set of internal class names (lowercase) found in the project
     private final Set<String> internalClasses = ConcurrentHashMap.newKeySet();
+    
+    // Set of internal method names (lowercase) found in the project
+    private final Set<String> internalMethods = ConcurrentHashMap.newKeySet();
 
     // Flag to track if initial scan is complete
     private volatile boolean initialized = false;
@@ -65,6 +68,8 @@ public final class HarbourFunctionClassificationService {
             "(?i)\\bPROCEDURE\\s+(\\w+)\\s*\\(", Pattern.CASE_INSENSITIVE);
     private static final Pattern CLASS_PATTERN = Pattern.compile(
             "(?i)\\bCLASS\\s+(\\w+)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern METHOD_PATTERN = Pattern.compile(
+            "(?i)\\bMETHOD\\s+(\\w+)\\s*\\(", Pattern.CASE_INSENSITIVE);
     
     // Common Harbour standard functions that are always external
     private static final Set<String> KNOWN_EXTERNAL_FUNCTIONS = Set.of(
@@ -131,7 +136,8 @@ public final class HarbourFunctionClassificationService {
         
         return internalFunctions.contains(normalizedName) || 
                internalProcedures.contains(normalizedName) ||
-               internalClasses.contains(normalizedName);
+               internalClasses.contains(normalizedName) ||
+               internalMethods.contains(normalizedName);
     }
 
     /**
@@ -154,6 +160,7 @@ public final class HarbourFunctionClassificationService {
         allInternal.addAll(internalFunctions);
         allInternal.addAll(internalProcedures);
         allInternal.addAll(internalClasses);
+        allInternal.addAll(internalMethods);
         return allInternal;
     }
 
@@ -289,6 +296,7 @@ public final class HarbourFunctionClassificationService {
             int functionsFound = 0;
             int proceduresFound = 0;
             int classesFound = 0;
+            int methodsFound = 0;
             
             // Process files in batches to avoid long blocking
             final int BATCH_SIZE = 10;
@@ -323,6 +331,7 @@ public final class HarbourFunctionClassificationService {
                     functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
                     proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
                     classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
+                    methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
                 }
                 
                 // Brief pause to allow UI updates
@@ -344,11 +353,11 @@ public final class HarbourFunctionClassificationService {
             indicator.setFraction(1.0);
             
             HarbourLogger.log("FunctionClassification", 
-                    String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes",
-                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound));
+                    String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
+                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
             
-            LOG.info(String.format("HarbourFunctionClassificationService initialized: %d functions, %d procedures, %d classes in %d ms",
-                    functionsFound, proceduresFound, classesFound, duration.toMillis()));
+            LOG.info(String.format("HarbourFunctionClassificationService initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
+                    functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
 
         } catch (Exception e) {
             LOG.error("Error during project scan for internal functions", e);
@@ -410,6 +419,7 @@ public final class HarbourFunctionClassificationService {
             int functionsFound = 0;
             int proceduresFound = 0;
             int classesFound = 0;
+            int methodsFound = 0;
             
             for (VirtualFile virtualFile : filesToProcess) {
                 processedFiles++;
@@ -434,11 +444,11 @@ public final class HarbourFunctionClassificationService {
             Duration duration = Duration.between(start, end);
             
             HarbourLogger.log("FunctionClassification", 
-                    String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes",
-                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound));
+                    String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
+                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
             
-            LOG.info(String.format("HarbourFunctionClassificationService initialized: %d functions, %d procedures, %d classes in %d ms",
-                    functionsFound, proceduresFound, classesFound, duration.toMillis()));
+            LOG.info(String.format("HarbourFunctionClassificationService initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
+                    functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
 
         } catch (Exception e) {
             LOG.error("Error during project scan for internal functions", e);

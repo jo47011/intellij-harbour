@@ -245,6 +245,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             identifierName = identifierName.replace("\"", "").replace("'", "");
             HarbourLogger.log(COMPONENT, "Processing string literal: " + identifierName);
         } else {
+            System.err.println("*** MAIN HANDLER: Processing identifier: " + identifierName);
             HarbourLogger.log(COMPONENT, "Processing identifier: " + identifierName);
         }
 
@@ -267,20 +268,36 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Get the line text for context analysis
         String lineText = getLineText(file, element);
 
-        // Next check if this is a method reference - but explicitly check for assignment operators
+        // Next check if this is a method reference
         boolean isMethod = false;
         if (lineText != null) {
-            // Check for assignment operator that might be confused with method reference
-            boolean hasAssignmentOperator = lineText.contains(":=");
-            int assignPos = lineText.indexOf(":=");
+            // Check if there's a colon immediately before the identifier (method call pattern)
             int identPos = lineText.indexOf(identifierName);
-
-            // Only consider it a method if we don't have an assignment or the assignment is after the identifier
-            if (!hasAssignmentOperator || (assignPos > identPos)) {
-                isMethod = isMethodReference(leafElement);
+            boolean hasColonBefore = false;
+            
+            if (identPos > 0) {
+                // Look backwards from identifier position for a colon
+                for (int i = identPos - 1; i >= 0; i--) {
+                    char ch = lineText.charAt(i);
+                    if (ch == ':') {
+                        // Check if it's part of := or just :
+                        if (i + 1 < lineText.length() && lineText.charAt(i + 1) != '=') {
+                            hasColonBefore = true;
+                        }
+                        break;
+                    } else if (!Character.isWhitespace(ch)) {
+                        break;
+                    }
+                }
             }
+            
+            // Always check for method reference
+            isMethod = isMethodReference(leafElement);
+            System.err.println("*** CHECKING IF " + identifierName + " IS METHOD REFERENCE: " + isMethod + 
+                             " (hasColonBefore: " + hasColonBefore + ", line: '" + lineText + "')");
         } else {
             isMethod = isMethodReference(leafElement);
+            System.err.println("*** CHECKING IF " + identifierName + " IS METHOD REFERENCE: " + isMethod);
         }
 
         if (isMethod) {
@@ -671,12 +688,15 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
+        System.err.println("*** isMethodReference called for: " + text);
         HarbourLogger.log(COMPONENT, "Checking if " + text + " is a method reference");
 
         // Look for a colon or dot before this element directly in the PSI tree
         PsiElement prev = element.getPrevSibling();
         while (prev != null) {
+            System.err.println("*** Checking prev sibling: '" + prev.getText() + "' class: " + prev.getClass().getSimpleName());
             if (prev.getText().equals(":") || prev.getText().equals(".")) {
+                System.err.println("*** Found immediate colon/dot before element: " + text);
                 HarbourLogger.log(COMPONENT, "Found immediate colon/dot before element: " + text);
                 return true;
             }
@@ -694,14 +714,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Get the line text for full context
         String lineText = getLineText(element.getContainingFile(), element);
         if (lineText == null) {
+            System.err.println("*** No line text found for element: " + text);
             return false;
         }
+
+        System.err.println("*** Line text: '" + lineText + "'");
 
         // Find where our element appears in the line
         int pos = lineText.indexOf(text);
         if (pos <= 0) {
+            System.err.println("*** Element " + text + " not found in line or at position 0");
             return false;
         }
+
+        System.err.println("*** Element " + text + " found at position " + pos + " in line");
 
         // Check for assignment operator `:=` which should not be confused with method reference
         int assignPos = lineText.lastIndexOf(":=", pos);
@@ -723,13 +749,17 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             colonPos = lineText.lastIndexOf(':', colonPos - 1);
         }
 
+        System.err.println("*** colonPos: " + colonPos + ", dotPos: " + dotPos + ", assignPos: " + assignPos);
+        
         if ((colonPos > 0 && colonPos != assignPos) || dotPos > 0) {
             // Make sure there's some character before the colon/dot (an object name)
             // and that it's not part of a comment
             int separatorPos = Math.max(colonPos, dotPos);
+            System.err.println("*** separatorPos: " + separatorPos);
             if (separatorPos > 0 &&
                     !lineText.substring(0, separatorPos).contains("//") &&
                     !lineText.substring(0, separatorPos).contains("/*")) {
+                System.err.println("*** Found method reference pattern with colon/dot: " + text);
                 HarbourLogger.log(COMPONENT, "Found method reference pattern with colon/dot: " + text);
                 return true;
             }
@@ -756,6 +786,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
+        System.err.println("*** " + text + " is NOT a method reference");
         HarbourLogger.log(COMPONENT, text + " is not a method reference");
         return false;
     }
@@ -766,18 +797,23 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     private String extractClassNameFromMethodCall(PsiElement methodElement) {
         String text = methodElement.getText();
         if (text == null || text.isEmpty()) {
+            System.err.println("*** extractClassNameFromMethodCall: text is null or empty");
             return null;
         }
 
         // Get the line text
         String lineText = getLineText(methodElement.getContainingFile(), methodElement);
         if (lineText == null) {
+            System.err.println("*** extractClassNameFromMethodCall: lineText is null");
             return null;
         }
+
+        System.err.println("*** extractClassNameFromMethodCall: text='" + text + "', lineText='" + lineText + "'");
 
         // Find method position in the line
         int methodPos = lineText.indexOf(text);
         if (methodPos <= 0) {
+            System.err.println("*** extractClassNameFromMethodCall: methodPos <= 0: " + methodPos);
             return null;
         }
 
@@ -786,20 +822,30 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         int dotPos = lineText.lastIndexOf('.', methodPos);
         int separatorPos = Math.max(colonPos, dotPos);
 
+        System.err.println("*** extractClassNameFromMethodCall: methodPos=" + methodPos + ", colonPos=" + colonPos + 
+                          ", dotPos=" + dotPos + ", separatorPos=" + separatorPos);
+
         if (separatorPos <= 0) {
+            System.err.println("*** extractClassNameFromMethodCall: separatorPos <= 0");
             return null;
         }
 
         // First try to match ClassName() pattern
-        Pattern classPattern = Pattern.compile("(\\w+)\\s*\\(\\s*\\)\\s*[:.]");
+        // The pattern should match at the end of beforeSeparator since we cut off at the colon
+        Pattern classPattern = Pattern.compile("(\\w+)\\s*\\(\\s*\\)\\s*$");
         String beforeSeparator = lineText.substring(0, separatorPos);
+        System.err.println("*** extractClassNameFromMethodCall: beforeSeparator='" + beforeSeparator + "'");
+        
         Matcher matcher = classPattern.matcher(beforeSeparator);
 
         if (matcher.find()) {
             // Found a class instantiation pattern
             String className = matcher.group(1);
+            System.err.println("*** extractClassNameFromMethodCall: FOUND className='" + className + "'");
             HarbourLogger.log(COMPONENT, "Found class name: " + className);
             return className;
+        } else {
+            System.err.println("*** extractClassNameFromMethodCall: Pattern did not match");
         }
 
         // Otherwise try to find nearest identifier before the separator
@@ -926,6 +972,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         String className = extractClassNameFromMethodCall(element);
 
         // Log both the method name and potential class name for debugging
+        System.err.println("*** EXTRACTING CLASS NAME FOR METHOD: " + methodName + 
+                          " -> FOUND CLASS: " + (className != null ? className : "NULL"));
         HarbourLogger.log(COMPONENT, "Method " + methodName +
                 (className != null ? " with potential class: " + className : " with no class detected"));
 
@@ -935,19 +983,30 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // Try class-specific search if we found a class name
         if (className != null) {
+            System.err.println("*** SEARCHING FOR CLASS METHODS: " + className + ":" + methodName);
             HarbourLogger.log(COMPONENT, "Searching for method " + methodName + " in class " + className);
             methodDeclarations = service.findClassMethods(className, methodName);
-        }
-
-        // If class-specific search didn't yield results, try general method search
-        if (methodDeclarations.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "No class-specific methods found, trying general method search");
+            
+            // If we have a specific class, ONLY use those results - don't fall back to general search
+            if (!methodDeclarations.isEmpty()) {
+                System.err.println("*** FOUND " + methodDeclarations.size() + " CLASS-SPECIFIC METHODS");
+                HarbourLogger.log(COMPONENT, "Found " + methodDeclarations.size() + 
+                        " class-specific methods for " + className + ":" + methodName);
+            } else {
+                System.err.println("*** NO CLASS-SPECIFIC METHODS FOUND, RETURNING EMPTY");
+                HarbourLogger.log(COMPONENT, "No methods found for " + className + ":" + methodName);
+            }
+        } else {
+            // Only do general search if no class was identified
+            System.err.println("*** NO CLASS IDENTIFIED, DOING GENERAL SEARCH");
+            HarbourLogger.log(COMPONENT, "No class identified, trying general method search");
 
             // Look for METHOD declarations with this name in all files
             // First try direct pattern-based search for METHOD keyword + method name
             List<PsiElement> directResults = findMethodsByDirectPattern(project, methodName);
 
             if (!directResults.isEmpty()) {
+                System.err.println("*** FOUND " + directResults.size() + " METHODS BY GENERAL SEARCH");
                 HarbourLogger.log(COMPONENT, "Found " + directResults.size() +
                         " methods by direct pattern search");
                 methodDeclarations.addAll(directResults);
@@ -963,11 +1022,32 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return null;
         }
 
-        // Convert to navigation elements
-        List<PsiElement> navigationElements = new ArrayList<>();
+        // Convert to navigation elements and prioritize implementations over declarations
+        List<PsiElement> implementations = new ArrayList<>();
+        List<PsiElement> declarations = new ArrayList<>();
         Set<String> locations = new HashSet<>();
 
+        // First pass: separate implementations from declarations
         for (PsiElement declaration : methodDeclarations) {
+            if (declaration != null && declaration.isValid()) {
+                String context = getElementContext(declaration);
+                // Check if this looks like an implementation (has body) vs declaration (just header)
+                if (context != null && (context.contains("{") || context.contains("LOCAL") || context.contains("RETURN"))) {
+                    implementations.add(declaration);
+                } else {
+                    declarations.add(declaration);
+                }
+            }
+        }
+
+        // Prioritize implementations over declarations
+        List<PsiElement> prioritizedMethods = new ArrayList<>();
+        prioritizedMethods.addAll(implementations);
+        prioritizedMethods.addAll(declarations);
+
+        List<PsiElement> navigationElements = new ArrayList<>();
+
+        for (PsiElement declaration : prioritizedMethods) {
             if (declaration != null && declaration.isValid()) {
                 try {
                     PsiFile containingFile = declaration.getContainingFile();
