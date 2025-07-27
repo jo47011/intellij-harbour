@@ -1042,16 +1042,6 @@ public final class HarbourReferenceService {
                 }
             });
 
-            // Pre-index some common functions in the background
-            ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                ReadAction.run(() -> {
-                    // Index some commonly used functions
-                    service.findFunctions("print");
-                    service.findFunctions("transform");
-                    service.findFunctions("eval");
-                    service.findFunctions("val");
-                });
-            });
         }
     }
 }

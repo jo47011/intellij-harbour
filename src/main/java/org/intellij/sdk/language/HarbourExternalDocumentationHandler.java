@@ -64,6 +64,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         if (!MOUSE_LISTENER_REGISTERED && element != null) {
             ensureMouseListenerRegistered(element.getProject());
         }
+        
 
         // Log this call for debugging
         String osName = System.getProperty("os.name");
@@ -179,10 +180,11 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             HarbourLogger.log("DocHandler", "Not opening browser - no recent click detected for: " + functionName);
         }
         
-        // Return empty array to prevent other handlers from running and showing "Cannot find declaration" popup
-        // This is important - returning null allows other handlers to run, empty array stops the chain
-        HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Returning EMPTY_ARRAY to prevent popup for: " + functionName);
-        return PsiElement.EMPTY_ARRAY;
+        // Return a dummy element to prevent the "Cannot find declaration" popup
+        // Returning empty array doesn't prevent the popup, but returning a dummy element does
+        PsiElement dummyTarget = new HarbourDummyPsiElement(element, false, "External Function: " + functionName);
+        HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Returning dummy element to prevent popup for: " + functionName);
+        return new PsiElement[] { dummyTarget };
     }
 
     /**
@@ -196,17 +198,19 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             return true;
         }
 
-        // Check for parenthesis after the element
+        // Check for parenthesis after the element (with potential whitespace)
         PsiElement sibling = element.getNextSibling();
         while (sibling != null && sibling.getText().trim().isEmpty()) {
             sibling = sibling.getNextSibling();
         }
 
-        boolean isFunction = sibling != null && sibling.getText().equals("(");
+        boolean isFunction = sibling != null && sibling.getText().startsWith("(");
         if (isFunction) {
             HarbourLogger.log("DocHandler", "Function call identified by parenthesis: " + element.getText());
+            return true;
         }
-        return isFunction;
+        
+        return false;
     }
 
     /**

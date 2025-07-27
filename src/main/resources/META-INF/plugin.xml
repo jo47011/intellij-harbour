@@ -46,7 +46,6 @@
         <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.HarbourDirectIncludeReferenceContributor"/>
 
         <!-- Annotators -->
-        <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFunctionCallAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourIncludeAnnotator"/>
 
