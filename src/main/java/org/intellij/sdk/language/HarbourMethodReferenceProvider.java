@@ -40,14 +40,11 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
             if (elementType.contains("IDENT")) {
                 // Only create method references for actual method calls, not variables
                 if (isActualMethodCall(leafElement)) {
-                    System.err.println("*** DEBUG: CREATING method reference for: " + element.getText() + " (method call detected)");
                     HarbourLogger.log(COMPONENT, "Found method call identifier: " + element.getText());
                     return new PsiReference[]{
                             new HarbourMethodReference(element, new TextRange(0, element.getTextLength()))
                     };
                 } else {
-                    // Add debug output to understand what's happening
-                    System.err.println("*** DEBUG: SKIPPING variable identifier: " + element.getText() + " (not creating PsiReference)");
                     HarbourLogger.log(COMPONENT, "Skipping variable identifier: " + element.getText());
                 }
             }
@@ -125,7 +122,6 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
             int doubleColonPos = lineText.indexOf("::");
             // If our element appears after ::, it's likely a field assignment, not a method reference
             if (doubleColonPos >= 0 && identifierPos > doubleColonPos) {
-                System.err.println("*** DEBUG: Found :: scope resolution, not a method reference: " + text);
                 HarbourLogger.log(COMPONENT, "Found :: scope resolution, not a method reference: " + text);
                 return false;
             }

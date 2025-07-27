@@ -137,11 +137,7 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 - remove garbage from idea log
 
 - navigation
-  - LOCAL GetList:={}, dateiName, shift := 0, gbsArt, anz_ls := 1
-    not working
-  - CLASS ArtikelInfo
-    => DATA artNr                 READONLY  not highlighted/clickable
-
+  - show example line per item
 
 - Tab should have the same as indent (2 in my case)
 - indentation 
