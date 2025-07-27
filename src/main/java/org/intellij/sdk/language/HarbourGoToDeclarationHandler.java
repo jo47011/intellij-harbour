@@ -25,6 +25,7 @@ import java.io.File;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Handles "Go To Declaration" for Harbour identifiers.
@@ -558,6 +559,25 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (navigationElements.size() == 1) {
             HarbourLogger.log(COMPONENT, "Only one target remains after filtering, navigating directly");
             return navigationElements.toArray(new PsiElement[0]);
+        }
+
+        // If we have multiple targets, show custom popup with syntax highlighting
+        // But only on actual click, not hover
+        if (navigationElements.size() > 1) {
+            // Check if this is a click operation (not hover)
+            if (HarbourMouseListener.isClickOperation()) {
+                HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), showing custom popup on click");
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    List<PsiElement> targets = navigationElements.stream()
+                            .map(e -> (PsiElement) e)
+                            .collect(Collectors.toList());
+                    HarbourNavigationPopup.showNavigationPopup(targets, editor);
+                });
+                return new PsiElement[0]; // Return empty array to prevent default popup
+            } else {
+                HarbourLogger.log(COMPONENT, "Multiple targets found but in hover mode - not showing popup");
+                return null; // Return null to prevent any action on hover
+            }
         }
 
         HarbourLogger.log(COMPONENT, "Returning " + navigationElements.size() + " sorted navigation targets");
