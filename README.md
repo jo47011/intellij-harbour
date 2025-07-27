@@ -146,17 +146,11 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 
 - **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
 
-- navigation
-  - should be correct while you type / after return
-  - LOCAL oB := BClass():New(oA) clicking on new should go to the correct new() method / show popup
-
 - remove garbage from idea log
 
 - navigation
-  - LOCAL oB := BClass():New(oA) clicking on new should go to the correct new() method / show popup
   - LOCAL GetList:={}, dateiName, shift := 0, gbsArt, anz_ls := 1
     not working
-  - pre-index so navigation becomes quicker
   
 - Tab should have the same as indent (2 in my case)
 - indentation 
@@ -172,10 +166,6 @@ RETURN
 - compile/link errors:
   - hbmk2: Error: Referenced, missing, but unknown function(s): FOO()
     foo() should be clickable
-
-- remove garbage from idea log
-
-- external functions are no longer recognized as such -> no external link opened
 
 - Debugger not showing static vars
 
