@@ -31,8 +31,8 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
 
             // Handle separators 
             if (navElement.isSeparator()) {
-                // Calculate width: filename(25) + linenum(5) + space(1) + code(80) = 111
-                int separatorWidth = 25 + 5 + 1 + 80;
+                // Calculate width: filename(22) + linenum(5) + space(1) + code(80) = 108
+                int separatorWidth = 22 + 5 + 1 + 80;
                 String separatorLine = "─".repeat(separatorWidth);
                 append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 return;
@@ -50,9 +50,9 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             }
 
             // Build the complete line with proper alignment
-            // Format: filename (25) + line number (5 right-aligned) + space (1) + code (fixed width)
-            String truncatedFileName = truncateFileName(fileName, 25);
-            String formattedFileName = String.format("%-25s", truncatedFileName);
+            // Format: filename (22) + line number (5 right-aligned) + space (1) + code (fixed width)
+            String truncatedFileName = truncateFileName(fileName, 22);
+            String formattedFileName = String.format("%-22s", truncatedFileName);
             String formattedLineNumber = String.format("%5d", navElement.getLineNumber());
             
             // Add the filename and line number first (these are fixed formatting)
@@ -60,8 +60,13 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             append(formattedLineNumber, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
             
-            // Ensure code is padded to consistent width for uniform popup appearance
-            String paddedCode = String.format("%-80s", processedCode.length() > 80 ? processedCode.substring(0, 80) : processedCode);
+            // Ensure code is padded to consistent width, with ellipsis for truncated lines
+            String paddedCode;
+            if (processedCode.length() > 80) {
+                paddedCode = processedCode.substring(0, 77) + "...";
+            } else {
+                paddedCode = String.format("%-80s", processedCode);
+            }
             
             // Apply syntax highlighting to padded code portion
             applySyntaxHighlighting(paddedCode);
