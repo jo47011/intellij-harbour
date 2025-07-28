@@ -317,11 +317,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourFunctionClassificationService classificationService = 
                     HarbourFunctionClassificationService.getInstance(file.getProject());
                 if (classificationService.isExternalFunction(identifierName)) {
-                    HarbourLogger.log(COMPONENT, "External function detected: " + identifierName + " - creating dummy element");
-                    // Return a dummy element to prevent "Cannot find declaration" popup
-                    // The external documentation handler will handle the actual action
-                    HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "External Function: " + identifierName);
-                    return new PsiElement[] { dummy };
+                    HarbourLogger.log(COMPONENT, "External function detected: " + identifierName + " - delegating to external handler");
+                    // Return null to let external documentation handler take over
+                    // The external handler is responsible for preventing the popup and opening browser
+                    return null;
                 }
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Error checking function classification: " + e.getMessage());
@@ -659,17 +658,27 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return singleTarget;
         }
 
-        // If we have multiple targets, return them all to show default IntelliJ popup
+        // If we have multiple targets, show custom popup with syntax highlighting (only on click, not hover)
         if (navigationElements.size() > 1) {
-            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), returning all for default popup");
-            PsiElement[] targets = navigationElements.toArray(new PsiElement[0]);
-            // Safety check - if somehow we got an empty array, return dummy
-            if (targets.length == 0) {
-                HarbourLogger.log(COMPONENT, "WARNING: navigationElements claimed size > 1 but toArray returned empty - returning dummy");
-                HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Navigation error - no targets");
-                return new PsiElement[] { dummy };
+            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), checking click vs hover");
+            
+            // Only show popup on actual click, not on hover (use same mechanism as external handler)
+            if (HarbourExternalDocumentationHandler.isClickMode()) {
+                HarbourLogger.log(COMPONENT, "Click detected - showing custom popup");
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    List<PsiElement> targets = navigationElements.stream()
+                            .map(e -> (PsiElement) e)
+                            .collect(Collectors.toList());
+                    HarbourNavigationPopup.showNavigationPopup(targets, editor);
+                });
+                
+                // Reset click mode after showing popup (same as external handler)
+                HarbourExternalDocumentationHandler.setClickMode(false);
+                return new PsiElement[0]; // Return empty array to prevent default popup
+            } else {
+                HarbourLogger.log(COMPONENT, "Hover mode detected - not showing popup");
+                return null; // Return null on hover to prevent any action
             }
-            return targets;
         }
 
         HarbourLogger.log(COMPONENT, "Returning " + navigationElements.size() + " sorted navigation targets");

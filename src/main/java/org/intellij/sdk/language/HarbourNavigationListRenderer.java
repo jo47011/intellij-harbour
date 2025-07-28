@@ -12,6 +12,7 @@ import com.intellij.ui.SimpleTextAttributes;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
+import java.awt.*;
 
 /**
  * Custom list cell renderer for Harbour navigation elements with syntax highlighting
@@ -26,9 +27,11 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
         if (element instanceof HarbourNavigationElement) {
             HarbourNavigationElement navElement = (HarbourNavigationElement) element;
 
-            // Skip separators
+            // Handle separators - create a visual line that spans the full width
             if (navElement.isSeparator()) {
-                append(navElement.getElementName(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                // Create a longer separator line to ensure full width visibility
+                String separatorLine = "─".repeat(120); // Much longer line
+                append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 return;
             }
 
@@ -124,8 +127,26 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
 
                 if (keys.length > 0) {
                     TextAttributes textAttrs = scheme.getAttributes(keys[0]);
-                    if (textAttrs != null) {
-                        attributes = SimpleTextAttributes.fromTextAttributes(textAttrs);
+                    if (textAttrs != null && textAttrs.getForegroundColor() != null) {
+                        // Create SimpleTextAttributes with explicit color information
+                        int style = SimpleTextAttributes.STYLE_PLAIN;
+                        if (textAttrs.getFontType() == Font.BOLD) {
+                            style |= SimpleTextAttributes.STYLE_BOLD;
+                        }
+                        if (textAttrs.getFontType() == Font.ITALIC) {
+                            style |= SimpleTextAttributes.STYLE_ITALIC;
+                        }
+                        
+                        attributes = new SimpleTextAttributes(
+                            textAttrs.getBackgroundColor(),
+                            textAttrs.getForegroundColor(),
+                            textAttrs.getEffectColor(),
+                            style
+                        );
+                        
+                        HarbourLogger.log(COMPONENT, 
+                            "Applied color " + textAttrs.getForegroundColor() + 
+                            " to token '" + tokenText + "'");
                     }
                 }
 

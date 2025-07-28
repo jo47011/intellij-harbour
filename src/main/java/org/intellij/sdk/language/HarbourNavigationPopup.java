@@ -26,7 +26,7 @@ public class HarbourNavigationPopup {
         JBList<PsiElement> list = new JBList<>(targets);
         list.setCellRenderer(new HarbourNavigationListRenderer());
 
-        // Create and show the popup
+        // Create and show the popup using the original working approach
         JBPopupFactory.getInstance()
                 .createListPopupBuilder(list)
                 .setTitle("Choose Declaration")

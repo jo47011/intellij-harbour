@@ -265,12 +265,7 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
                     return null;
                 }
 
-                // Since filename and line are now in the main text, 
-                // only show definition context if it's a definition
-                if (isDefinition) {
-                    return "(definition)";
-                }
-                
+                // Definition text removed as requested by user
                 return null; // No additional location info needed
             }
 
@@ -420,6 +415,43 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
         }
 
         return lineText;
+    }
+
+    /**
+     * Format the presentation text in PyCharm style with HTML syntax highlighting
+     * @param fileName The filename (without path)
+     * @param lineNumber The line number
+     * @param htmlCodeText The HTML-formatted code text with syntax highlighting
+     * @return HTML formatted text with fixed-width columns
+     */
+    private String formatPyCharmStyleWithHTML(String fileName, int lineNumber, String htmlCodeText) {
+        // Fixed width columns like PyCharm Find Usages
+        final int FILENAME_WIDTH = 30;  // Fixed width for filename column
+        final int LINE_WIDTH = 4;       // Fixed width for line number column
+        
+        // Truncate filename if too long, but keep extension
+        String displayFileName = fileName;
+        if (fileName.length() > FILENAME_WIDTH - 2) {
+            String extension = "";
+            int dotIndex = fileName.lastIndexOf('.');
+            if (dotIndex > 0) {
+                extension = fileName.substring(dotIndex);
+                String baseName = fileName.substring(0, dotIndex);
+                int maxBase = FILENAME_WIDTH - extension.length() - 3; // -3 for "..."
+                if (maxBase > 0) {
+                    displayFileName = baseName.substring(0, Math.min(baseName.length(), maxBase)) + "..." + extension;
+                } else {
+                    displayFileName = "..." + extension;
+                }
+            } else {
+                displayFileName = fileName.substring(0, FILENAME_WIDTH - 3) + "...";
+            }
+        }
+        
+        // Format with HTML support for syntax highlighting
+        return "<html><body style='font-family: monospace;'>" +
+               String.format("%-" + FILENAME_WIDTH + "s %4d  ", displayFileName, lineNumber) + 
+               htmlCodeText + "</body></html>";
     }
 
     /**

@@ -54,6 +54,11 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         }
         HarbourLogger.log("DocHandler", "Click mode set to: " + isClick);
     }
+    
+    // Method to check if currently in click mode - used by main handler for consistency
+    public static boolean isClickMode() {
+        return IS_CLICK_MODE;
+    }
 
     @Override
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {

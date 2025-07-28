@@ -89,7 +89,9 @@ public final class HarbourFunctionClassificationService {
             "type", "valtype", "array", "aadd", "adel", "ains", "asort",
             "ascan", "asize", "aclone", "afill", "acopy", "eval", "fieldblock",
             "memvar", "public", "private", "parameters", "pcount", "procname",
-            "procline", "errorblock", "break", "errorlevel", "altd"
+            "procline", "errorblock", "break", "errorlevel", "altd",
+            "round", "abs", "int", "sqrt", "exp", "log", "sin", "cos", "tan",
+            "asin", "acos", "atan", "min", "max", "mod", "pow"
     );
 
     /**
