@@ -558,7 +558,21 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         if (isDefinition) {
                             definitionElements.add(navigationElement);
                         } else {
-                            callElements.add(navigationElement);
+                            // For functions, only add to callElements if it's actually a function call
+                            // This filters out variable assignments like "message = something"
+                            if (isFunction) {
+                                if (isFunctionCallAtLocation(foundElement, identifierName)) {
+                                    callElements.add(navigationElement);
+                                    HarbourLogger.log(COMPONENT, "Added function call for " + identifierName + 
+                                            " at " + containingFile.getName() + ":" + lineNumber);
+                                } else {
+                                    HarbourLogger.log(COMPONENT, "Skipped non-function call usage of " + identifierName + 
+                                            " at " + containingFile.getName() + ":" + lineNumber + " (variable assignment/usage)");
+                                }
+                            } else {
+                                // For non-functions (variables), add all non-definition usages
+                                callElements.add(navigationElement);
+                            }
                         }
 
                         // Record the location to prevent duplicates
@@ -2392,6 +2406,54 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
 
         HarbourLogger.log(COMPONENT, "DEBUG-FC: " + identifierName + " does not appear to be a function call");
+        return false;
+    }
+
+    /**
+     * Check if a specific found element represents a function call (has trailing parentheses)
+     * This is used to filter out variable assignments when showing function navigation results
+     */
+    private boolean isFunctionCallAtLocation(PsiElement element, String identifierName) {
+        // First check if this element is part of a FunctionCallImpl PSI structure
+        PsiElement parent = element.getParent();
+        if (parent instanceof FunctionCallImpl) {
+            return true;
+        }
+        
+        // Check if followed by parentheses in the line text
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return false;
+        }
+        
+        String lineText = getLineText(file, element);
+        if (lineText == null) {
+            return false;
+        }
+        
+        // Find the identifier in the line and check what follows it
+        int pos = lineText.indexOf(identifierName);
+        if (pos >= 0) {
+            // Look for opening parenthesis after the identifier
+            int afterIdentifier = pos + identifierName.length();
+            
+            for (int i = afterIdentifier; i < lineText.length(); i++) {
+                char c = lineText.charAt(i);
+                
+                if (Character.isWhitespace(c)) {
+                    continue; // Skip whitespace
+                }
+                if (c == '(') {
+                    return true; // Found function call with parentheses
+                }
+                // If we hit assignment operators, it's a variable assignment, not a function call
+                if (c == '=' || c == ':') {
+                    return false;
+                }
+                break; // Stop at first non-whitespace character
+            }
+        }
+        
         return false;
     }
 
