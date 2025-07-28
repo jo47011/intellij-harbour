@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.475'
+version = '1.0.476'
 
 repositories {
     mavenCentral()

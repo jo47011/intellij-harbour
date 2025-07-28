@@ -26,13 +26,16 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
                                          boolean selected, boolean hasFocus) {
         // Force monospace font for consistent character width
         setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        
+        // Calculate dynamic filename column width based on all elements in the list
+        int maxFileNameWidth = calculateMaxFileNameWidth(list);
         if (element instanceof HarbourNavigationElement) {
             HarbourNavigationElement navElement = (HarbourNavigationElement) element;
 
             // Handle separators 
             if (navElement.isSeparator()) {
-                // Calculate width: filename(22) + linenum(5) + space(1) + code(80) = 108
-                int separatorWidth = 22 + 5 + 1 + 80;
+                // Calculate width: filename(dynamic) + linenum(5) + space(1) + code(80)
+                int separatorWidth = maxFileNameWidth + 5 + 1 + 80;
                 String separatorLine = "─".repeat(separatorWidth);
                 append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 return;
@@ -50,9 +53,9 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             }
 
             // Build the complete line with proper alignment
-            // Format: filename (22) + line number (5 right-aligned) + space (1) + code (fixed width)
-            String truncatedFileName = truncateFileName(fileName, 22);
-            String formattedFileName = String.format("%-22s", truncatedFileName);
+            // Format: filename (dynamic) + line number (5 right-aligned) + space (1) + code (fixed width)
+            String truncatedFileName = truncateFileName(fileName, maxFileNameWidth);
+            String formattedFileName = String.format("%-" + maxFileNameWidth + "s", truncatedFileName);
             String formattedLineNumber = String.format("%5d", navElement.getLineNumber());
             
             // Add the filename and line number first (these are fixed formatting)
@@ -63,7 +66,7 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             // Ensure code is padded to consistent width, with ellipsis for truncated lines
             String paddedCode;
             if (processedCode.length() > 80) {
-                paddedCode = processedCode.substring(0, 77) + "...";
+                paddedCode = processedCode.substring(0, 79) + "…";
             } else {
                 paddedCode = String.format("%-80s", processedCode);
             }
@@ -88,14 +91,14 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
         if (dotIndex > 0) {
             String extension = fileName.substring(dotIndex);
             String baseName = fileName.substring(0, dotIndex);
-            int maxBase = maxWidth - extension.length() - 3; // -3 for "..."
+            int maxBase = maxWidth - extension.length() - 1; // -1 for "…"
             if (maxBase > 0) {
-                return baseName.substring(0, Math.min(baseName.length(), maxBase)) + "..." + extension;
+                return baseName.substring(0, Math.min(baseName.length(), maxBase)) + "…" + extension;
             } else {
-                return "..." + extension;
+                return "…" + extension;
             }
         } else {
-            return fileName.substring(0, maxWidth - 3) + "...";
+            return fileName.substring(0, maxWidth - 1) + "…";
         }
     }
 
@@ -174,5 +177,35 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             // Fallback to plain text
             append(codeText, SimpleTextAttributes.REGULAR_ATTRIBUTES);
         }
+    }
+
+    /**
+     * Calculate the maximum filename width needed for all elements in the list
+     */
+    private int calculateMaxFileNameWidth(JList<? extends PsiElement> list) {
+        int maxWidth = 15; // Minimum width for filename column
+        
+        // Iterate through all elements to find the longest filename
+        for (int i = 0; i < list.getModel().getSize(); i++) {
+            PsiElement element = list.getModel().getElementAt(i);
+            if (element instanceof HarbourNavigationElement) {
+                HarbourNavigationElement navElement = (HarbourNavigationElement) element;
+                
+                // Skip separators
+                if (navElement.isSeparator()) {
+                    continue;
+                }
+                
+                // Extract filename from path
+                String filePath = navElement.getFilePath();
+                if (filePath != null) {
+                    String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                    maxWidth = Math.max(maxWidth, fileName.length());
+                }
+            }
+        }
+        
+        // Add some reasonable limit to prevent extremely wide columns
+        return Math.min(maxWidth, 30);
     }
 }
