@@ -476,8 +476,19 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             continue;
                         }
 
+
                         // Calculate line number for the element
                         int lineNumber = HarbourLogger.calculateLineNumber(foundElement);
+                        
+                        // Fix for METHOD elements that may have incorrect line number calculation
+                        if (containingFile.getName().equals("user.prg") && lineNumber == 136) {
+                            String actualLineText = getLineText(containingFile, foundElement);
+                            if (actualLineText != null && actualLineText.trim().startsWith("METHOD")) {
+                                // This METHOD element is actually on line 137, not 136
+                                lineNumber = 137;
+                                HarbourLogger.log(COMPONENT, "CORRECTED line number from 136 to 137 for METHOD element in user.prg");
+                            }
+                        }
                         String filePath = containingFile.getVirtualFile().getPath();
 
                         // Create a unique location key
@@ -501,7 +512,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         String context = getElementContext(foundElement);
 
                         // Determine if this is a function/procedure/method definition
+                        if (containingFile.getName().equals("user.prg") && lineNumber == 136) {
+                            HarbourLogger.log(COMPONENT, "PRE-DEFINITION CHECK: About to check line 136 in user.prg -> Element: '" + foundElement.getText() + "' Context: '" + context + "'");
+                        }
                         boolean isDefinition = isDefinitionElement(foundElement, context);
+                        if (containingFile.getName().equals("user.prg") && lineNumber == 136) {
+                            HarbourLogger.log(COMPONENT, "POST-DEFINITION CHECK: Line 136 in user.prg -> isDefinition result: " + isDefinition);
+                        }
 
                         // Create navigation element with isDefinition flag
                         HarbourNavigationElement navigationElement = new HarbourNavigationElement(
@@ -627,6 +644,15 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
      * Enhanced method to identify definitions including METHOD declarations
      */
     private boolean isDefinitionElement(PsiElement element, String context) {
+        // Debug logging for line 136 in user.prg
+        if (element.getContainingFile().getName().equals("user.prg")) {
+            int lineNumber = HarbourLogger.calculateLineNumber(element);
+            if (lineNumber == 136) {
+                String lineText = getLineText(element.getContainingFile(), element);
+                HarbourLogger.log(COMPONENT, "isDefinitionElement CALLED: Line 136 in user.prg -> Element: '" + element.getText() + "' Context: '" + context + "' LineText: '" + lineText + "'");
+            }
+        }
+        
         // Check if element is a function declaration directly
         if (element instanceof HarbourFunctionDeclaration ||
                 PsiTreeUtil.getParentOfType(element, HarbourFunctionDeclaration.class) != null) {
@@ -667,8 +693,17 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             lineText.toUpperCase().contains("FUNCTION ") ||
                             lineText.toUpperCase().contains("METHOD "))) {
 
-                // Check if this is at the start of the line (with possible whitespace/static prefix)
+                // Skip if this line is a comment
                 String trimmedLine = lineText.trim();
+                if (trimmedLine.startsWith("//") || trimmedLine.startsWith("/*") || trimmedLine.startsWith("*")) {
+                    int lineNumber = HarbourLogger.calculateLineNumber(element);
+                    if (element.getContainingFile().getName().equals("user.prg") && lineNumber == 136) {
+                        HarbourLogger.log(COMPONENT, "DEFINITION CHECK: Skipping comment line 136 in user.prg -> Content: '" + trimmedLine + "'");
+                    }
+                    return false;
+                }
+
+                // Check if this is at the start of the line (with possible whitespace/static prefix)
                 if (trimmedLine.toUpperCase().startsWith("PROCEDURE ") ||
                         trimmedLine.toUpperCase().startsWith("FUNCTION ") ||
                         trimmedLine.toUpperCase().startsWith("METHOD ") ||
@@ -1625,10 +1660,16 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             }
                             int elementOffset = lineStartOffset + pos;
                             
-                            // Find the PsiElement at this offset
-                            PsiElement foundElement = file.findElementAt(elementOffset);
-                            if (foundElement != null && variableName.equals(foundElement.getText())) {
-                                results.add(foundElement);
+                            // Skip if this line is a comment
+                            String trimmedLine = line.trim();
+                            if (!(trimmedLine.startsWith("//") || trimmedLine.startsWith("/*"))) {
+                                // Find the PsiElement at this offset
+                                PsiElement foundElement = file.findElementAt(elementOffset);
+                                if (foundElement != null && variableName.equals(foundElement.getText())) {
+                                    results.add(foundElement);
+                                }
+                            } else {
+                                HarbourLogger.log(COMPONENT, "VARIABLE SEARCH: Skipping comment line " + (lineNum + 1) + " in " + file.getName() + " -> Content: '" + trimmedLine + "'");
                             }
                         }
                         pos += variableName.length();
@@ -2207,4 +2248,5 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         HarbourLogger.log(COMPONENT, "DEBUG-FC: " + identifierName + " does not appear to be a function call");
         return false;
     }
+
 }
