@@ -249,6 +249,94 @@ public final class HarbourReferenceService {
     }
 
     /**
+     * Find DATA fields in a given class.
+     *
+     * @param className The name of the class  
+     * @param fieldName The name of the DATA field
+     * @return A list of PSI elements for the DATA field declarations
+     */
+    public List<PsiElement> findDataFields(String className, String fieldName) {
+        HarbourLogger.log("ReferenceService", "Searching for DATA field: " + fieldName + " in class: " + className);
+        
+        if (className == null || className.isEmpty() || fieldName == null || fieldName.isEmpty()) {
+            return Collections.emptyList();
+        }
+        
+        List<PsiElement> result = new ArrayList<>();
+        
+        // Get class declarations first
+        List<PsiElement> classDeclarations = findClasses(className);
+        HarbourLogger.log("ReferenceService", "Found " + classDeclarations.size() + " class declarations for: " + className);
+        
+        // Search for DATA fields in each class file
+        for (PsiElement classDecl : classDeclarations) {
+            PsiFile containingFile = classDecl.getContainingFile();
+            if (containingFile == null) continue;
+            
+            // Search for DATA fieldName patterns in the file
+            String fileText = containingFile.getText();
+            if (fileText == null) continue;
+            
+            // Look for DATA fieldName pattern
+            String[] lines = fileText.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i].trim();
+                
+                // Match patterns like:
+                // DATA fieldName
+                // DATA fieldName INIT value
+                // DATA fieldName READONLY
+                if (line.toUpperCase().startsWith("DATA ")) {
+                    String dataLine = line.substring(5).trim(); // Remove "DATA "
+                    
+                    // Extract the field name (first word after DATA)
+                    String[] parts = dataLine.split("\\s+");
+                    if (parts.length > 0 && parts[0].equalsIgnoreCase(fieldName)) {
+                        // Found a matching DATA field
+                        // Try to find the exact PSI element
+                        int lineStartOffset = getLineStartOffset(fileText, i);
+                        PsiElement element = containingFile.findElementAt(lineStartOffset + line.indexOf(fieldName));
+                        
+                        if (element != null) {
+                            // Get the identifier element
+                            while (element != null && !(element instanceof LeafPsiElement && 
+                                   ((LeafPsiElement)element).getElementType() == HarbourTypes.IDENT &&
+                                   element.getText().equalsIgnoreCase(fieldName))) {
+                                element = element.getNextSibling();
+                            }
+                            
+                            if (element != null) {
+                                HarbourLogger.log("ReferenceService", "Found DATA field: " + fieldName + " at line " + (i + 1));
+                                result.add(element);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        HarbourLogger.log("ReferenceService", "Found " + result.size() + " DATA field declarations for: " + className + ":" + fieldName);
+        return result;
+    }
+    
+    /**
+     * Calculate the offset of the start of a line
+     */
+    private int getLineStartOffset(String text, int lineNumber) {
+        int offset = 0;
+        int currentLine = 0;
+        
+        for (int i = 0; i < text.length() && currentLine < lineNumber; i++) {
+            if (text.charAt(i) == '\n') {
+                currentLine++;
+                offset = i + 1;
+            }
+        }
+        
+        return offset;
+    }
+
+    /**
      * Find all methods of a specific class or related to a class name.
      *
      * @param className The name of the class

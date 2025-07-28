@@ -249,6 +249,52 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             HarbourLogger.log(COMPONENT, "Processing identifier: " + identifierName);
         }
 
+        // Check if this element is part of a PropertyAccess expression (e.g., getUser():date)
+        HarbourLogger.log(COMPONENT, "DEBUG: Starting PropertyAccess check for element: " + identifierName + 
+                         " at offset: " + element.getTextOffset());
+        
+        PsiElement propertyAccessContext = checkPropertyAccessContext(leafElement);
+        if (propertyAccessContext != null) {
+            HarbourLogger.log(COMPONENT, "DEBUG: Element is part of PropertyAccess: " + propertyAccessContext.getText());
+            HarbourLogger.log(COMPONENT, "DEBUG: PropertyAccess context class: " + propertyAccessContext.getClass().getName());
+            
+            // Determine if we're clicking on the object part or property part
+            String fullText = propertyAccessContext.getText();
+            int colonPos = fullText.indexOf(':');
+            
+            HarbourLogger.log(COMPONENT, "DEBUG: Full PropertyAccess text: '" + fullText + "', colon at: " + colonPos);
+            
+            if (colonPos > 0) {
+                String beforeColon = fullText.substring(0, colonPos);
+                String afterColon = fullText.substring(colonPos + 1);
+                
+                HarbourLogger.log(COMPONENT, "DEBUG: Before colon: '" + beforeColon + "', After colon: '" + afterColon + "'");
+                HarbourLogger.log(COMPONENT, "DEBUG: Clicked identifier: '" + identifierName + "'");
+                
+                // Check if we're clicking on the property part (after colon)
+                if (afterColon.trim().equals(identifierName)) {
+                    // Clicking on the property part (e.g., date)
+                    HarbourLogger.log(COMPONENT, "DEBUG: Clicking on property part of PropertyAccess: " + identifierName);
+                    
+                    // Try to resolve the object type first
+                    String objectPart = beforeColon.trim();
+                    HarbourLogger.log(COMPONENT, "DEBUG: Resolving property '" + identifierName + "' of object: '" + objectPart + "'");
+                    return resolvePropertyAccess(leafElement, objectPart, identifierName, currentLocationKey);
+                } else if (beforeColon.contains(identifierName)) {
+                    // Clicking on the function/object part (e.g., getUser())
+                    HarbourLogger.log(COMPONENT, "DEBUG: Clicking on object/function part of PropertyAccess: " + identifierName);
+                    HarbourLogger.log(COMPONENT, "DEBUG: Will continue with normal function resolution for: " + identifierName);
+                    // Let this fall through to normal function resolution logic
+                } else {
+                    HarbourLogger.log(COMPONENT, "DEBUG: Identifier '" + identifierName + "' doesn't match either part of PropertyAccess");
+                }
+            } else {
+                HarbourLogger.log(COMPONENT, "DEBUG: No colon found in PropertyAccess text: " + fullText);
+            }
+        } else {
+            HarbourLogger.log(COMPONENT, "DEBUG: Element is NOT part of PropertyAccess: " + identifierName);
+        }
+
         // Check if this is an external function call - if so, delegate to external handler
         // Only check for external functions if this appears to be a function call context
         if (isLikelyFunctionCall(leafElement, identifierName)) {
@@ -562,22 +608,15 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
 
         // If we have multiple targets, show custom popup with syntax highlighting
-        // But only on actual click, not hover
         if (navigationElements.size() > 1) {
-            // Check if this is a click operation (not hover)
-            if (HarbourMouseListener.isClickOperation()) {
-                HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), showing custom popup on click");
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    List<PsiElement> targets = navigationElements.stream()
-                            .map(e -> (PsiElement) e)
-                            .collect(Collectors.toList());
-                    HarbourNavigationPopup.showNavigationPopup(targets, editor);
-                });
-                return new PsiElement[0]; // Return empty array to prevent default popup
-            } else {
-                HarbourLogger.log(COMPONENT, "Multiple targets found but in hover mode - not showing popup");
-                return null; // Return null to prevent any action on hover
-            }
+            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), showing custom popup");
+            ApplicationManager.getApplication().invokeLater(() -> {
+                List<PsiElement> targets = navigationElements.stream()
+                        .map(e -> (PsiElement) e)
+                        .collect(Collectors.toList());
+                HarbourNavigationPopup.showNavigationPopup(targets, editor);
+            });
+            return new PsiElement[0]; // Return empty array to prevent default popup
         }
 
         HarbourLogger.log(COMPONENT, "Returning " + navigationElements.size() + " sorted navigation targets");
@@ -679,7 +718,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     }
 
     /**
-     * Determines if an element is a class reference in code like ClassName():method()
+     * Determines if an element is a class reference in code like ClassName():new()
+     * Class instantiation is identified by the pattern: identifier():new()
      */
     private boolean isClassReference(PsiElement element) {
         String text = element.getText();
@@ -695,19 +735,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
-        // Check if this line contains a pattern like "ClassName():method"
+        // Check if this line contains a pattern like "ClassName():new()"
+        // This is the Harbour pattern for class instantiation
         // First, find where our element appears in the line
         int elementPos = lineText.indexOf(text);
         if (elementPos < 0) {
             return false;
         }
 
-        // Now check if it's followed by "()" and then ":" or "."
+        // Now check if it's followed by "():new()" pattern
         String afterText = lineText.substring(elementPos + text.length());
-        Pattern classPattern = Pattern.compile("\\s*\\(\\s*\\)\\s*[:.]");
+        Pattern classPattern = Pattern.compile("\\s*\\(\\s*\\)\\s*:\\s*new\\s*\\(");
 
         boolean isClass = classPattern.matcher(afterText).find();
-        HarbourLogger.log(COMPONENT, text + " is " + (isClass ? "" : "not ") + "a class reference");
+        HarbourLogger.log(COMPONENT, text + " is " + (isClass ? "" : "not ") + "a class reference (:new() pattern match: " + isClass + ")");
         return isClass;
     }
 
@@ -1926,43 +1967,244 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     }
 
     /**
+     * Check if this element is part of a PropertyAccess expression
+     * PropertyAccess in BNF: (FunctionCall | IDENT) COLON IDENT
+     */
+    private PsiElement checkPropertyAccessContext(PsiElement element) {
+        if (element == null) {
+            HarbourLogger.log(COMPONENT, "DEBUG-PA: Element is null");
+            return null;
+        }
+        
+        HarbourLogger.log(COMPONENT, "DEBUG-PA: Checking PropertyAccess context for: " + element.getText() + 
+                         " (class: " + element.getClass().getSimpleName() + ")");
+        
+        // Look at the parent and siblings to see if we're in a PropertyAccess pattern
+        // But be MUCH more restrictive - only look at immediate parents and small contexts
+        PsiElement parent = element.getParent();
+        int level = 0;
+        while (parent != null && level < 3) {  // Much more restrictive depth
+            String parentText = parent.getText();
+            level++;
+            
+            // Only consider small text contexts (< 100 chars) to avoid false matches in comments/files
+            if (parentText != null && parentText.length() > 100) {
+                HarbourLogger.log(COMPONENT, "DEBUG-PA: Level " + level + " - Parent text too long (" + 
+                                 parentText.length() + " chars), skipping: " + parent.getClass().getSimpleName());
+                parent = parent.getParent();
+                continue;
+            }
+            
+            HarbourLogger.log(COMPONENT, "DEBUG-PA: Level " + level + " - Parent: " + parent.getClass().getSimpleName() + 
+                             " text: '" + (parentText != null ? parentText.replace("\n", "\\n") : "null") + "'");
+            
+            // Check if parent contains colon pattern typical of PropertyAccess
+            if (parentText != null && parentText.contains(":") && !parentText.contains("::")) {
+                HarbourLogger.log(COMPONENT, "DEBUG-PA: Found colon in parent at level " + level);
+                
+                // Additional validation: make sure this looks like a PropertyAccess pattern
+                // Should be something like: identifier():property or identifier:property
+                // NOT like comments (/* module: file.prg */) or assignments (:=)
+                int colonPos = parentText.indexOf(':');
+                if (colonPos > 0 && colonPos < parentText.length() - 1) {
+                    // Make sure it's not an assignment := 
+                    if (colonPos + 1 < parentText.length() && parentText.charAt(colonPos + 1) != '=') {
+                        
+                        // Check if this looks like a comment (starts with /* or //)
+                        String trimmedText = parentText.trim();
+                        if (trimmedText.startsWith("/*") || trimmedText.startsWith("//")) {
+                            HarbourLogger.log(COMPONENT, "DEBUG-PA: Colon is in comment at level " + level + ", ignoring");
+                            parent = parent.getParent();
+                            continue;
+                        }
+                        
+                        // Check if it looks like a valid PropertyAccess (contains alphanumeric before and after colon)
+                        String beforeColon = parentText.substring(0, colonPos).trim();
+                        String afterColon = parentText.substring(colonPos + 1).trim();
+                        
+                        // Basic validation: both parts should contain letters/numbers and be reasonable length
+                        if (beforeColon.length() > 0 && afterColon.length() > 0 && 
+                            beforeColon.length() < 50 && afterColon.length() < 50 &&
+                            beforeColon.matches(".*[a-zA-Z0-9()].*") && 
+                            afterColon.matches(".*[a-zA-Z0-9].*")) {
+                            
+                            HarbourLogger.log(COMPONENT, "DEBUG-PA: Found valid PropertyAccess parent at level " + level + ": " + parentText);
+                            return parent;
+                        } else {
+                            HarbourLogger.log(COMPONENT, "DEBUG-PA: PropertyAccess pattern validation failed at level " + level);
+                        }
+                    } else {
+                        HarbourLogger.log(COMPONENT, "DEBUG-PA: Colon is part of assignment := at level " + level);
+                    }
+                } else {
+                    HarbourLogger.log(COMPONENT, "DEBUG-PA: Invalid colon position (" + colonPos + ") at level " + level);
+                }
+            }
+            
+            // Don't go too far up the tree
+            if (parent instanceof HarbourFile || parent instanceof HarbourFunctionDeclaration) {
+                HarbourLogger.log(COMPONENT, "DEBUG-PA: Reached file/function boundary at level " + level);
+                break;
+            }
+            parent = parent.getParent();
+        }
+        
+        HarbourLogger.log(COMPONENT, "DEBUG-PA: No PropertyAccess context found after " + level + " levels");
+        return null;
+    }
+
+    /**
+     * Resolve property access like getUser():date
+     */
+    private PsiElement[] resolvePropertyAccess(PsiElement element, String objectPart, String propertyName, String currentLocationKey) {
+        HarbourLogger.log(COMPONENT, "Resolving property access: " + objectPart + ":" + propertyName);
+        
+        // First, we need to determine what objectPart is
+        // It could be:
+        // 1. A function call like getUser()
+        // 2. An object variable
+        // 3. A class instantiation like User()
+        
+        List<HarbourNavigationElement> navigationElements = new ArrayList<>();
+        
+        // If objectPart ends with (), it's likely a function call
+        if (objectPart.endsWith("()")) {
+            String functionName = objectPart.substring(0, objectPart.length() - 2).trim();
+            HarbourLogger.log(COMPONENT, "Object part is a function call: " + functionName);
+            
+            // For now, try to infer the class from the function name
+            // Common pattern: getXxx() returns an Xxx object
+            String inferredClass = inferClassFromFunctionName(functionName);
+            if (inferredClass != null) {
+                HarbourLogger.log(COMPONENT, "Inferred class: " + inferredClass + " from function: " + functionName);
+                
+                // Now look for the property in that class
+                HarbourReferenceService service = HarbourReferenceService.getInstance(element.getProject());
+                List<PsiElement> propertyDeclarations = service.findClassMethods(inferredClass, propertyName);
+                
+                // Also look for DATA fields
+                List<PsiElement> dataFields = service.findDataFields(inferredClass, propertyName);
+                propertyDeclarations.addAll(dataFields);
+                
+                HarbourLogger.log(COMPONENT, "Found " + propertyDeclarations.size() + " property declarations for " + inferredClass + ":" + propertyName);
+                
+                for (PsiElement decl : propertyDeclarations) {
+                    PsiFile declFile = decl.getContainingFile();
+                    if (declFile != null && declFile.getVirtualFile() != null) {
+                        String filePath = declFile.getVirtualFile().getPath();
+                        int lineNumber = HarbourLogger.calculateLineNumber(decl);
+                        String locationKey = filePath + ":" + lineNumber;
+                        
+                        if (!locationKey.equals(currentLocationKey)) {
+                            navigationElements.add(new HarbourNavigationElement(
+                                    decl,
+                                    propertyName,
+                                    filePath,
+                                    lineNumber,
+                                    "Property",
+                                    true,
+                                    false
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we found targets, return them
+        if (!navigationElements.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " property navigation targets");
+            return navigationElements.toArray(new PsiElement[0]);
+        }
+        
+        HarbourLogger.log(COMPONENT, "No property navigation targets found");
+        return null;
+    }
+
+    /**
+     * Try to infer class name from function name
+     * Common patterns:
+     * - getUser() -> User
+     * - getUserInfo() -> User or UserInfo
+     */
+    private String inferClassFromFunctionName(String functionName) {
+        if (functionName == null || functionName.isEmpty()) {
+            return null;
+        }
+        
+        // Handle getXxx() pattern
+        if (functionName.startsWith("get") && functionName.length() > 3) {
+            String className = functionName.substring(3);
+            // Capitalize first letter if needed
+            if (!className.isEmpty() && Character.isLowerCase(className.charAt(0))) {
+                className = Character.toUpperCase(className.charAt(0)) + className.substring(1);
+            }
+            return className;
+        }
+        
+        // Could add more patterns here in the future
+        
+        return null;
+    }
+
+    /**
      * Check if an identifier is likely a function call by looking for contextual clues
      */
     private boolean isLikelyFunctionCall(PsiElement element, String identifierName) {
+        HarbourLogger.log(COMPONENT, "DEBUG-FC: Checking if '" + identifierName + "' is likely a function call");
+        
         PsiFile file = element.getContainingFile();
         if (file == null) {
+            HarbourLogger.log(COMPONENT, "DEBUG-FC: No containing file for " + identifierName);
             return false;
         }
 
         // Check if this element is part of a FunctionCallImpl
         PsiElement parent = element.getParent();
+        HarbourLogger.log(COMPONENT, "DEBUG-FC: Parent of '" + identifierName + "' is: " + 
+                         (parent != null ? parent.getClass().getSimpleName() : "null"));
+        
         if (parent instanceof FunctionCallImpl) {
-            HarbourLogger.log(COMPONENT, identifierName + " is part of FunctionCallImpl - likely function call");
+            HarbourLogger.log(COMPONENT, "DEBUG-FC: " + identifierName + " is part of FunctionCallImpl - likely function call");
             return true;
         }
 
         // Check if followed by parentheses in the line text
         String lineText = getLineText(file, element);
         if (lineText != null) {
+            HarbourLogger.log(COMPONENT, "DEBUG-FC: Line text for '" + identifierName + "': " + lineText.trim());
+            
             int pos = lineText.indexOf(identifierName);
             if (pos >= 0) {
+                HarbourLogger.log(COMPONENT, "DEBUG-FC: Found '" + identifierName + "' at position " + pos + " in line");
+                
                 // Look for opening parenthesis after the identifier
                 int afterIdentifier = pos + identifierName.length();
-                for (int i = afterIdentifier; i < lineText.length(); i++) {
+                StringBuilder nextChars = new StringBuilder();
+                
+                for (int i = afterIdentifier; i < lineText.length() && i < afterIdentifier + 10; i++) {
                     char c = lineText.charAt(i);
+                    nextChars.append(c);
+                    
                     if (Character.isWhitespace(c)) {
                         continue; // Skip whitespace
                     }
                     if (c == '(') {
-                        HarbourLogger.log(COMPONENT, identifierName + " followed by '(' - likely function call");
+                        HarbourLogger.log(COMPONENT, "DEBUG-FC: " + identifierName + " followed by '(' - likely function call");
                         return true;
                     }
                     break; // Stop at first non-whitespace character that's not '('
                 }
+                
+                HarbourLogger.log(COMPONENT, "DEBUG-FC: Characters after '" + identifierName + "': '" + nextChars.toString() + "'");
+            } else {
+                HarbourLogger.log(COMPONENT, "DEBUG-FC: '" + identifierName + "' not found in line text");
             }
+        } else {
+            HarbourLogger.log(COMPONENT, "DEBUG-FC: No line text available for " + identifierName);
         }
 
-        HarbourLogger.log(COMPONENT, identifierName + " does not appear to be a function call");
+        HarbourLogger.log(COMPONENT, "DEBUG-FC: " + identifierName + " does not appear to be a function call");
         return false;
     }
 }

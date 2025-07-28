@@ -135,10 +135,17 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 - **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
 
 - remove garbage from idea log
+- fix some navigation elements()
+  - KInternAendern()
+  - mymemo.prg click on ::setPos
+  - nav popup column alignment
+  - getUser():setCurrentPrintJob() click => shows some comment in definition block
 
-- navigation
-  - show example line per item
+The following files are still written to the project dir, either remove or move to.hbmk (from settings):
+- debug_entry_handler.log  debug_trace.log  error_handler_init.log  init_called.log  sendlocals_trace.log
 
+code formatting
+- refactor -> reformat no longer there?
 - Tab should have the same as indent (2 in my case)
 - indentation 
   - should be correct while you type / after return
@@ -149,6 +156,9 @@ RETURN
     endif
 
 - code completion should propose local and public vars as well
+  as well as constants, e.g. Error(TRY_AGAIN)
+
+- debugging: ALT-F8 evaluator or alike not avaiable
 
 - compile/link errors:
   - hbmk2: Error: Referenced, missing, but unknown function(s): FOO()
