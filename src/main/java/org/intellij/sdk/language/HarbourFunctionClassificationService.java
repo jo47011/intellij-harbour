@@ -63,13 +63,13 @@ public final class HarbourFunctionClassificationService {
 
     // Patterns for detecting function declarations
     private static final Pattern FUNCTION_PATTERN = Pattern.compile(
-            "(?i)\\bFUNCTION\\s+(\\w+)\\s*\\(", Pattern.CASE_INSENSITIVE);
+            "(?i)\\bFUNCTION\\s+(\\w+)(?:\\s*\\()?", Pattern.CASE_INSENSITIVE);
     private static final Pattern PROCEDURE_PATTERN = Pattern.compile(
-            "(?i)\\bPROCEDURE\\s+(\\w+)\\s*\\(", Pattern.CASE_INSENSITIVE);
+            "(?i)\\bPROCEDURE\\s+(\\w+)(?:\\s*\\()?", Pattern.CASE_INSENSITIVE);
     private static final Pattern CLASS_PATTERN = Pattern.compile(
             "(?i)\\bCLASS\\s+(\\w+)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern METHOD_PATTERN = Pattern.compile(
-            "(?i)\\bMETHOD\\s+(\\w+)\\s*\\(", Pattern.CASE_INSENSITIVE);
+            "(?i)\\bMETHOD\\s+(\\w+)(?:\\s*\\()?", Pattern.CASE_INSENSITIVE);
     
     // Common Harbour standard functions that are always external
     private static final Set<String> KNOWN_EXTERNAL_FUNCTIONS = Set.of(
