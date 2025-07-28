@@ -161,10 +161,22 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     @Override
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
         processedElements.clear();
-
+        
+        try {
+            return doGetGotoDeclarationTargets(element, offset, editor);
+        } catch (Exception e) {
+            HarbourLogger.log(COMPONENT, "Exception in getGotoDeclarationTargets: " + e.getMessage());
+            // Always return dummy element to prevent "Cannot find declaration" popup
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element != null ? element : new HarbourDummyPsiElement(null, false, "Error"), false, "Navigation error occurred");
+            return new PsiElement[] { dummy };
+        }
+    }
+    
+    private PsiElement[] doGetGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
         if (element == null) {
             HarbourLogger.log(COMPONENT, "Element is null");
-            return null;
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(null, false, "No element to navigate");
+            return new PsiElement[] { dummy };
         }
 
         String osName = System.getProperty("os.name");
@@ -175,7 +187,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         PsiFile file = element.getContainingFile();
         if (!(file instanceof HarbourFile)) {
             HarbourLogger.log(COMPONENT, "Not a Harbour file: " + (file != null ? file.getName() : "null"));
-            return null;
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Not a Harbour file");
+            return new PsiElement[] { dummy };
         }
 
         // Special case: If we're clicking on FUNCTION or PROCEDURE keyword,
@@ -204,7 +217,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Check if this is an identifier token or string literal (for includes)
         if (!(element instanceof LeafPsiElement)) {
             HarbourLogger.log(COMPONENT, "Not a LeafPsiElement: " + element.getClass().getName());
-            return null;
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Invalid element type");
+            return new PsiElement[] { dummy };
         }
 
         // Get current location information - for filtering
@@ -237,7 +251,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         if (leafElement.getElementType() != HarbourTypes.IDENT) {
             HarbourLogger.log(COMPONENT, "Not an IDENT element: " + leafElement.getElementType());
-            return null;
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Not an identifier");
+            return new PsiElement[] { dummy };
         }
 
         String identifierName = leafElement.getText();
@@ -302,8 +317,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourFunctionClassificationService classificationService = 
                     HarbourFunctionClassificationService.getInstance(file.getProject());
                 if (classificationService.isExternalFunction(identifierName)) {
-                    HarbourLogger.log(COMPONENT, "External function detected: " + identifierName + " - delegating to external handler");
-                    return null; // Let external handler take over
+                    HarbourLogger.log(COMPONENT, "External function detected: " + identifierName + " - creating dummy element");
+                    // Return a dummy element to prevent "Cannot find declaration" popup
+                    // The external documentation handler will handle the actual action
+                    HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "External Function: " + identifierName);
+                    return new PsiElement[] { dummy };
                 }
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Error checking function classification: " + e.getMessage());
@@ -553,10 +571,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        // If we have no valid elements, return empty array to prevent default handlers
+        // If we have no valid elements, return dummy to prevent default handlers
         if (definitionElements.isEmpty() && callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning empty array to prevent default handlers");
-            return new PsiElement[0];
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning dummy to prevent popup");
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No navigation targets found for: " + identifierName);
+            return new PsiElement[] { dummy };
         }
 
         // If we only have calls but no definitions, show the calls (for variables, these are references)
@@ -630,22 +649,38 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // This avoids showing a popup when there's only one valid target
         if (navigationElements.size() == 1) {
             HarbourLogger.log(COMPONENT, "Only one target remains after filtering, navigating directly");
-            return navigationElements.toArray(new PsiElement[0]);
+            PsiElement[] singleTarget = navigationElements.toArray(new PsiElement[0]);
+            // Safety check - ensure we actually have the element
+            if (singleTarget.length == 0) {
+                HarbourLogger.log(COMPONENT, "WARNING: navigationElements had size 1 but toArray returned empty - returning dummy");
+                HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Single target error");
+                return new PsiElement[] { dummy };
+            }
+            return singleTarget;
         }
 
-        // If we have multiple targets, show custom popup with syntax highlighting
+        // If we have multiple targets, return them all to show default IntelliJ popup
         if (navigationElements.size() > 1) {
-            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), showing custom popup");
-            ApplicationManager.getApplication().invokeLater(() -> {
-                List<PsiElement> targets = navigationElements.stream()
-                        .map(e -> (PsiElement) e)
-                        .collect(Collectors.toList());
-                HarbourNavigationPopup.showNavigationPopup(targets, editor);
-            });
-            return new PsiElement[0]; // Return empty array to prevent default popup
+            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), returning all for default popup");
+            PsiElement[] targets = navigationElements.toArray(new PsiElement[0]);
+            // Safety check - if somehow we got an empty array, return dummy
+            if (targets.length == 0) {
+                HarbourLogger.log(COMPONENT, "WARNING: navigationElements claimed size > 1 but toArray returned empty - returning dummy");
+                HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Navigation error - no targets");
+                return new PsiElement[] { dummy };
+            }
+            return targets;
         }
 
         HarbourLogger.log(COMPONENT, "Returning " + navigationElements.size() + " sorted navigation targets");
+        
+        // If we have no elements at all, return a dummy to prevent "Cannot find declaration" popup
+        if (navigationElements.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "No navigation elements found - returning dummy to prevent popup");
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No navigation targets found");
+            return new PsiElement[] { dummy };
+        }
+        
         return navigationElements.toArray(new PsiElement[0]);
     }
 
@@ -719,12 +754,82 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         trimmedLine.toUpperCase().startsWith("STATIC PROCEDURE ") ||
                         trimmedLine.toUpperCase().startsWith("STATIC FUNCTION ") ||
                         trimmedLine.toUpperCase().startsWith("STATIC METHOD ")) {
-                    return true;
+                    
+                    // Only mark as definition if this element is the actual function/method name, not a parameter
+                    String elementText = element.getText();
+                    
+                    // Extract the expected function/method name from the line
+                    String expectedName = extractFunctionMethodName(trimmedLine);
+                    
+                    // Only return true if this element matches the actual function/method name
+                    if (expectedName != null && elementText.equalsIgnoreCase(expectedName)) {
+                        return true;
+                    }
+                    
+                    // If this element doesn't match the function/method name, it's likely a parameter
+                    return false;
                 }
             }
         }
 
         return false;
+    }
+
+    /**
+     * Extract the function/method name from a declaration line.
+     * Examples:
+     * - "METHOD new(MArtNr,mArt,titel)" -> "new"
+     * - "FUNCTION calculate(x, y)" -> "calculate" 
+     * - "PROCEDURE KInternAendern" -> "KInternAendern"
+     */
+    private String extractFunctionMethodName(String line) {
+        if (line == null) {
+            return null;
+        }
+        
+        String upperLine = line.toUpperCase().trim();
+        String keyword = null;
+        
+        // Identify the keyword and its position
+        if (upperLine.startsWith("STATIC METHOD ")) {
+            keyword = "STATIC METHOD ";
+        } else if (upperLine.startsWith("STATIC FUNCTION ")) {
+            keyword = "STATIC FUNCTION ";
+        } else if (upperLine.startsWith("STATIC PROCEDURE ")) {
+            keyword = "STATIC PROCEDURE ";
+        } else if (upperLine.startsWith("METHOD ")) {
+            keyword = "METHOD ";
+        } else if (upperLine.startsWith("FUNCTION ")) {
+            keyword = "FUNCTION ";
+        } else if (upperLine.startsWith("PROCEDURE ")) {
+            keyword = "PROCEDURE ";
+        }
+        
+        if (keyword == null) {
+            return null;
+        }
+        
+        // Extract everything after the keyword
+        String remainder = line.substring(keyword.length()).trim();
+        
+        // Find the function/method name (everything before parentheses or end of identifier)
+        int parenIndex = remainder.indexOf('(');
+        int spaceIndex = remainder.indexOf(' ');
+        
+        int endIndex = remainder.length();
+        if (parenIndex >= 0 && spaceIndex >= 0) {
+            endIndex = Math.min(parenIndex, spaceIndex);
+        } else if (parenIndex >= 0) {
+            endIndex = parenIndex;
+        } else if (spaceIndex >= 0) {
+            endIndex = spaceIndex;
+        }
+        
+        if (endIndex > 0) {
+            return remainder.substring(0, endIndex).trim();
+        }
+        
+        return null;
     }
 
     /**
@@ -1802,7 +1907,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         if (navigationElements.isEmpty()) {
             HarbourLogger.log(COMPONENT, "No valid navigation targets found for DATA field: " + variableName);
-            return null;
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No DATA field found: " + variableName);
+            return new PsiElement[] { dummy };
         }
 
         HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " DATA field targets for: " + variableName);
@@ -1949,7 +2055,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         if (navigationElements.isEmpty()) {
             HarbourLogger.log(COMPONENT, "No valid navigation targets found for DATA field usages: " + fieldName);
-            return null;
+            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(null, false, "No DATA field usages: " + fieldName);
+            return new PsiElement[] { dummy };
         }
 
         HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " usage targets for DATA field: " + fieldName);
@@ -2188,7 +2295,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
         
         HarbourLogger.log(COMPONENT, "No property navigation targets found");
-        return null;
+        HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(null, false, "No property targets found");
+        return new PsiElement[] { dummy };
     }
 
     /**
