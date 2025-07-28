@@ -24,13 +24,17 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
     protected void customizeCellRenderer(@NotNull JList<? extends PsiElement> list,
                                          PsiElement element, int index,
                                          boolean selected, boolean hasFocus) {
+        // Force monospace font for consistent character width
+        setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         if (element instanceof HarbourNavigationElement) {
             HarbourNavigationElement navElement = (HarbourNavigationElement) element;
 
-            // Handle separators - create a visual line that spans the full width
+            // Handle separators 
             if (navElement.isSeparator()) {
-                // Create a longer separator line to ensure full width visibility
-                String separatorLine = "─".repeat(120); // Much longer line
+                // Calculate actual width based on longest line pattern
+                // Use standard monospace character width calculation
+                int separatorWidth = 120; // Adjust based on typical popup width
+                String separatorLine = "─".repeat(separatorWidth);
                 append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 return;
             }
@@ -39,27 +43,31 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             String filePath = navElement.getFilePath();
             String fileName = filePath != null ? filePath.substring(filePath.lastIndexOf('/') + 1) : "unknown";
 
-            // Column 1: Filename (fixed width 30 chars)
-            String paddedFileName = String.format("%-30s", truncateFileName(fileName, 30));
-            append(paddedFileName, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
-
-            // Column 2: Line number (right-aligned with extra space for better alignment)  
-            String lineNumberStr = String.format("%6d", navElement.getLineNumber());
-            append(lineNumberStr, SimpleTextAttributes.GRAYED_ATTRIBUTES);
-
-            // Column 3: Single space separator (reduced since line number field is wider)
-            append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
-
-            // Column 4: Syntax-highlighted code (truncated to fit popup width)
+            // Read and prepare code text
             String codeText = navElement.readLineFromFile(navElement.getFilePath(), navElement.getLineNumber());
+            String processedCode = "";
             if (codeText != null && !codeText.isEmpty()) {
-                String truncatedCode = truncateCodeText(codeText.trim());
-                applySyntaxHighlighting(truncatedCode);
+                processedCode = truncateCodeText(codeText.trim());
             }
+
+            // Build the complete line with proper alignment
+            // Format: filename (30) + line number (6 right-aligned) + code
+            String truncatedFileName = truncateFileName(fileName, 30);
+            String formattedFileName = String.format("%-30s", truncatedFileName);
+            String formattedLineNumber = String.format("%6d", navElement.getLineNumber());
+            
+            // Add the filename and line number first (these are fixed formatting)
+            append(formattedFileName, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+            append(formattedLineNumber, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+            append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            
+            // Apply syntax highlighting to code portion only
+            applySyntaxHighlighting(processedCode);
 
             // Definition indicator removed as requested
         }
     }
+
 
     /**
      * Truncate filename to fit in specified width, preserving extension
@@ -85,23 +93,22 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
     }
 
     /**
-     * Truncate code text to fit within maximum popup width
+     * Format code text for display, allowing reasonable length without artificial truncation
      */
     private String truncateCodeText(String codeText) {
         if (codeText == null || codeText.isEmpty()) {
             return "";
         }
         
-        // Maximum total width: 80 characters
-        // Filename: 30 + Line number: 6 + Separator: 1 = 37
-        // Remaining for code: 80 - 37 = 43 characters
-        final int MAX_CODE_LENGTH = 43;
+        // Allow much longer code lines - let popup size naturally
+        // Only truncate extremely long lines (e.g., minified code, data strings)
+        final int MAX_CODE_LENGTH = 150; // Increased from 43 to 150
         
         if (codeText.length() <= MAX_CODE_LENGTH) {
             return codeText;
         }
         
-        // Truncate and add ellipsis
+        // Truncate only very long lines and add ellipsis
         return codeText.substring(0, MAX_CODE_LENGTH - 3) + "...";
     }
 
