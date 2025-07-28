@@ -31,9 +31,8 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
 
             // Handle separators 
             if (navElement.isSeparator()) {
-                // Calculate actual width based on longest line pattern
-                // Use standard monospace character width calculation
-                int separatorWidth = 120; // Adjust based on typical popup width
+                // Calculate width: filename(25) + linenum(5) + space(1) + code(80) = 111
+                int separatorWidth = 25 + 5 + 1 + 80;
                 String separatorLine = "─".repeat(separatorWidth);
                 append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 return;
@@ -51,18 +50,21 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             }
 
             // Build the complete line with proper alignment
-            // Format: filename (30) + line number (6 right-aligned) + code
-            String truncatedFileName = truncateFileName(fileName, 30);
-            String formattedFileName = String.format("%-30s", truncatedFileName);
-            String formattedLineNumber = String.format("%6d", navElement.getLineNumber());
+            // Format: filename (25) + line number (5 right-aligned) + space (1) + code (fixed width)
+            String truncatedFileName = truncateFileName(fileName, 25);
+            String formattedFileName = String.format("%-25s", truncatedFileName);
+            String formattedLineNumber = String.format("%5d", navElement.getLineNumber());
             
             // Add the filename and line number first (these are fixed formatting)
             append(formattedFileName, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
             append(formattedLineNumber, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
             
-            // Apply syntax highlighting to code portion only
-            applySyntaxHighlighting(processedCode);
+            // Ensure code is padded to consistent width for uniform popup appearance
+            String paddedCode = String.format("%-80s", processedCode.length() > 80 ? processedCode.substring(0, 80) : processedCode);
+            
+            // Apply syntax highlighting to padded code portion
+            applySyntaxHighlighting(paddedCode);
 
             // Definition indicator removed as requested
         }
