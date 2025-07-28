@@ -160,12 +160,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
     @Override
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
+        long timestamp = System.currentTimeMillis();
+        HarbourLogger.log(COMPONENT, ">>>>>>> HANDLER ENTRY POINT [" + timestamp + "] ELEMENT: '" + 
+                (element != null ? element.getText() : "NULL") + "' <<<<<<<");
+        
         processedElements.clear();
         
         try {
-            return doGetGotoDeclarationTargets(element, offset, editor);
+            PsiElement[] result = doGetGotoDeclarationTargets(element, offset, editor);
+            HarbourLogger.log(COMPONENT, "<<<<<<< HANDLER EXIT POINT [" + timestamp + "] RETURNING: " + 
+                    (result != null ? result.length + " elements" : "NULL") + " <<<<<<<");
+            return result;
         } catch (Exception e) {
             HarbourLogger.log(COMPONENT, "Exception in getGotoDeclarationTargets: " + e.getMessage());
+            HarbourLogger.log(COMPONENT, "<<<<<<< HANDLER EXIT POINT [" + timestamp + "] EXCEPTION: " + e.getClass().getSimpleName() + " <<<<<<<");
             // Always return dummy element to prevent "Cannot find declaration" popup
             HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element != null ? element : new HarbourDummyPsiElement(null, false, "Error"), false, "Navigation error occurred");
             return new PsiElement[] { dummy };
@@ -457,31 +465,85 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Use our custom finder to locate occurrences of this symbol
         Project project = element.getProject();
         HarbourReferenceService service = HarbourReferenceService.getInstance(project);
+        
+        // Add detailed logging for debugging first-click issues
+        HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG START for: " + identifierName + " ===");
+        HarbourLogger.log(COMPONENT, "Service instance: " + (service != null ? "OK" : "NULL"));
+        HarbourLogger.log(COMPONENT, "Current file: " + (file != null ? file.getName() : "NULL"));
+        HarbourLogger.log(COMPONENT, "isFunction: " + isFunction);
 
         List<PsiElement> foundElements;
         if (isFunction) {
             HarbourLogger.log(COMPONENT, "Searching for function: " + identifierName);
-            foundElements = service.findFunctions(identifierName);
+            try {
+                foundElements = service.findFunctions(identifierName);
+                HarbourLogger.log(COMPONENT, "Initial search result: " + foundElements.size() + " elements found");
+            } catch (Exception e) {
+                HarbourLogger.log(COMPONENT, "Exception during initial function search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                // If we get a JobCancellationException, return null to let other handlers try
+                if (e.getClass().getSimpleName().contains("JobCancellation")) {
+                    HarbourLogger.log(COMPONENT, "JobCancellationException detected - returning null to let other handlers try");
+                    return null;
+                }
+                foundElements = new ArrayList<>();
+            }
 
             // If we didn't find anything, try force-reindexing the file first
             if (foundElements.isEmpty()) {
-                HarbourLogger.log(COMPONENT, "No functions found, trying to reindex file");
+                HarbourLogger.log(COMPONENT, "No functions found on first try, attempting force reindex");
                 if (file instanceof HarbourFile) {
-                    service.forceClearCaches();
-                    service.registerFunctions((HarbourFile)file);
-                    service.registerProcedures((HarbourFile)file);
-                    foundElements = service.findFunctions(identifierName);
+                    try {
+                        HarbourLogger.log(COMPONENT, "Clearing caches and reindexing file: " + file.getName());
+                        service.forceClearCaches();
+                        service.registerFunctions((HarbourFile)file);
+                        service.registerProcedures((HarbourFile)file);
+                        foundElements = service.findFunctions(identifierName);
+                        HarbourLogger.log(COMPONENT, "After reindex: " + foundElements.size() + " elements found");
+                        
+                        // If still nothing found after reindex, try broader project-wide search
+                        if (foundElements.isEmpty()) {
+                            HarbourLogger.log(COMPONENT, "Still nothing after reindex, trying project-wide search");
+                            foundElements = service.findSymbol(identifierName);
+                            HarbourLogger.log(COMPONENT, "Project-wide search result: " + foundElements.size() + " elements found");
+                        }
+                    } catch (Exception e) {
+                        HarbourLogger.log(COMPONENT, "Exception during reindex/project search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                        // If we get a JobCancellationException during reindex, return null to let other handlers try
+                        if (e.getClass().getSimpleName().contains("JobCancellation")) {
+                            HarbourLogger.log(COMPONENT, "JobCancellationException during reindex - returning null to let other handlers try");
+                            return null;
+                        }
+                        // If reindexing fails, just return empty list and let it fail gracefully
+                        foundElements = new ArrayList<>();
+                    }
+                } else {
+                    HarbourLogger.log(COMPONENT, "File is not a HarbourFile, cannot reindex");
                 }
             }
         } else {
             HarbourLogger.log(COMPONENT, "Searching for variable/symbol: " + identifierName);
 
-            // For variables: Use simple file-based search with line-based scoping
-            // Variables cannot be used outside their declaration file unless PRIVATE/STATIC
-            foundElements = findVariableInCurrentFileWithScope(element, identifierName);
+            try {
+                // For variables: Use simple file-based search with line-based scoping
+                // Variables cannot be used outside their declaration file unless PRIVATE/STATIC
+                foundElements = findVariableInCurrentFileWithScope(element, identifierName);
+            } catch (Exception e) {
+                HarbourLogger.log(COMPONENT, "Exception during variable search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                // If we get a JobCancellationException, return null to let other handlers try
+                if (e.getClass().getSimpleName().contains("JobCancellation")) {
+                    HarbourLogger.log(COMPONENT, "JobCancellationException during variable search - returning null to let other handlers try");
+                    return null;
+                }
+                foundElements = new ArrayList<>();
+            }
         }
 
-        HarbourLogger.log(COMPONENT, "Found " + foundElements.size() + " elements for: " + identifierName);
+        HarbourLogger.log(COMPONENT, "FINAL SEARCH RESULT: Found " + foundElements.size() + " elements for: " + identifierName);
+        for (int i = 0; i < Math.min(foundElements.size(), 5); i++) {
+            PsiElement elem = foundElements.get(i);
+            HarbourLogger.log(COMPONENT, "  Element " + i + ": " + elem.getText() + " in " + 
+                    (elem.getContainingFile() != null ? elem.getContainingFile().getName() : "unknown"));
+        }
 
         // Filter out invalid elements and deduplicate by file:line
         Set<String> locations = new HashSet<>();
@@ -672,38 +734,34 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return singleTarget;
         }
 
-        // If we have multiple targets, show custom popup with syntax highlighting (only on click, not hover)
+        // If we have multiple targets, show custom popup with syntax highlighting
         if (navigationElements.size() > 1) {
-            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), checking click vs hover");
+            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), showing custom popup");
             
-            // Only show popup on actual click, not on hover (use same mechanism as external handler)
-            if (HarbourExternalDocumentationHandler.isClickMode()) {
-                HarbourLogger.log(COMPONENT, "Click detected - showing custom popup");
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    List<PsiElement> targets = navigationElements.stream()
-                            .map(e -> (PsiElement) e)
-                            .collect(Collectors.toList());
-                    HarbourNavigationPopup.showNavigationPopup(targets, editor);
-                });
-                
-                // Reset click mode after showing popup (same as external handler)
-                HarbourExternalDocumentationHandler.setClickMode(false);
-                return new PsiElement[0]; // Return empty array to prevent default popup
-            } else {
-                HarbourLogger.log(COMPONENT, "Hover mode detected - not showing popup");
-                return null; // Return null on hover to prevent any action
-            }
+            // GoToDeclarationHandler is only called for actual navigation requests (Ctrl+Click)
+            // so we don't need to check for hover vs click - if we're here, it's a click
+            HarbourLogger.log(COMPONENT, "Navigation handler called - showing custom popup");
+            ApplicationManager.getApplication().invokeLater(() -> {
+                List<PsiElement> targets = navigationElements.stream()
+                        .map(e -> (PsiElement) e)
+                        .collect(Collectors.toList());
+                HarbourNavigationPopup.showNavigationPopup(targets, editor);
+            });
+            
+            return new PsiElement[0]; // Return empty array to prevent default popup
         }
 
-        HarbourLogger.log(COMPONENT, "Returning " + navigationElements.size() + " sorted navigation targets");
+        HarbourLogger.log(COMPONENT, "FINAL RESULT: Returning " + navigationElements.size() + " sorted navigation targets");
         
         // If we have no elements at all, return a dummy to prevent "Cannot find declaration" popup
         if (navigationElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "No navigation elements found - returning dummy to prevent popup");
+            HarbourLogger.log(COMPONENT, "ERROR: No navigation elements found - returning dummy to prevent popup");
+            HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (FAILED) ===");
             HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No navigation targets found");
             return new PsiElement[] { dummy };
         }
         
+        HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (SUCCESS) ===");
         return navigationElements.toArray(new PsiElement[0]);
     }
 
