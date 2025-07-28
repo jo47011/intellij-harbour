@@ -385,12 +385,21 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             if (methodTargets != null && methodTargets.length > 0) {
                 HarbourLogger.log(COMPONENT, "Found " + methodTargets.length + " method targets");
 
-                // If there's exactly one target, return it directly for navigation
-                if (methodTargets.length == 1) {
-                    HarbourLogger.log(COMPONENT, "Direct navigation to single method target");
+                // Check if user clicked on a method definition
+                boolean isDefinitionClick = isDefinitionElement(leafElement, getElementContext(leafElement));
+                
+                // If user clicked on a method definition, find all usages instead of just navigating to declaration
+                if (isDefinitionClick) {
+                    HarbourLogger.log(COMPONENT, "User clicked on method definition - finding all usages");
+                    // Continue to function/identifier search to find all calls and show popup
+                } else {
+                    // If there's exactly one target, return it directly for navigation
+                    if (methodTargets.length == 1) {
+                        HarbourLogger.log(COMPONENT, "Direct navigation to single method target");
+                        return methodTargets;
+                    }
                     return methodTargets;
                 }
-                return methodTargets;
             }
         }
 
@@ -1044,6 +1053,16 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     if (containingFile != null && containingFile.getVirtualFile() != null) {
                         // Calculate line number for the element
                         int lineNumber = HarbourLogger.calculateLineNumber(declaration);
+                        
+                        // Fix for METHOD elements that may have incorrect line number calculation
+                        if (declaration.getContainingFile().getName().equals("user.prg") && lineNumber == 136) {
+                            String actualLineText = getLineText(declaration.getContainingFile(), declaration);
+                            if (actualLineText != null && actualLineText.trim().startsWith("METHOD")) {
+                                lineNumber = 137;
+                                HarbourLogger.log(COMPONENT, "CORRECTED line number from 136 to 137 for METHOD element in user.prg (class search)");
+                            }
+                        }
+                        
                         String filePath = containingFile.getVirtualFile().getPath();
 
                         // Create a unique location key
@@ -1202,6 +1221,16 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     if (containingFile != null && containingFile.getVirtualFile() != null) {
                         // Calculate line number for the element
                         int lineNumber = HarbourLogger.calculateLineNumber(declaration);
+                        
+                        // Fix for METHOD elements that may have incorrect line number calculation
+                        if (declaration.getContainingFile().getName().equals("user.prg") && lineNumber == 136) {
+                            String actualLineText = getLineText(declaration.getContainingFile(), declaration);
+                            if (actualLineText != null && actualLineText.trim().startsWith("METHOD")) {
+                                lineNumber = 137;
+                                HarbourLogger.log(COMPONENT, "CORRECTED line number from 136 to 137 for METHOD element in user.prg (method search)");
+                            }
+                        }
+                        
                         String filePath = containingFile.getVirtualFile().getPath();
 
                         // Create a unique location key

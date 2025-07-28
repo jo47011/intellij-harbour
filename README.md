@@ -137,9 +137,7 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 - remove garbage from idea log
 - fix some navigation elements()
   - KInternAendern()
-  - mymemo.prg click on ::setPos
   - nav popup column alignment
-  - getUser():setCurrentPrintJob() click => shows some comment in definition block
 
 The following files are still written to the project dir, either remove or move to.hbmk (from settings):
 - debug_entry_handler.log  debug_trace.log  error_handler_init.log  init_called.log  sendlocals_trace.log
