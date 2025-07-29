@@ -14,6 +14,7 @@ A plugin for IntelliJ IDEA that provides support for the Harbour/Clipper program
 - Structure view
 - Code formatting
 - [Debugging](#debugging-features)
+- Enhanced navigation popup with syntax highlighting
 
 ## Introduction
 
@@ -136,7 +137,6 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 
 - remove garbage from idea log
 - fix some navigation elements()
-  - nav popup column alignment
   - nav popup should exclude excluded files from Settings->excluded Files
 - 
 
