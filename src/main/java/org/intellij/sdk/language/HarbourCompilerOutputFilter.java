@@ -7,6 +7,12 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.find.FindManager;
+import com.intellij.find.FindModel;
+import com.intellij.find.FindSettings;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.util.TextRange;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,6 +41,9 @@ public class HarbourCompilerOutputFilter implements Filter {
 
     // Pattern to match error codes in compiler output
     private static final Pattern ERROR_PATTERN = Pattern.compile("Error [A-Z]\\d+");
+    
+    // Pattern to match missing function references: "Referenced, missing, but unknown function(s): FOO()"
+    private static final Pattern MISSING_FUNCTION_PATTERN = Pattern.compile("Referenced,\\s+missing,\\s+but\\s+unknown\\s+function\\(s\\):\\s+([A-Z_][A-Z0-9_]*)\\(\\)");
     
     // Pattern to match ALL Harbour runtime errors - UNIVERSAL approach
     private static final Pattern RUNTIME_ERROR_PATTERN = Pattern.compile(
@@ -92,6 +101,7 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher errorMatcher = ERROR_PATTERN.matcher(line);
         Matcher runtimeErrorMatcher = RUNTIME_ERROR_PATTERN.matcher(line);
         Matcher includeFileMatcher = INCLUDE_FILE_PATTERN.matcher(line);
+        Matcher missingFunctionMatcher = MISSING_FUNCTION_PATTERN.matcher(line);
 
         // Check for runtime errors first (highest priority)
         if (runtimeErrorMatcher.find()) {
@@ -144,6 +154,16 @@ public class HarbourCompilerOutputFilter implements Filter {
                 int end = findIncludeFileEnd(includeFileMatcher, includeFile);
                 result = createIncludeFileResult(line, entireLength, includeFile, start, end);
             }
+        }
+        // Check for missing function references: "Referenced, missing, but unknown function(s): FOO()"
+        else if (missingFunctionMatcher.find()) {
+            String functionName = missingFunctionMatcher.group(1);
+            HarbourLogger.log("HarbourCompilerOutputFilter", "Found missing function reference: " + functionName);
+            
+            // Create hyperlink for the function name to search for its usage
+            int start = missingFunctionMatcher.start(1);  // Start of function name
+            int end = missingFunctionMatcher.end(1);      // End of function name
+            result = createMissingFunctionResult(line, entireLength, functionName, start, end);
         }
         // Check for generic error with code
         else if (errorMatcher.find()) {
@@ -330,5 +350,50 @@ public class HarbourCompilerOutputFilter implements Filter {
     private String capitalizeFirstLetter(String filename) {
         if (filename == null || filename.isEmpty()) return filename;
         return Character.toUpperCase(filename.charAt(0)) + filename.substring(1);
+    }
+    
+    /**
+     * Create a result with missing function hyperlink that searches for function usage.
+     */
+    private Result createMissingFunctionResult(String line, int entireLength, String functionName, int matchStart, int matchEnd) {
+        HyperlinkInfo hyperlinkInfo = new HyperlinkInfo() {
+            @Override
+            public void navigate(Project project) {
+                // Search for function usage in the project
+                searchForFunctionUsage(project, functionName);
+            }
+        };
+        
+        // Calculate actual positions in the entire output
+        int lineStartInEntireText = entireLength - line.length();
+        int hyperlinkStart = lineStartInEntireText + matchStart;
+        int hyperlinkEnd = lineStartInEntireText + matchEnd;
+        
+        return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Search for function usage in the project using IntelliJ's Find functionality.
+     */
+    private void searchForFunctionUsage(Project project, String functionName) {
+        HarbourLogger.log("HarbourCompilerOutputFilter", "Searching for function usage: " + functionName);
+        
+        // Create find model for searching
+        FindModel findModel = new FindModel();
+        findModel.setStringToFind(functionName + "(");  // Search for function calls like "FOO("
+        findModel.setCaseSensitive(false);
+        findModel.setWholeWordsOnly(false);
+        findModel.setRegularExpressions(false);
+        findModel.setFromCursor(false);
+        findModel.setForward(true);
+        findModel.setGlobal(true);
+        findModel.setFindAll(true);
+        
+        // Use IntelliJ's Find in Files functionality
+        FindManager findManager = FindManager.getInstance(project);
+        findManager.showFindDialog(findModel, () -> {
+            // Callback after find dialog is closed
+            HarbourLogger.log("HarbourCompilerOutputFilter", "Find dialog closed for function: " + functionName);
+        });
     }
 }
