@@ -12,15 +12,20 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.io.File;
 
 /**
  * Filter Harbour compiler output to create file links and highlight errors.
  */
 public class HarbourCompilerOutputFilter implements Filter {
     private final Project project;
+    private final String workingDirectory;
 
     // Pattern to match file:line references in compiler output
     private static final Pattern FILE_PATTERN = Pattern.compile("([^:]+)\\((\\d+)\\)");
+    
+    // Pattern to match include file references like 'filename.ch' or "filename.ch"
+    private static final Pattern INCLUDE_FILE_PATTERN = Pattern.compile("['\"]([^'\"]+\\.(ch|hbh|h))['\"]|Can't open #include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|#include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|'([^']+\\.(ch|hbh|h))'|\"([^\"]+\\.(ch|hbh|h))\"");
     
     // Pattern to match stack trace file references: "in filepath(line)"
     private static final Pattern STACK_TRACE_PATTERN = Pattern.compile("in\\s+([^\\s]+)\\((\\d+)\\)");
@@ -57,8 +62,13 @@ public class HarbourCompilerOutputFilter implements Filter {
     );
 
     public HarbourCompilerOutputFilter(Project project) {
+        this(project, null);
+    }
+    
+    public HarbourCompilerOutputFilter(Project project, String workingDirectory) {
         this.project = project;
-        HarbourLogger.log("HarbourCompilerOutputFilter", "Filter initialized");
+        this.workingDirectory = workingDirectory;
+        HarbourLogger.log("HarbourCompilerOutputFilter", "Filter initialized with working dir: " + workingDirectory);
     }
 
     /**
@@ -70,7 +80,10 @@ public class HarbourCompilerOutputFilter implements Filter {
     @Nullable
     @Override
     public Result applyFilter(@NotNull String line, int entireLength) {
-        // Removed flooding log message - was logging every single line of output
+        // Temporary debug logging for stacktrace navigation issue
+        if (line.contains("test-gui.prg") || line.contains(".prg(")) {
+            HarbourLogger.log("HarbourCompilerOutputFilter", "Processing line: " + line);
+        }
 
         Result result = null;
         Matcher fileMatcher = FILE_PATTERN.matcher(line);
@@ -78,6 +91,7 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher functionMatcher = FUNCTION_PATTERN.matcher(line);
         Matcher errorMatcher = ERROR_PATTERN.matcher(line);
         Matcher runtimeErrorMatcher = RUNTIME_ERROR_PATTERN.matcher(line);
+        Matcher includeFileMatcher = INCLUDE_FILE_PATTERN.matcher(line);
 
         // Check for runtime errors first (highest priority)
         if (runtimeErrorMatcher.find()) {
@@ -95,7 +109,9 @@ public class HarbourCompilerOutputFilter implements Filter {
             int lineNumber = Integer.parseInt(functionMatcher.group(4));
             HarbourLogger.log("HarbourCompilerOutputFilter", "Found function reference: " + functionName + " in " + filePath + ":" + lineNumber);
 
-            result = createResult(line, entireLength, filePath, lineNumber);
+            int start = functionMatcher.start(3);  // Start of filepath
+            int end = functionMatcher.end(4) + 1;  // End of line number including ')'
+            result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
         // Check for stack trace file references "in filepath(line)"
         else if (stackTraceMatcher.find()) {
@@ -103,7 +119,9 @@ public class HarbourCompilerOutputFilter implements Filter {
             int lineNumber = Integer.parseInt(stackTraceMatcher.group(2));
             HarbourLogger.log("HarbourCompilerOutputFilter", "Found stack trace file reference: " + filePath + ":" + lineNumber);
 
-            result = createResult(line, entireLength, filePath, lineNumber);
+            int start = stackTraceMatcher.start(1);  // Start of filepath
+            int end = stackTraceMatcher.end(2) + 1;  // End of line number including ')'
+            result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
         // Check for compiler error with file and line
         else if (fileMatcher.find()) {
@@ -111,7 +129,21 @@ public class HarbourCompilerOutputFilter implements Filter {
             int lineNumber = Integer.parseInt(fileMatcher.group(2));
             HarbourLogger.log("HarbourCompilerOutputFilter", "Found file reference: " + filePath + ":" + lineNumber);
 
-            result = createResult(line, entireLength, filePath, lineNumber);
+            int start = fileMatcher.start();
+            int end = fileMatcher.end();
+            result = createResult(line, entireLength, filePath, lineNumber, start, end);
+        }
+        // Check for include file references (like miki.ch in error messages)
+        else if (includeFileMatcher.find()) {
+            String includeFile = extractIncludeFileName(includeFileMatcher);
+            if (includeFile != null) {
+                HarbourLogger.log("HarbourCompilerOutputFilter", "Found include file reference: " + includeFile);
+                
+                // Create hyperlink for the include file
+                int start = findIncludeFileStart(includeFileMatcher, includeFile);
+                int end = findIncludeFileEnd(includeFileMatcher, includeFile);
+                result = createIncludeFileResult(line, entireLength, includeFile, start, end);
+            }
         }
         // Check for generic error with code
         else if (errorMatcher.find()) {
@@ -129,15 +161,174 @@ public class HarbourCompilerOutputFilter implements Filter {
     /**
      * Create a result with file hyperlink.
      */
-    private Result createResult(String line, int entireLength, String filePath, int lineNumber) {
-        VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(filePath);
+    private Result createResult(String line, int entireLength, String filePath, int lineNumber, int matchStart, int matchEnd) {
+        VirtualFile vFile = findFile(filePath);
         HyperlinkInfo hyperlinkInfo = null;
 
         if (vFile != null) {
             hyperlinkInfo = new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1);
         }
 
-        // Create result with hyperlink
-        return new Result(entireLength - line.length(), entireLength, hyperlinkInfo, null);
+        // Calculate actual positions in the entire output
+        int lineStartInEntireText = entireLength - line.length();
+        int hyperlinkStart = lineStartInEntireText + matchStart;
+        int hyperlinkEnd = lineStartInEntireText + matchEnd;
+        
+        // Create result with hyperlink only for the matched part
+        return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Find a file, trying both absolute and relative paths.
+     */
+    private VirtualFile findFile(String filePath) {
+        // First try as absolute path
+        VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(filePath);
+        
+        // If not found and we have a working directory, try as relative path
+        if (vFile == null && workingDirectory != null && !new File(filePath).isAbsolute()) {
+            String absolutePath = new File(workingDirectory, filePath).getAbsolutePath();
+            vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+            
+            if (vFile != null) {
+                HarbourLogger.log("HarbourCompilerOutputFilter", "Resolved relative path: " + filePath + " -> " + absolutePath);
+            }
+        }
+        
+        return vFile;
+    }
+    
+    /**
+     * Extract include file name from matcher, checking all groups.
+     */
+    private String extractIncludeFileName(Matcher matcher) {
+        // Check each group to find the non-null match
+        for (int i = 1; i <= matcher.groupCount(); i++) {
+            String group = matcher.group(i);
+            if (group != null && (group.endsWith(".ch") || group.endsWith(".hbh") || group.endsWith(".h"))) {
+                return group;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Find start position of include file in the match.
+     */
+    private int findIncludeFileStart(Matcher matcher, String includeFile) {
+        String matchedText = matcher.group(0);
+        int pos = matchedText.indexOf(includeFile);
+        return pos >= 0 ? matcher.start() + pos : matcher.start();
+    }
+    
+    /**
+     * Find end position of include file in the match.
+     */
+    private int findIncludeFileEnd(Matcher matcher, String includeFile) {
+        String matchedText = matcher.group(0);
+        int pos = matchedText.indexOf(includeFile);
+        return pos >= 0 ? matcher.start() + pos + includeFile.length() : matcher.end();
+    }
+    
+    /**
+     * Create a result with include file hyperlink.
+     */
+    private Result createIncludeFileResult(String line, int entireLength, String includeFile, int start, int end) {
+        VirtualFile vFile = findIncludeFile(includeFile);
+        HyperlinkInfo hyperlinkInfo = null;
+        
+        if (vFile != null) {
+            hyperlinkInfo = new OpenFileHyperlinkInfo(project, vFile, 0);
+        }
+        
+        // Calculate actual positions in the entire output
+        int lineStartInEntireText = entireLength - line.length();
+        int hyperlinkStart = lineStartInEntireText + start;
+        int hyperlinkEnd = lineStartInEntireText + end;
+        
+        return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Find an include file by searching in include paths with case-insensitive matching.
+     */
+    private VirtualFile findIncludeFile(String includeFile) {
+        HarbourLogger.log("HarbourCompilerOutputFilter", "Searching for include file: " + includeFile);
+        
+        // First try in working directory
+        VirtualFile vFile = findIncludeFileWithCaseVariations(includeFile, workingDirectory);
+        if (vFile != null) return vFile;
+        
+        // Try in working directory + include subdirectory
+        if (workingDirectory != null) {
+            String includeDir = new File(workingDirectory, "include").getAbsolutePath();
+            vFile = findIncludeFileWithCaseVariations(includeFile, includeDir);
+            if (vFile != null) return vFile;
+        }
+        
+        // Try in include paths from settings
+        if (project != null) {
+            HarbourSettings settings = HarbourSettings.getInstance(project);
+            if (settings != null) {
+                for (String includePath : settings.getResolvedIncludePaths(project)) {
+                    vFile = findIncludeFileWithCaseVariations(includeFile, includePath);
+                    if (vFile != null) {
+                        HarbourLogger.log("HarbourCompilerOutputFilter", "Found include file in settings path: " + includePath);
+                        return vFile;
+                    }
+                }
+            }
+        }
+        
+        // Try in common Harbour installation directories
+        String[] commonPaths = {
+            "/usr/include/harbour",
+            "/usr/local/include/harbour"
+        };
+        
+        for (String basePath : commonPaths) {
+            vFile = findIncludeFileWithCaseVariations(includeFile, basePath);
+            if (vFile != null) {
+                HarbourLogger.log("HarbourCompilerOutputFilter", "Found include file at: " + basePath);
+                return vFile;
+            }
+        }
+        
+        HarbourLogger.log("HarbourCompilerOutputFilter", "Include file not found: " + includeFile);
+        return null;
+    }
+    
+    /**
+     * Find include file with case variations (original, lowercase, uppercase, first letter capitalized).
+     */
+    private VirtualFile findIncludeFileWithCaseVariations(String includeFile, String searchDir) {
+        if (searchDir == null) return null;
+        
+        // Try different case variations
+        String[] variations = {
+            includeFile,                                    // Original case
+            includeFile.toLowerCase(),                      // All lowercase (miki.ch)
+            includeFile.toUpperCase(),                      // All uppercase (MIKI.CH)
+            capitalizeFirstLetter(includeFile)             // First letter capitalized (Miki.ch)
+        };
+        
+        for (String variation : variations) {
+            String fullPath = new File(searchDir, variation).getAbsolutePath();
+            VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(fullPath);
+            if (vFile != null) {
+                HarbourLogger.log("HarbourCompilerOutputFilter", "Found " + includeFile + " as " + variation + " in " + searchDir);
+                return vFile;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Capitalize first letter of filename.
+     */
+    private String capitalizeFirstLetter(String filename) {
+        if (filename == null || filename.isEmpty()) return filename;
+        return Character.toUpperCase(filename.charAt(0)) + filename.substring(1);
     }
 }
