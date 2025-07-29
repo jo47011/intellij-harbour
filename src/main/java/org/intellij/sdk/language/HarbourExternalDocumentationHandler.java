@@ -465,13 +465,12 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
     private void showBrowserConfigurationNotification(Project project, String functionName, String docUrl, String errorMessage) {
         HarbourLogger.log("DocHandler", "showBrowserConfigurationNotification called for function: " + functionName);
         
-        String title = "Browser Configuration Required";
+        String title = "Documentation Access";
         String content = String.format(
-            "Failed to open documentation for function '%s'.<br/>" +
-            "The browser needs to be configured in PyCharm settings.<br/>" +
-            "Error: %s<br/>" +
+            "Documentation for function '%s'.<br/>" +
+            "If browser did not open, configure it in PyCharm settings.<br/>" +
             "URL: <a href=\"%s\">%s</a>",
-            functionName, errorMessage, docUrl, docUrl
+            functionName, docUrl, docUrl
         );
         
         HarbourLogger.log("DocHandler", "Creating notification with title: " + title);
