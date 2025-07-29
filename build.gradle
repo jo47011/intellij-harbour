@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.494'
+version = '1.0.497'
 
 repositories {
     mavenCentral()
@@ -41,7 +41,7 @@ intellijPlatform {
         version.set(project.version)
         ideaVersion {
             sinceBuild.set("233")
-            untilBuild.set("243.*")
+            untilBuild.set("251.*")
         }
     }
 
