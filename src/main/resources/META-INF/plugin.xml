@@ -1,12 +1,24 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.384</version>
-    <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
+    <version>1.0.498</version>
+    <vendor email="support@example.com" url="http://www.example.com">Harbour Development</vendor>
 
     <description><![CDATA[
-      Harbour language support for IntelliJ Platform IDEs.
-      Provides syntax highlighting, code completion, and debugging support.
+      Comprehensive Harbour language support for IntelliJ Platform IDEs (PyCharm, IntelliJ IDEA).
+      
+      Features:
+      • Advanced syntax highlighting with colour customization
+      • Intelligent code completion for functions, methods, and variables
+      • Go-to-declaration with external documentation links
+      • Full debugging support with breakpoints and variable inspection
+      • Code formatting and auto-indentation
+      • Structure view and navigation popup
+      • Include file resolution and reference support
+      • Function classification and error detection
+      • Custom notification system for browser configuration
+      
+      Supports .prg and .hb file extensions with comprehensive Harbour/xHarbour syntax support.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

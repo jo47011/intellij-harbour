@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.480'
+version = '1.0.498'
 
 repositories {
     mavenCentral()
@@ -24,9 +24,6 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity('2024.3.4')
         bundledPlugin('com.intellij.java')
-        // Note: execution and debugging modules are provided by module dependencies in plugin.xml
-        pluginVerifier()
-        zipSigner()
         instrumentationTools()
     }
 }
@@ -48,18 +45,9 @@ intellijPlatform {
         }
     }
 
-    pluginVerification {
-        ides {
-            recommended()
-        }
-    }
-
-    // Configure sandbox to auto-open hbmiki-test project
-    sandboxContainer = file("$buildDir/idea-sandbox")
-    
-    // Configure runIde to automatically open hbmiki-test project
     runIde {
-        args = ["/home/developer/workspace/hbmiki-test"]
+        jvmArgs = ["-Xmx2048m"]
+        args = [file("../hbmiki-test").absolutePath]
     }
 }
 
@@ -116,33 +104,3 @@ tasks.withType(org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask) 
         println "Configured trusted paths: ${parentDir}, ${projectPath}"
     }
 }
-
-// Task to ensure gradle directories exist
-task ensureGradleDirs {
-    doLast {
-        // Create necessary gradle directories
-        def gradleUserHome = gradle.gradleUserHomeDir
-        def projectName = project.name ?: 'intellij-harbour'
-
-        // Create daemon directory for current gradle version
-        def gradleVersion = gradle.gradleVersion
-        def daemonDir = new File(gradleUserHome, "daemon/${gradleVersion}/${projectName}")
-        if (!daemonDir.exists()) {
-            daemonDir.mkdirs()
-            println "Created gradle daemon directory: ${daemonDir.absolutePath}"
-        }
-
-        // Also create a generic daemon directory as fallback
-        def genericDaemonDir = new File(gradleUserHome, "daemon/${gradleVersion}")
-        if (!genericDaemonDir.exists()) {
-            genericDaemonDir.mkdirs()
-        }
-    }
-}
-
-// Ensure directories exist before running IDE
-tasks.named('runIde') {
-    dependsOn ensureGradleDirs
-}
-
-// Note: Trusted paths are now configured via PrepareSandboxTask hook above

@@ -1523,7 +1523,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
         TextConsoleBuilder consoleBuilder = TextConsoleBuilderFactory.getInstance()
                 .createBuilder(env.getProject());
-        consoleBuilder.filters(new HarbourCompilerOutputFilter(env.getProject()));
+        consoleBuilder.filters(new HarbourCompilerOutputFilter(env.getProject(), runConfig.getWorkingDirectory()));
         ConsoleView console = consoleBuilder.getConsole();
         console.attachToProcess(processHandler);
         

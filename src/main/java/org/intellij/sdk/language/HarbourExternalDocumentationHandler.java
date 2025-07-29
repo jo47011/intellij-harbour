@@ -2,7 +2,15 @@ package org.intellij.sdk.language;
 
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler;
 import com.intellij.ide.BrowserUtil;
+import com.intellij.ide.browsers.BrowserLauncher;
+import com.intellij.ide.browsers.WebBrowserManager;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAction;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
@@ -16,6 +24,7 @@ import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.intellij.sdk.language.psi.HarbourTypes;
 import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
@@ -408,6 +417,23 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         recentlyOpenedUrls.entrySet().removeIf(entry -> 
             (currentTime - entry.getValue()) > 10000);
 
+        // Check if a browser is configured before attempting to open
+        WebBrowserManager browserManager = WebBrowserManager.getInstance();
+        boolean hasBrowsers = !browserManager.getActiveBrowsers().isEmpty();
+        
+        HarbourLogger.log("DocHandler", "Browser check - has browsers: " + hasBrowsers + 
+                         ", active browsers: " + browserManager.getActiveBrowsers().size());
+        
+        // Show notification if no browsers configured
+        if (!hasBrowsers) {
+            HarbourLogger.log("DocHandler", "No browsers configured, showing notification for external function: " + functionName);
+            showBrowserConfigurationNotification(project, functionName, docUrl, "No browsers configured");
+            return;
+        }
+        
+        boolean browserLaunchFailed = false;
+        String errorMessage = null;
+        
         try {
             // Add platform-specific logging
             String osName = System.getProperty("os.name");
@@ -420,8 +446,72 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             
             HarbourLogger.log("DocHandler", "BrowserUtil.browse() called successfully for: " + docUrl);
         } catch (Exception e) {
-            HarbourLogger.log("DocHandler", "ERROR opening browser: " + e.getMessage());
+            browserLaunchFailed = true;
+            errorMessage = e.getMessage();
+            HarbourLogger.log("DocHandler", "ERROR opening browser: " + errorMessage);
             HarbourLogger.log("DocHandler", "Exception stack trace: " + java.util.Arrays.toString(e.getStackTrace()));
+        }
+        
+        // Always show notification for ALL external functions to test if it works
+        // This catches cases where BrowserUtil.browse() doesn't throw exception but browser still fails
+        HarbourLogger.log("DocHandler", "Showing notification for all external functions for testing: " + functionName);
+        String message = errorMessage != null ? errorMessage : "Browser configuration test - please verify browser opens correctly";
+        showBrowserConfigurationNotification(project, functionName, docUrl, message);
+    }
+    
+    /**
+     * Show a user-friendly notification when browser opening fails, with instructions to configure browser settings.
+     */
+    private void showBrowserConfigurationNotification(Project project, String functionName, String docUrl, String errorMessage) {
+        HarbourLogger.log("DocHandler", "showBrowserConfigurationNotification called for function: " + functionName);
+        
+        String title = "Documentation Access";
+        String content = String.format(
+            "Documentation for function '%s'.<br/>" +
+            "If browser did not open, configure it in PyCharm settings.<br/>" +
+            "URL: <a href=\"%s\">%s</a>",
+            functionName, docUrl, docUrl
+        );
+        
+        HarbourLogger.log("DocHandler", "Creating notification with title: " + title);
+        HarbourLogger.log("DocHandler", "Notification content: " + content);
+        
+        try {
+            // Create notification with action to open settings
+            Notification notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Harbour Application")
+                .createNotification(title, content, NotificationType.WARNING)
+            .addAction(new NotificationAction("Open Browser Settings") {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+                    // Open the Tools > Web Browsers settings page
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "Web Browsers");
+                    notification.expire();
+                }
+            })
+            .addAction(new NotificationAction("Copy URL") {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+                    // Copy URL to clipboard
+                    java.awt.datatransfer.StringSelection selection = new java.awt.datatransfer.StringSelection(docUrl);
+                    java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+                    
+                    // Show a brief success message
+                    NotificationGroupManager.getInstance()
+                        .getNotificationGroup("Harbour Application")
+                        .createNotification("URL copied to clipboard", NotificationType.INFORMATION)
+                        .notify(project);
+                    
+                    notification.expire();
+                }
+            });
+        
+            notification.notify(project);
+            
+            HarbourLogger.log("DocHandler", "Notification displayed successfully for function: " + functionName);
+        } catch (Exception e) {
+            HarbourLogger.log("DocHandler", "ERROR creating/showing notification: " + e.getMessage());
+            HarbourLogger.log("DocHandler", "Notification exception: " + java.util.Arrays.toString(e.getStackTrace()));
         }
     }
     
