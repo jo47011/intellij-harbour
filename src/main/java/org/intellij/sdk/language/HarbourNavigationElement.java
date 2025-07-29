@@ -375,7 +375,15 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
             
             while ((line = reader.readLine()) != null) {
                 if (currentLine == lineNumber) {
-                    return line.trim(); // Trim whitespace for better display
+                    String trimmedLine = line.trim();
+                    
+                    // Check if this line is a comment or empty line that should be filtered out
+                    if (isCommentOrEmptyLine(trimmedLine)) {
+                        HarbourLogger.log(COMPONENT, "Filtering out comment/empty line at " + lineNumber + " in " + filePath + ": '" + trimmedLine + "'");
+                        return null; // Return null to indicate this line should be skipped
+                    }
+                    
+                    return trimmedLine; // Return the trimmed line for display
                 }
                 currentLine++;
             }
@@ -384,6 +392,20 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
         }
         
         return null;
+    }
+    
+    /**
+     * Check if a line is a comment or empty line that should be filtered from navigation popup
+     */
+    private boolean isCommentOrEmptyLine(String trimmedLine) {
+        if (trimmedLine == null || trimmedLine.isEmpty()) {
+            return true; // Empty lines should be filtered
+        }
+        
+        // Check for various comment patterns
+        return trimmedLine.startsWith("//") || 
+               trimmedLine.startsWith("/*") || 
+               trimmedLine.startsWith("/**");
     }
 
     /**

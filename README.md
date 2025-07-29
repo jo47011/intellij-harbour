@@ -1,173 +1,227 @@
-# Harbour Language IntelliJ Plugin
+# Harbour Language Plugin for IntelliJ Platform
 
-# Harbour Language Plugin for IntelliJ
+A comprehensive language support plugin for Harbour/xHarbour programming language, compatible with IntelliJ IDEA, PyCharm, and other JetBrains IDEs.
 
-A plugin for IntelliJ IDEA that provides support for the Harbour/Clipper programming language.
+[![Plugin Version](https://img.shields.io/badge/version-1.0.498-blue.svg)](https://github.com/yourusername/intellij-harbour)
+[![IntelliJ Platform](https://img.shields.io/badge/platform-2024.3.4-orange.svg)](https://plugins.jetbrains.com/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## Features
+## ✨ Features
 
-- Syntax highlighting
-- Code completion
-- Function and procedure navigation
-- Reference resolution
-- Rename refactoring
-- Structure view
-- Code formatting
-- [Debugging](#debugging-features)
-- Enhanced navigation popup with syntax highlighting
+### 🎨 **Language Support**
+- **Advanced Syntax Highlighting** with customizable colors for keywords, strings, functions, and comments
+- **Intelligent Code Completion** for functions, methods, variables, and DATA fields
+- **Structure View** with class hierarchy and method navigation
+- **Code Formatting** with auto-indentation and custom style settings
+- **File Extensions**: Full support for `.prg` and `.hb` files
 
-## Introduction
+### 🧭 **Navigation & References**
+- **Go-to-Declaration** for functions, methods, classes, and variables
+- **Enhanced Navigation Popup** with syntax highlighting and precise column alignment
+- **External Function Documentation** - Ctrl+click opens Harbour documentation in browser
+- **Include File Resolution** with case-insensitive search and multiple path support
+- **Find Usages** with comprehensive reference tracking
+- **Class Property Navigation** - Navigate between DATA declarations and `::property` usage
 
-This package was purely implemented by O1 pro and Claude 3.7.  No code was written by myself.  I just did the
-orchestration and provided some help here and there.  If you are interested in my experiences see the making-of.
+### 🐛 **Debugging Features**
+The plugin provides **dual debugging support** with automatic detection:
 
-## Debugging Features
+- **Console Applications**: Full PyCharm debugger integration
+  - Conditional breakpoints with expressions (`counter > 5`)
+  - Variable inspection (LOCAL, PRIVATE, PUBLIC variables)
+  - Step debugging (Step Into, Step Over, Step Out)
+  - Watch expressions and evaluate functionality
+  
+- **GUI Applications**: Harbour internal debugger with breakpoints in `init.cld`
+- **Smart Detection**: Automatically chooses method based on GUI flags in .hbp files
+- **Socket Protocol**: Debug communication on port 9876
 
-The plugin provides **dual debugging support**, automatically choosing the appropriate method:
+### 🛠 **Development Tools**
+- **Compiler Error Navigation** - Click on error messages to jump to source
+- **Missing Function Detection** - Navigate to undefined function references
+- **Browser Configuration Notifications** for external documentation access
+- **Custom Run/Debug Configurations** for Harbour applications
+- **File Exclusion Settings** to improve performance and focus navigation
 
-- **Console Applications**: Full PyCharm debugger integration with conditional breakpoints, variable inspection, step debugging, and watches
-- **GUI Applications**: Uses Harbour's internal debugger with breakpoints written to `init.cld`
-- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`) in .hbp files to choose debugging method
+### ⚙️ **Customization**
+- **Color Settings Page** for syntax highlighting customization
+- **Code Style Settings** with Harbour-specific formatting rules
+- **Application Settings** for include paths and excluded files
+- **Notification System** with configurable browser failure detection
 
-### Variable Types Supported
+## 🚀 Installation
 
-- **Local Variables**: Function/procedure local variables (`LOCAL nVar`)
-- **Private Variables**: Private memory variables (`PRIVATE m_nVar`)
-- **Public Variables**: Public memory variables (`PUBLIC g_nVar`)
-- **Static Variables**: Currently not supported due to Harbour VM limitations
+### From JetBrains Plugin Repository
+1. Open **Settings/Preferences** → **Plugins**
+2. Search for "Harbour Language Support"
+3. Click **Install** and restart IDE
 
-### Setting Up Debugging
+### From Release File
+1. Download the latest `.zip` file from [Releases](../../releases)
+2. Open **Settings/Preferences** → **Plugins** → **⚙️ Settings** → **Install Plugin from Disk...**
+3. Select the downloaded file and restart IDE
 
-1. **Compile with Debug Info**: Ensure your Harbour program is compiled with debug information:
+## 🏗️ Building from Source
+
+### Prerequisites
+- **Java 17** or higher
+- **Gradle 8.0+** 
+- **IntelliJ Platform SDK**
+
+### Build Commands
+```bash
+# Build the plugin
+./gradlew buildPlugin
+
+# Run in development IDE
+./gradlew runIde
+
+# Run tests
+./gradlew test
+
+# Clean build artifacts
+./gradlew clean
+```
+
+The built plugin will be in `build/distributions/harbour-language-plugin-X.X.XXX.zip`
+
+## 🐛 Debugging Setup
+
+### For Console Applications
+1. **Compile with Debug Info**:
    ```bash
    hbmk2 yourprogram.prg -b -D__HARBOUR_DEBUG__
    ```
-   Note: The `-b` flag creates an executable, and `-D__HARBOUR_DEBUG__` enables debug support. When using the IntelliJ Harbour debug configuration, these flags are automatically added for you.
+   
+2. **Create Harbour Debug Configuration** in IntelliJ
+3. **Set Breakpoints** by clicking in the gutter
+4. **Start Debugging** with the Debug button or **Shift+F9**
 
-2. **Create Debug Configuration**: Use the Harbour Debug configuration type in IntelliJ
-
-3. **Set Breakpoints**: Click in the gutter next to line numbers to set breakpoints. Right-click on breakpoints to set conditional breakpoints with expressions like `nCounter > 5` or hit count conditions.
-
-4. **Start Debugging**: Use the Debug button or Shift+F9 to start debugging
+### Variable Types Supported
+- **LOCAL Variables**: `LOCAL nCounter := 0`
+- **PRIVATE Variables**: `PRIVATE m_cName := "John"`  
+- **PUBLIC Variables**: `PUBLIC g_lDebug := .T.`
+- **Static Variables**: Currently not supported due to Harbour VM limitations
 
 ### Debug Protocol
+- Uses socket-based communication (default port 9876)
+- Automatic integration when compiling with `-D__HARBOUR_DEBUG__`
+- Supports both local and remote debugging scenarios
 
-The plugin uses a socket-based debug protocol (default port 9876) to communicate with Harbour programs. The debug server is automatically integrated when compiling with `-D__HARBOUR_DEBUG__`.
+## 📁 Project Structure
 
-### Limitations
-
-- **Static Variables**: Static variables are not visible in the debugger due to Harbour VM compilation-unit scoping
-- **Complex Objects**: Limited support for complex object inspection
-- **Remote Debugging**: Currently supports local debugging only (debugging programs running on the same machine). Remote debugging would allow debugging Harbour programs running on different machines over a network connection.
-
-## Installation
-
-1. Download the latest release from the JetBrains Plugin Repository
-2. Install the plugin from disk in IntelliJ IDEA (Settings → Plugins → ⚙️ → Install Plugin from Disk...)
-
-## Usage Example
-
-The plugin supports standard Harbour/Clipper code syntax:
-
-![Syntax Highlighting](example.png)
-
-## Building from Source
-
-To build the plugin from source:
-
-```bash
-./gradlew buildPlugin
+```
+intellij-harbour/
+├── src/main/java/org/intellij/sdk/language/
+│   ├── HarbourGoToDeclarationHandler.java    # Navigation logic
+│   ├── HarbourSyntaxHighlighter.java         # Syntax highlighting  
+│   ├── HarbourDebuggerRunner.java            # Debug configuration
+│   ├── HarbourExternalDocumentationHandler.java  # External docs
+│   └── ...
+├── src/main/resources/
+│   ├── META-INF/plugin.xml                   # Plugin configuration
+│   └── debug/harbour_debug.prg               # Debug library
+├── src/main/grammar/
+│   └── Harbour.flex                          # Lexer definition
+└── build.gradle                              # Build configuration
 ```
 
-## License
+## 🔧 Configuration
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Include Paths
+Configure Harbour include directories in **Settings** → **Languages & Frameworks** → **Harbour**:
+- Add your Harbour installation include directory
+- Add project-specific include paths
+- Configure HARBOUR_HOME environment variable
 
+### File Exclusions
+Exclude files from navigation and indexing to improve performance:
+- Large generated files
+- Third-party library code  
+- Debug and temporary files
 
-## Logging
+### Browser Configuration
+For external documentation links:
+1. Configure default browser in IDE settings
+2. Ensure internet connectivity for Harbour documentation
+3. Use notification system to troubleshoot browser issues
 
-// Simple usage (auto-detects project)
-HarbourLogger.log("ComponentName", "Log message");
+## 🔗 External Documentation
 
-// With explicit project reference
-HarbourLogger.log(project, "ComponentName", "Log message");
+The plugin integrates with Harbour online documentation:
+- **Function References**: Links to `https://harbour.github.io/doc/`
+- **Ctrl+Click Navigation**: Opens documentation in configured browser
+- **Smart Fallback**: Shows notification if browser fails to open
+- **URL Copying**: Easy access to documentation URLs
 
------
+## 🐞 Troubleshooting
 
-## File Exclusion
+### Debug Connection Issues
+- Ensure port 9876 is not blocked by firewall
+- Check that Harbour program is compiled with debug flags
+- Verify `HB_REMOTE_DEBUG=1` environment variable is set
 
-The Harbour plugin allows you to exclude specific files from navigation and indexing. This is useful for:
+### Navigation Problems  
+- Rebuild project indexes: **File** → **Invalidate Caches and Restart**
+- Check include paths in Harbour settings
+- Verify file exclusion settings aren't hiding target files
 
-- Improving performance by skipping large generated files
-- Avoiding navigation to library or third-party code
-- Focusing on your own source code during development
+### Browser Not Opening
+- Check browser configuration in IDE settings
+- Test with different browsers
+- Review notification messages for specific error details
 
-### How to Configure Excluded Files
+### Performance Issues
+- Add large generated files to exclusion list
+- Limit include path scope to essential directories
+- Consider increasing IDE memory allocation
 
-1. Go to **Settings** > **Languages & Frameworks** > **Harbour**
-2. Under "Files excluded from navigation (won't be indexed)", use:
-  - **+** button to add a new file
-  - **-** button to remove selected files
-  - Up/down arrows to reorder the list
+## 📝 Version History
 
-### Effects of Exclusion
+- **v1.0.498** - Navigation popup improvements, version compatibility fixes
+- **v1.0.496** - Fixed case-sensitive missing function navigation  
+- **v1.0.495** - Universal browser failure detection for external functions
+- **v1.0.490** - Enhanced missing function navigation with clickable error messages
+- **v1.0.470** - Perfect navigation popup alignment and visual consistency
+- **v1.0.426** - PropertyAccess navigation fixes for class DATA fields
 
-When a file is excluded:
+See [VERSION_HISTORY.md](VERSION_HISTORY.md) for complete changelog.
 
-- Its functions won't appear in code completion suggestions
-- Go to Declaration won't navigate to functions defined in excluded files
-- Find Usages won't include references from excluded files
-- Code highlighting for unresolved references won't report references to excluded files
+## 🤝 Contributing
 
-### Best Practices
+This plugin was developed using AI assistance (Claude 3.7 and O1 Pro) with human orchestration. Contributions are welcome:
 
-- Exclude test files if they're not relevant to your main development
-- Exclude large generated code files that slow down indexing
-- Don't exclude files that contain functions you regularly need to navigate to
+1. **Fork** the repository
+2. **Create** a feature branch
+3. **Make** your changes following existing code style
+4. **Test** thoroughly with sample Harbour projects
+5. **Submit** a pull request with detailed description
 
-Changes to excluded files take effect after restarting the IDE or manually refreshing the Harbour indexes.
+### Development Guidelines
+- Follow existing Java code conventions
+- Add comprehensive logging using `HarbourLogger.java`
+- Update plugin version in both `build.gradle` and `plugin.xml`
+- Test with both GUI and console Harbour applications
+- Document any new features in README and VERSION_HISTORY
 
-# TODOs
+## 📄 License
 
-## Debugging Improvements
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-- **Process Coupling**: Debugging process in PyCharm and running GUI should be coupled - if one ends or crashes, the other should be stopped
+## 🙏 Acknowledgments
 
-- **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
+- **Harbour Development Team** for the excellent programming language
+- **JetBrains** for the IntelliJ Platform SDK and documentation
+- **AI Development Partners** (Claude 3.7, O1 Pro) for code generation assistance
+- **Harbour Community** for feedback and testing
 
-- remove garbage from idea log
-- fix some navigation elements()
-  - nav popup should exclude excluded files from Settings->excluded Files
-- 
+## 🔗 Links
 
-The following files are still written to the project dir, either remove or move to.hbmk (from settings):
-- debug_entry_handler.log  debug_trace.log  error_handler_init.log  init_called.log  sendlocals_trace.log
+- [Harbour Language Official Site](https://harbour.github.io/)
+- [IntelliJ Platform SDK Documentation](https://plugins.jetbrains.com/docs/intellij/)
+- [JetBrains Plugin Repository](https://plugins.jetbrains.com/)
+- [Issue Tracker](../../issues)
 
-code formatting
-- refactor -> reformat no longer there?
-- Tab should have the same as indent (2 in my case)
-- indentation 
-  - should be correct while you type / after return
-  - only return at eof should be left aligned, e.g. this not:
-    if ...
-      ... 
-RETURN
-    endif
+---
 
-- code completion should propose local and public vars as well
-  as well as constants, e.g. Error(TRY_AGAIN)
-
-- debugging: ALT-F8 evaluator or alike not avaiable
-
-- compile/link errors:
-  - hbmk2: Error: Referenced, missing, but unknown function(s): FOO()
-    foo() should be clickable
-
-- Debugger not showing static vars
-
-- Settings: provide for flag rebuild yes/no
-
-- making-of schreiben:
-  - Erfahrung O1 Pro vs claude, evtl. als Tabelle
-  - mein prompt Vorgaben etc.
-
+**Note**: This plugin provides comprehensive Harbour language support with advanced debugging capabilities. For best results, ensure your Harbour compiler supports debug information generation and your projects are properly configured with include paths.

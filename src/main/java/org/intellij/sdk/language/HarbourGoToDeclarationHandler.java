@@ -743,6 +743,26 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             HarbourLogger.log(COMPONENT, "Navigation handler called - showing custom popup");
             ApplicationManager.getApplication().invokeLater(() -> {
                 List<PsiElement> targets = navigationElements.stream()
+                        .filter(e -> {
+                            // Filter out navigation elements that point to empty lines or comments
+                            if (e instanceof HarbourNavigationElement) {
+                                HarbourNavigationElement navElement = (HarbourNavigationElement) e;
+                                
+                                // Always keep separator elements
+                                if (navElement.isSeparator()) {
+                                    HarbourLogger.log(COMPONENT, "Keeping separator element");
+                                    return true;
+                                }
+                                
+                                String lineContent = navElement.readLineFromFile(navElement.getFilePath(), navElement.getLineNumber());
+                                if (lineContent == null) {
+                                    HarbourLogger.log(COMPONENT, "Filtered out navigation element at " + 
+                                            navElement.getFilePath() + ":" + navElement.getLineNumber() + " (empty/comment line)");
+                                    return false; // Filter out this element
+                                }
+                            }
+                            return true; // Keep this element
+                        })
                         .map(e -> (PsiElement) e)
                         .collect(Collectors.toList());
                 HarbourNavigationPopup.showNavigationPopup(targets, editor);

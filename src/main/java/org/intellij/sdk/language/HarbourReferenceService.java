@@ -537,7 +537,12 @@ public final class HarbourReferenceService {
         
         // Enhanced logging for debugging
         int lineNumber = getLineNumberFromOffset(fileText, offset);
-        boolean isComment = trimmedLine.startsWith("//") || trimmedLine.startsWith("/*");
+        
+        // Check for various comment patterns and empty lines
+        boolean isComment = trimmedLine.startsWith("//") || 
+                           trimmedLine.startsWith("/*") || 
+                           trimmedLine.startsWith("/**") ||
+                           trimmedLine.isEmpty();  // Exclude empty lines
         
         HarbourLogger.log("ReferenceService", "COMMENT CHECK: " + filename + " Line " + lineNumber + " at offset " + offset + 
                 " -> isComment=" + isComment + " -> Content: '" + trimmedLine + "'");
