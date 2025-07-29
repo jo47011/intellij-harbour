@@ -249,6 +249,94 @@ public final class HarbourReferenceService {
     }
 
     /**
+     * Find DATA fields in a given class.
+     *
+     * @param className The name of the class  
+     * @param fieldName The name of the DATA field
+     * @return A list of PSI elements for the DATA field declarations
+     */
+    public List<PsiElement> findDataFields(String className, String fieldName) {
+        HarbourLogger.log("ReferenceService", "Searching for DATA field: " + fieldName + " in class: " + className);
+        
+        if (className == null || className.isEmpty() || fieldName == null || fieldName.isEmpty()) {
+            return Collections.emptyList();
+        }
+        
+        List<PsiElement> result = new ArrayList<>();
+        
+        // Get class declarations first
+        List<PsiElement> classDeclarations = findClasses(className);
+        HarbourLogger.log("ReferenceService", "Found " + classDeclarations.size() + " class declarations for: " + className);
+        
+        // Search for DATA fields in each class file
+        for (PsiElement classDecl : classDeclarations) {
+            PsiFile containingFile = classDecl.getContainingFile();
+            if (containingFile == null) continue;
+            
+            // Search for DATA fieldName patterns in the file
+            String fileText = containingFile.getText();
+            if (fileText == null) continue;
+            
+            // Look for DATA fieldName pattern
+            String[] lines = fileText.split("\n");
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i].trim();
+                
+                // Match patterns like:
+                // DATA fieldName
+                // DATA fieldName INIT value
+                // DATA fieldName READONLY
+                if (line.toUpperCase().startsWith("DATA ")) {
+                    String dataLine = line.substring(5).trim(); // Remove "DATA "
+                    
+                    // Extract the field name (first word after DATA)
+                    String[] parts = dataLine.split("\\s+");
+                    if (parts.length > 0 && parts[0].equalsIgnoreCase(fieldName)) {
+                        // Found a matching DATA field
+                        // Try to find the exact PSI element
+                        int lineStartOffset = getLineStartOffset(fileText, i);
+                        PsiElement element = containingFile.findElementAt(lineStartOffset + line.indexOf(fieldName));
+                        
+                        if (element != null) {
+                            // Get the identifier element
+                            while (element != null && !(element instanceof LeafPsiElement && 
+                                   ((LeafPsiElement)element).getElementType() == HarbourTypes.IDENT &&
+                                   element.getText().equalsIgnoreCase(fieldName))) {
+                                element = element.getNextSibling();
+                            }
+                            
+                            if (element != null) {
+                                HarbourLogger.log("ReferenceService", "Found DATA field: " + fieldName + " at line " + (i + 1));
+                                result.add(element);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        HarbourLogger.log("ReferenceService", "Found " + result.size() + " DATA field declarations for: " + className + ":" + fieldName);
+        return result;
+    }
+    
+    /**
+     * Calculate the offset of the start of a line
+     */
+    private int getLineStartOffset(String text, int lineNumber) {
+        int offset = 0;
+        int currentLine = 0;
+        
+        for (int i = 0; i < text.length() && currentLine < lineNumber; i++) {
+            if (text.charAt(i) == '\n') {
+                currentLine++;
+                offset = i + 1;
+            }
+        }
+        
+        return offset;
+    }
+
+    /**
      * Find all methods of a specific class or related to a class name.
      *
      * @param className The name of the class
@@ -264,6 +352,7 @@ public final class HarbourReferenceService {
         }
 
         List<PsiElement> result = new ArrayList<>();
+        Set<PsiFile> classFiles = new HashSet<>();
 
         // Get class declarations first
         List<PsiElement> classDeclarations = findClasses(className);
@@ -272,6 +361,17 @@ public final class HarbourReferenceService {
 
         // If we have class declarations, look for methods within them
         for (PsiElement classDecl : classDeclarations) {
+            // Handle both ClassDeclaration and raw elements
+            PsiFile containingFile = classDecl.getContainingFile();
+            if (containingFile == null) {
+                continue;
+            }
+            
+            // Add the file to search for methods
+            if (containingFile instanceof HarbourFile) {
+                classFiles.add(containingFile);
+            }
+            
             if (classDecl instanceof ClassDeclaration) {
                 ClassDeclaration declaration = (ClassDeclaration) classDecl;
                 // Scan for METHOD declarations within the class
@@ -285,6 +385,14 @@ public final class HarbourReferenceService {
                 Matcher matcher = methodPattern.matcher(classText);
                 while (matcher.find()) {
                     int offset = matcher.start() + classDecl.getTextOffset();
+                    
+                    // Skip if this match is inside a comment
+                    String fullFileText = classDecl.getContainingFile().getText();
+                    if (isLineComment(fullFileText, offset, classDecl.getContainingFile().getName())) {
+                        HarbourLogger.log("ReferenceService", "Skipping method match in class declaration inside comment at offset " + offset);
+                        continue;
+                    }
+                    
                     PsiElement methodElement = classDecl.getContainingFile().findElementAt(offset);
 
                     if (methodElement != null) {
@@ -296,26 +404,28 @@ public final class HarbourReferenceService {
         }
 
         // Also search in the files containing these class declarations
-        Set<PsiFile> classFiles = new HashSet<>();
-        for (PsiElement classDecl : classDeclarations) {
-            PsiFile file = classDecl.getContainingFile();
-            if (file != null && file instanceof HarbourFile) {
-                classFiles.add(file);
-            }
-        }
-
         for (PsiFile file : classFiles) {
-            // Look for methods with this name in the same file as the class
-            Collection<HarbourFunctionDeclaration> functionDeclarations =
-                    PsiTreeUtil.findChildrenOfType(file, HarbourFunctionDeclaration.class);
-
-            for (HarbourFunctionDeclaration decl : functionDeclarations) {
-                // Check if this is a method declaration for our class and method
-                String declText = decl.getText().toUpperCase();
-                if (declText.contains("METHOD") && declText.contains(className.toUpperCase()) &&
-                        (methodName == null || declText.contains(methodName.toUpperCase()))) {
-                    result.add(decl);
-                    HarbourLogger.log("ReferenceService", "Found method declaration in file for class " + className);
+            // Direct text search for METHOD declarations in the file
+            String fileText = file.getText();
+            Pattern methodPattern = methodName != null
+                    ? Pattern.compile("(?i)\\bMETHOD\\s+" + Pattern.quote(methodName) + "\\b")
+                    : Pattern.compile("(?i)\\bMETHOD\\s+\\w+");
+            
+            Matcher matcher = methodPattern.matcher(fileText);
+            while (matcher.find()) {
+                int offset = matcher.start();
+                
+                // Skip if this match is inside a comment
+                if (isLineComment(fileText, offset, file.getName())) {
+                    HarbourLogger.log("ReferenceService", "Skipping method match inside comment at offset " + offset);
+                    continue;
+                }
+                
+                PsiElement methodElement = file.findElementAt(offset);
+                
+                if (methodElement != null) {
+                    result.add(methodElement);
+                    HarbourLogger.log("ReferenceService", "Found method declaration in file for class " + className + " at offset " + offset);
                 }
             }
         }
@@ -356,6 +466,13 @@ public final class HarbourReferenceService {
                 Matcher matcher1 = pattern1.matcher(fileText);
                 while (matcher1.find()) {
                     int offset = matcher1.start();
+                    
+                    // Skip if this match is inside a comment
+                    if (isLineComment(fileText, offset, virtualFile.getName())) {
+                        HarbourLogger.log("ReferenceService", "Skipping method pattern1 match inside comment at offset " + offset);
+                        continue;
+                    }
+                    
                     PsiElement element = psiFile.findElementAt(offset);
                     if (element != null) {
                         directResults.add(element);
@@ -368,6 +485,13 @@ public final class HarbourReferenceService {
                 Matcher matcher2 = pattern2.matcher(fileText);
                 while (matcher2.find()) {
                     int offset = matcher2.start();
+                    
+                    // Skip if this match is inside a comment
+                    if (isLineComment(fileText, offset, virtualFile.getName())) {
+                        HarbourLogger.log("ReferenceService", "Skipping method pattern2 match inside comment at offset " + offset);
+                        continue;
+                    }
+                    
                     PsiElement element = psiFile.findElementAt(offset);
                     if (element != null) {
                         directResults.add(element);
@@ -386,6 +510,49 @@ public final class HarbourReferenceService {
 
         HarbourLogger.log("ReferenceService", "Found " + result.size() + " methods for class: " + className);
         return result;
+    }
+
+    /**
+     * Check if a given offset position is inside a comment
+     */
+    private boolean isLineComment(String fileText, int offset, String filename) {
+        if (fileText == null || offset < 0 || offset >= fileText.length()) {
+            return false;
+        }
+        
+        // Find the start of the line containing this offset
+        int lineStart = offset;
+        while (lineStart > 0 && fileText.charAt(lineStart - 1) != '\n') {
+            lineStart--;
+        }
+        
+        // Find the end of the line
+        int lineEnd = offset;
+        while (lineEnd < fileText.length() && fileText.charAt(lineEnd) != '\n') {
+            lineEnd++;
+        }
+        
+        String line = fileText.substring(lineStart, lineEnd);
+        String trimmedLine = line.trim();
+        
+        // Enhanced logging for debugging
+        int lineNumber = getLineNumberFromOffset(fileText, offset);
+        boolean isComment = trimmedLine.startsWith("//") || trimmedLine.startsWith("/*");
+        
+        HarbourLogger.log("ReferenceService", "COMMENT CHECK: " + filename + " Line " + lineNumber + " at offset " + offset + 
+                " -> isComment=" + isComment + " -> Content: '" + trimmedLine + "'");
+        
+        return isComment;
+    }
+    
+    private int getLineNumberFromOffset(String fileContent, int offset) {
+        int lineNumber = 1;
+        for (int i = 0; i < Math.min(offset, fileContent.length()); i++) {
+            if (fileContent.charAt(i) == '\n') {
+                lineNumber++;
+            }
+        }
+        return lineNumber;
     }
 
     /**
@@ -442,6 +609,23 @@ public final class HarbourReferenceService {
                     Matcher declarationMatcher = functionPattern.matcher(fileContent);
                     while (declarationMatcher.find()) {
                         int startOffset = declarationMatcher.start();
+                        String matchedText = declarationMatcher.group();
+                        int lineNumber = getLineNumberFromOffset(fileContent, startOffset);
+                        
+                        // Special debugging for user.prg line 136
+                        if (virtualFile.getPath().contains("user.prg") && lineNumber == 136) {
+                            HarbourLogger.log("ReferenceService", "DEBUG DECLARATION: Found match '" + matchedText + "' at offset " + startOffset + " line " + lineNumber + " in user.prg");
+                        }
+                        
+                        // Skip if this match is inside a comment
+                        int lineNum = getLineNumberFromOffset(fileContent, startOffset);
+                        if (virtualFile.getPath().contains("user.prg") && lineNum == 136) {
+                            HarbourLogger.log("ReferenceService", "DEBUG: Checking line 136 in user.prg at offset " + startOffset);
+                        }
+                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                            continue;
+                        }
+                        
                         PsiElement element = psiFile.findElementAt(startOffset);
 
                         if (element != null) {
@@ -467,6 +651,19 @@ public final class HarbourReferenceService {
                     Matcher callMatcher = callPattern.matcher(fileContent);
                     while (callMatcher.find()) {
                         int startOffset = callMatcher.start();
+                        String matchedText = callMatcher.group();
+                        int lineNumber = getLineNumberFromOffset(fileContent, startOffset);
+                        
+                        // Special debugging for user.prg line 136
+                        if (virtualFile.getPath().contains("user.prg") && lineNumber == 136) {
+                            HarbourLogger.log("ReferenceService", "DEBUG CALL: Found match '" + matchedText + "' at offset " + startOffset + " line " + lineNumber + " in user.prg");
+                        }
+                        
+                        // Skip if this match is inside a comment
+                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                            continue;
+                        }
+                        
                         PsiElement element = psiFile.findElementAt(startOffset);
 
                         if (element != null && element.getText().equalsIgnoreCase(identifierName)) {
@@ -487,6 +684,19 @@ public final class HarbourReferenceService {
                 Matcher identMatcher = identifierPattern.matcher(fileContent);
                 while (identMatcher.find()) {
                     int startOffset = identMatcher.start();
+                    String matchedText = identMatcher.group();
+                    int lineNumber = getLineNumberFromOffset(fileContent, startOffset);
+                    
+                    // Special debugging for user.prg line 136
+                    if (virtualFile.getPath().contains("user.prg") && lineNumber == 136) {
+                        HarbourLogger.log("ReferenceService", "DEBUG: Found match '" + matchedText + "' at offset " + startOffset + " line " + lineNumber + " in user.prg");
+                    }
+                    
+                    // Skip if this match is inside a comment
+                    if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                        continue;
+                    }
+                    
                     PsiElement element = psiFile.findElementAt(startOffset);
 
                     if (element != null) {
@@ -555,6 +765,12 @@ public final class HarbourReferenceService {
                 Matcher declarationMatcher = classPattern.matcher(fileContent);
                 while (declarationMatcher.find()) {
                     int startOffset = declarationMatcher.start();
+                    
+                    // Skip if match is inside comment
+                    if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                        continue;
+                    }
+                    
                     PsiElement element = psiFile.findElementAt(startOffset);
 
                     if (element != null) {
@@ -651,6 +867,12 @@ public final class HarbourReferenceService {
                     int methodPos = matchText.toUpperCase().lastIndexOf("METHOD " + methodName.toUpperCase());
                     if (methodPos >= 0) {
                         int startOffset = classBlockMatcher.start() + methodPos;
+                        
+                        // Skip if match is inside comment
+                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                            continue;
+                        }
+                        
                         PsiElement element = psiFile.findElementAt(startOffset);
 
                         if (element != null && element.getText().equalsIgnoreCase("METHOD")) {
@@ -682,6 +904,12 @@ public final class HarbourReferenceService {
                     Matcher declarationMatcher = methodPattern.matcher(fileContent);
                     while (declarationMatcher.find()) {
                         int startOffset = declarationMatcher.start();
+                        
+                        // Skip if match is inside comment
+                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                            continue;
+                        }
+                        
                         PsiElement element = psiFile.findElementAt(startOffset);
 
                         if (element != null && element.getText().equalsIgnoreCase("METHOD")) {
@@ -709,6 +937,12 @@ public final class HarbourReferenceService {
                     declarationMatcher = methodPattern2.matcher(fileContent);
                     while (declarationMatcher.find()) {
                         int startOffset = declarationMatcher.start();
+                        
+                        // Skip if match is inside comment
+                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
+                            continue;
+                        }
+                        
                         PsiElement element = psiFile.findElementAt(startOffset);
 
                         if (element != null && element.getText().equalsIgnoreCase("METHOD")) {
@@ -1039,16 +1273,6 @@ public final class HarbourReferenceService {
                 }
             });
 
-            // Pre-index some common functions in the background
-            ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                ReadAction.run(() -> {
-                    // Index some commonly used functions
-                    service.findFunctions("print");
-                    service.findFunctions("transform");
-                    service.findFunctions("eval");
-                    service.findFunctions("val");
-                });
-            });
         }
     }
 }

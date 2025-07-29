@@ -14,6 +14,7 @@ A plugin for IntelliJ IDEA that provides support for the Harbour/Clipper program
 - Structure view
 - Code formatting
 - [Debugging](#debugging-features)
+- Enhanced navigation popup with syntax highlighting
 
 ## Introduction
 
@@ -130,34 +131,20 @@ Changes to excluded files take effect after restarting the IDE or manually refre
 
 ## Debugging Improvements
 
-- **GUI Debugging Integration**: Integrate GUI debugging directly into IntelliJ (currently uses Harbour's internal debugger)
-- **Enhanced Breakpoint Sync**: Real-time updates between IntelliJ breakpoints and init.cld file
-
 - **Process Coupling**: Debugging process in PyCharm and running GUI should be coupled - if one ends or crashes, the other should be stopped
-- **Breakpoint Controls**: Fix mute breakpoints functionality - not currently working
-- **Cross-Platform Path Handling**: Fix Windows path display issues in config edit (should show backslashes instead of forward slashes)
-- **Debugging Test Coverage**: Test debugging in 4 scenarios:
-  1. Unix with GUI
-  2. Unix without GUI (console only)
-  3. Windows with GUI  
-  4. Windows without GUI (console only)
-
-## Language Features
 
 - **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
 
-- navigation
-  - should be correct while you type / after return
-  - LOCAL oB := BClass():New(oA) clicking on new should go to the correct new() method / show popup
-
 - remove garbage from idea log
+- fix some navigation elements()
+  - nav popup should exclude excluded files from Settings->excluded Files
+- 
 
-- navigation
-  - LOCAL oB := BClass():New(oA) clicking on new should go to the correct new() method / show popup
-  - LOCAL GetList:={}, dateiName, shift := 0, gbsArt, anz_ls := 1
-    not working
-  - pre-index so navigation becomes quicker
-  
+The following files are still written to the project dir, either remove or move to.hbmk (from settings):
+- debug_entry_handler.log  debug_trace.log  error_handler_init.log  init_called.log  sendlocals_trace.log
+
+code formatting
+- refactor -> reformat no longer there?
 - Tab should have the same as indent (2 in my case)
 - indentation 
   - should be correct while you type / after return
@@ -168,17 +155,17 @@ RETURN
     endif
 
 - code completion should propose local and public vars as well
+  as well as constants, e.g. Error(TRY_AGAIN)
+
+- debugging: ALT-F8 evaluator or alike not avaiable
 
 - compile/link errors:
   - hbmk2: Error: Referenced, missing, but unknown function(s): FOO()
     foo() should be clickable
 
-- remove garbage from idea log
-
-- external functions are no longer recognized as such -> no external link opened
-
 - Debugger not showing static vars
 
+- Settings: provide for flag rebuild yes/no
 
 - making-of schreiben:
   - Erfahrung O1 Pro vs claude, evtl. als Tabelle

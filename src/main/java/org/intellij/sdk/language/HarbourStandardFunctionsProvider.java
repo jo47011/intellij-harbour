@@ -10,118 +10,36 @@ import com.intellij.psi.PsiFileFactory;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Provider for standard Harbour functions.
- * Creates virtual declarations for standard functions to enable reference resolution.
+ * Provider for Harbour functions.
+ * Creates virtual declarations for external functions to enable reference resolution.
+ * Uses dynamic classification to distinguish between internal and external functions.
  */
 public class HarbourStandardFunctionsProvider {
     private static final Logger LOG = Logger.getInstance(HarbourStandardFunctionsProvider.class);
-    private static final Set<String> STANDARD_FUNCTIONS = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
     private static final Map<String, PsiElement> FUNCTION_DECLARATIONS = new HashMap<>();
     private static boolean initialized = false;
 
     /**
-     * Get all standard functions as a set.
-     * @return Set of all standard function names
+     * Get all external functions as a set.
+     * @return Set of all external function names that have been encountered
      */
     public static Set<String> getAllStandardFunctions() {
-        return new TreeSet<>(STANDARD_FUNCTIONS);
+        // Return the keys of function declarations that have been created
+        Set<String> externalFunctions = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        externalFunctions.addAll(FUNCTION_DECLARATIONS.keySet());
+        return externalFunctions;
     }
 
-    // Initialize with common Harbour/Clipper functions
-    static {
-        // String functions
-        STANDARD_FUNCTIONS.add("upper");
-        STANDARD_FUNCTIONS.add("lower");
-        STANDARD_FUNCTIONS.add("alltrim");
-        STANDARD_FUNCTIONS.add("ltrim");
-        STANDARD_FUNCTIONS.add("rtrim");
-        STANDARD_FUNCTIONS.add("substr");
-        STANDARD_FUNCTIONS.add("left");
-        STANDARD_FUNCTIONS.add("right");
-        STANDARD_FUNCTIONS.add("str");
-        STANDARD_FUNCTIONS.add("chr");
-        STANDARD_FUNCTIONS.add("asc");
-        STANDARD_FUNCTIONS.add("at");
-        STANDARD_FUNCTIONS.add("strtran");
-
-        // Database functions
-        STANDARD_FUNCTIONS.add("dbUseArea");
-        STANDARD_FUNCTIONS.add("dbSeek");
-        STANDARD_FUNCTIONS.add("dbGoTop");
-        STANDARD_FUNCTIONS.add("dbGoBottom");
-        STANDARD_FUNCTIONS.add("dbSkip");
-        STANDARD_FUNCTIONS.add("dbCloseArea");
-        STANDARD_FUNCTIONS.add("dbSetIndex");
-        STANDARD_FUNCTIONS.add("dbSetOrder");
-        STANDARD_FUNCTIONS.add("dbAppend");
-        STANDARD_FUNCTIONS.add("dbDelete");
-        STANDARD_FUNCTIONS.add("dbRecall");
-        STANDARD_FUNCTIONS.add("dbCommit");
-
-        // File functions
-        STANDARD_FUNCTIONS.add("fopen");
-        STANDARD_FUNCTIONS.add("fclose");
-        STANDARD_FUNCTIONS.add("fread");
-        STANDARD_FUNCTIONS.add("fwrite");
-        STANDARD_FUNCTIONS.add("ferror");
-        STANDARD_FUNCTIONS.add("directory");
-
-        // UI/Terminal functions
-        STANDARD_FUNCTIONS.add("cls");
-        STANDARD_FUNCTIONS.add("setpos");
-        STANDARD_FUNCTIONS.add("devout");
-        STANDARD_FUNCTIONS.add("qout");
-        STANDARD_FUNCTIONS.add("qqout");
-        STANDARD_FUNCTIONS.add("setcolor");
-        STANDARD_FUNCTIONS.add("inkey");
-
-        // Type functions
-        STANDARD_FUNCTIONS.add("valtype");
-        STANDARD_FUNCTIONS.add("type");
-        STANDARD_FUNCTIONS.add("empty");
-
-        // Math functions
-        STANDARD_FUNCTIONS.add("abs");
-        STANDARD_FUNCTIONS.add("int");
-        STANDARD_FUNCTIONS.add("round");
-        STANDARD_FUNCTIONS.add("sqrt");
-
-        // Date functions
-        STANDARD_FUNCTIONS.add("date");
-        STANDARD_FUNCTIONS.add("time");
-        STANDARD_FUNCTIONS.add("ctod");
-        STANDARD_FUNCTIONS.add("dtoc");
-        STANDARD_FUNCTIONS.add("day");
-        STANDARD_FUNCTIONS.add("month");
-        STANDARD_FUNCTIONS.add("year");
-        STANDARD_FUNCTIONS.add("dow");
-
-        // Array functions
-        STANDARD_FUNCTIONS.add("aadd");
-        STANDARD_FUNCTIONS.add("adel");
-        STANDARD_FUNCTIONS.add("asize");
-        STANDARD_FUNCTIONS.add("asort");
-        STANDARD_FUNCTIONS.add("ains");
-        STANDARD_FUNCTIONS.add("aeval");
-        STANDARD_FUNCTIONS.add("len");
-
-        // Common application functions used in the logs
-        STANDARD_FUNCTIONS.add("disp");
-        STANDARD_FUNCTIONS.add("message");
-    }
+    // No hardcoded functions - use dynamic classification
 
     /**
-     * Initialize the provider by loading the standard function list.
+     * Initialize the provider.
      * This must be called from a background thread or with proper read action.
      */
     public static void initialize(Project project) {
@@ -129,44 +47,12 @@ public class HarbourStandardFunctionsProvider {
             return;
         }
 
-        LOG.info("Initializing standard Harbour functions provider");
-
-        try {
-            // Try loading additional functions from a resource file
-            InputStream stream = HarbourStandardFunctionsProvider.class.getResourceAsStream("/harbour_functions.txt");
-            if (stream != null) {
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        line = line.trim();
-                        if (!line.isEmpty() && !line.startsWith("#")) {
-                            STANDARD_FUNCTIONS.add(line);
-                        }
-                    }
-                }
-            }
-        } catch (IOException e) {
-            LOG.warn("Could not load additional Harbour functions", e);
-        }
-
-        LOG.info("Loaded " + STANDARD_FUNCTIONS.size() + " standard Harbour functions");
-
-        // Schedule creation of function declarations to happen in a read action
-        ApplicationManager.getApplication().invokeLater(() -> {
-            ReadAction.run(() -> {
-                // Create virtual declarations for standard functions
-                for (String funcName : STANDARD_FUNCTIONS) {
-                    try {
-                        createStandardFunctionDeclaration(funcName, project);
-                    } catch (Exception e) {
-                        LOG.error("Error creating standard function declaration for " + funcName, e);
-                    }
-                }
-                LOG.info("Created declarations for standard Harbour functions");
-            });
-        });
-
+        LOG.info("Initializing Harbour functions provider (using dynamic classification)");
+        
+        // No hardcoded functions to initialize - everything is dynamic now
         initialized = true;
+        
+        LOG.info("Harbour functions provider initialized with dynamic classification");
     }
 
     /**
@@ -208,10 +94,21 @@ public class HarbourStandardFunctionsProvider {
     }
 
     /**
-     * Check if a function is a standard Harbour function.
+     * Check if a function is an external Harbour function (not declared in the project).
+     * This method now uses dynamic classification instead of hardcoded function lists.
      */
     public static boolean isStandardFunction(@NotNull String functionName) {
-        return STANDARD_FUNCTIONS.contains(functionName);
+        // For backward compatibility, we need to determine this dynamically
+        // Try to get the project from any open project (this is a limitation of the static method)
+        for (Project openProject : com.intellij.openapi.project.ProjectManager.getInstance().getOpenProjects()) {
+            HarbourFunctionClassificationService classificationService = 
+                HarbourFunctionClassificationService.getInstance(openProject);
+            if (classificationService.isInitialized()) {
+                return classificationService.isExternalFunction(functionName);
+            }
+        }
+        // If no project available or not initialized, assume external for safety
+        return true;
     }
 
     /**
@@ -251,15 +148,13 @@ public class HarbourStandardFunctionsProvider {
     }
 
     /**
-     * Add a function to the standard functions list.
+     * Add a function as an external function by creating a virtual declaration.
+     * This is used when we encounter a function call that is not defined internally.
      */
     public static void addStandardFunction(@NotNull String functionName, Project project) {
-        // Create a final copy for use in the lambda
         final String lowerName = functionName.toLowerCase();
 
-        if (!STANDARD_FUNCTIONS.contains(lowerName)) {
-            STANDARD_FUNCTIONS.add(lowerName);
-
+        if (!FUNCTION_DECLARATIONS.containsKey(lowerName)) {
             // Add declaration in a read action
             ApplicationManager.getApplication().invokeLater(() -> {
                 ReadAction.run(() -> {

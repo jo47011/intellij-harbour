@@ -24,17 +24,13 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
 
     @Override
     public void mouseClicked(EditorMouseEvent event) {
-        if (event.getMouseEvent().isControlDown()) {
-            HarbourLogger.logImportant(COMPONENT, "Ctrl+Click detected - setting click mode");
-            lastClickTime = System.currentTimeMillis();
-            HarbourExternalDocumentationHandler.setClickMode(true);
-        }
+        // No action needed - we only handle mousePressed to avoid double-triggering
     }
 
     @Override
     public void mousePressed(EditorMouseEvent event) {
         if (event.getMouseEvent().isControlDown()) {
-            HarbourLogger.logImportant(COMPONENT, "Ctrl+Press detected - setting click mode");
+            HarbourLogger.log(COMPONENT, "Ctrl+Press detected - setting click mode");
             lastClickTime = System.currentTimeMillis();
             HarbourExternalDocumentationHandler.setClickMode(true);
         }

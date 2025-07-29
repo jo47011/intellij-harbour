@@ -127,17 +127,11 @@ public class HarbourClassMethodReferenceContributor extends PsiReferenceContribu
             }
         }
 
-        // Special check for common patterns like User():new(...)
-        // This additional check helps with cases where the normal PSI traversal might miss
-        if (methodName.equals("new") || methodName.equals("create") ||
-                methodName.equals("init") || methodName.equals("setup")) {
-
-            // Check if preceded by a colon and function call
-            String beforeMethod = lineText.substring(0, pos).trim();
-            if (beforeMethod.endsWith(":") && beforeMethod.contains("(") && beforeMethod.contains(")")) {
-                HarbourLogger.log("ClassMethodReferenceContributor", "Found special class method pattern for: " + methodName);
-                return true;
-            }
+        // Generic check: any method after colon and parentheses pattern
+        String beforeMethod = lineText.substring(0, pos).trim();
+        if (beforeMethod.endsWith(":") && beforeMethod.contains("(") && beforeMethod.contains(")")) {
+            HarbourLogger.log("ClassMethodReferenceContributor", "Found class method pattern for: " + methodName);
+            return true;
         }
 
         return false;

@@ -46,7 +46,6 @@
         <psi.referenceContributor language="Harbour" implementation="org.intellij.sdk.language.HarbourDirectIncludeReferenceContributor"/>
 
         <!-- Annotators -->
-        <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFunctionCallAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourIncludeAnnotator"/>
 
@@ -55,7 +54,8 @@
                                       implementationClass="org.intellij.sdk.language.HarbourStructureViewFactory"/>
 
         <!-- Go to Declaration -->
-        <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourGoToDeclarationHandler"/>
+        <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourGoToDeclarationHandler" order="first"/>
+        <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourExternalDocumentationHandler" order="last"/>
 
         <!-- Documentation Provider -->
         <lang.documentationProvider language="Harbour"
@@ -66,6 +66,13 @@
         
         <!-- Breakpoint Properties Storage Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
+        
+        <!-- Function Classification Service -->
+        <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
+        
+        <!-- Startup Activities -->
+        <startupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
+        <startupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"
@@ -78,7 +85,7 @@
         <xdebugger.breakpointType implementation="org.intellij.sdk.language.HarbourDebuggerLineBreakpointType"/>
         
         <!-- Windows-specific registration fix -->
-        <postStartupActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerRegistration"/>
+        <projectActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerRegistration"/>
         
         
         <!-- Formatting -->
