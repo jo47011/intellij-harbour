@@ -424,19 +424,15 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         HarbourLogger.log("DocHandler", "Browser check - has browsers: " + hasBrowsers + 
                          ", active browsers: " + browserManager.getActiveBrowsers().size());
         
-        // For testing purposes - show notification for common external functions to test the system
-        if (functionName.equalsIgnoreCase("chr") || functionName.equalsIgnoreCase("str") || 
-            functionName.equalsIgnoreCase("substr") || functionName.equalsIgnoreCase("len")) {
-            HarbourLogger.log("DocHandler", "Testing notification for external function: " + functionName);
-            showBrowserConfigurationNotification(project, functionName, docUrl, "Browser configuration test");
-            return;
-        }
-        
+        // Show notification if no browsers configured
         if (!hasBrowsers) {
-            HarbourLogger.log("DocHandler", "No browsers configured, showing configuration notification");
+            HarbourLogger.log("DocHandler", "No browsers configured, showing notification for external function: " + functionName);
             showBrowserConfigurationNotification(project, functionName, docUrl, "No browsers configured");
             return;
         }
+        
+        boolean browserLaunchFailed = false;
+        String errorMessage = null;
         
         try {
             // Add platform-specific logging
@@ -450,12 +446,17 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             
             HarbourLogger.log("DocHandler", "BrowserUtil.browse() called successfully for: " + docUrl);
         } catch (Exception e) {
-            HarbourLogger.log("DocHandler", "ERROR opening browser: " + e.getMessage());
+            browserLaunchFailed = true;
+            errorMessage = e.getMessage();
+            HarbourLogger.log("DocHandler", "ERROR opening browser: " + errorMessage);
             HarbourLogger.log("DocHandler", "Exception stack trace: " + java.util.Arrays.toString(e.getStackTrace()));
-            
-            // Show user-friendly notification about browser configuration
-            showBrowserConfigurationNotification(project, functionName, docUrl, e.getMessage());
         }
+        
+        // Always show notification for ALL external functions to test if it works
+        // This catches cases where BrowserUtil.browse() doesn't throw exception but browser still fails
+        HarbourLogger.log("DocHandler", "Showing notification for all external functions for testing: " + functionName);
+        String message = errorMessage != null ? errorMessage : "Browser configuration test - please verify browser opens correctly";
+        showBrowserConfigurationNotification(project, functionName, docUrl, message);
     }
     
     /**
