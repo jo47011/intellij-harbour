@@ -243,9 +243,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Check for class start/end
+            boolean isEndClassStatement = CLASS_END_PATTERN.matcher(line).matches();
             if (CLASS_START_PATTERN.matcher(line).matches()) {
                 inClassDefinition = true;
-            } else if (CLASS_END_PATTERN.matcher(line).matches()) {
+            } else if (isEndClassStatement) {
                 inClassDefinition = false;
             }
 
@@ -299,8 +300,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     lowerLine.startsWith("endcase") ||
                     lowerLine.startsWith("next");
 
-            // Additional block end check for endswitch
-            if (isEndSwitchStatement) {
+            // Additional block end check for endswitch and endclass
+            if (isEndSwitchStatement || isEndClassStatement) {
                 isBlockEnd = true;
             }
 
@@ -344,6 +345,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
                 // Using continuation indentation for line line
+            } else if (isEndClassStatement) {
+                // ENDCLASS should never be indented
+                newIndent = "";
             } else if (customIndentSpaces >= 0) {
                 // Use custom indentation for specific statement types
                 newIndent = " ".repeat(customIndentSpaces);
