@@ -70,11 +70,12 @@ public class HarbourWrappingAndBracesPanel extends CodeStyleAbstractPanel {
         commonSettings.RIGHT_MARGIN = (Integer) myRightMarginSpinner.getValue();
         commonSettings.WRAP_ON_TYPING = myWrapOnTypingCheckBox.isSelected() ? CommonCodeStyleSettings.WrapOnTyping.WRAP.intValue : CommonCodeStyleSettings.WrapOnTyping.NO_WRAP.intValue;
         
-        // Handle visual guide
-        settings.getDefaultSoftMargins().clear();
+        // Handle visual guide - create a new list instead of modifying the existing one
         int visualGuide = (Integer) myVisualGuideSpinner.getValue();
         if (visualGuide > 0) {
-            settings.getDefaultSoftMargins().add(visualGuide);
+            settings.setDefaultSoftMargins(java.util.Arrays.asList(visualGuide));
+        } else {
+            settings.setDefaultSoftMargins(java.util.Collections.emptyList());
         }
     }
     

@@ -35,6 +35,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             Pattern.compile("^\\s*DATA\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern METHOD_DECLARATION_PATTERN =
             Pattern.compile("^\\s*METHOD\\s+\\w+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern METHOD_IMPLEMENTATION_PATTERN =
+            Pattern.compile("^\\s*METHOD\\s+\\w+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CLASS_START_PATTERN =
+            Pattern.compile("^\\s*CLASS\\s+\\w+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CLASS_END_PATTERN =
+            Pattern.compile("^\\s*ENDCLASS.*$", Pattern.CASE_INSENSITIVE);
 
     // Patterns for detecting string continuations
     private static final Pattern STRING_CONTINUATION_PATTERN =
@@ -54,7 +60,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
     // Pattern for detecting comment-only lines
     private static final Pattern COMMENT_LINE_PATTERN =
-            Pattern.compile("^\\s*(?://.*|/\\*.*\\*/\\s*)$");
+            Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
 
     @Override
     public @NotNull PsiElement processElement(@NotNull PsiElement element, @NotNull CodeStyleSettings settings) {
@@ -165,6 +171,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int indentLevel = 0;
         boolean inFunctionBody = false;
         boolean inSwitchBlock = false;
+        boolean inClassDefinition = false;
         int indentSize = 2; // Default indentation size for Harbour
         
         // Get custom indentation settings
@@ -226,11 +233,22 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Check for function/procedure start
             Matcher functionStartMatcher = FUNCTION_START_PATTERN.matcher(line);
-            if (functionStartMatcher.matches()) {
-                // Found function/procedure start
+            boolean isMethodImplementation = METHOD_IMPLEMENTATION_PATTERN.matcher(line).matches();
+            
+            if (functionStartMatcher.matches() || isMethodImplementation) {
+                // Found function/procedure start or method implementation
                 indentLevel = 0;
                 inFunctionBody = true;
                 inSwitchBlock = false;
+            }
+
+            // Check for class start/end
+            boolean isClassStatement = CLASS_START_PATTERN.matcher(line).matches();
+            boolean isEndClassStatement = CLASS_END_PATTERN.matcher(line).matches();
+            if (isClassStatement) {
+                inClassDefinition = true;
+            } else if (isEndClassStatement) {
+                inClassDefinition = false;
             }
 
             // Check for switch statement
@@ -250,38 +268,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 inSwitchBlock = false;
             }
 
-            // FIX: Improved return statement detection
+            // Detect RETURN statements - all will use normal indentation now
             boolean isReturnStatement = FUNCTION_END_PATTERN.matcher(line).matches();
-            boolean isReturnStatementAtEnd = false;
-
-            if (inFunctionBody && isReturnStatement) {
-                // Check if this RETURN statement should be treated as function end
-                boolean isEndOfFunction = false;
-
-                // Case 1: It's followed by a function start or end of file
-                if (i == lines.length - 1) {
-                    isEndOfFunction = true;
-                } else {
-                    // Check the next non-empty line
-                    int nextNonEmptyLineIndex = i + 1;
-                    while (nextNonEmptyLineIndex < lines.length && lines[nextNonEmptyLineIndex].trim().isEmpty()) {
-                        nextNonEmptyLineIndex++;
-                    }
-
-                    if (nextNonEmptyLineIndex >= lines.length) {
-                        isEndOfFunction = true; // End of file
-                    } else {
-                        String nextNonEmptyLine = lines[nextNonEmptyLineIndex].trim();
-                        isEndOfFunction = FUNCTION_START_PATTERN.matcher(nextNonEmptyLine).matches();
-                    }
-                }
-
-                if (isEndOfFunction) {
-                    // Found function/procedure end
-                    inFunctionBody = false;
-                    isReturnStatementAtEnd = true;
-                }
-            }
 
             // Check for statement types
             boolean isLocalDeclaration = LOCAL_DECLARATION_PATTERN.matcher(line).matches();
@@ -292,17 +280,25 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             int customIndentSpaces = -1; // -1 means use standard indentation
 
             // Apply custom indentation for specific statement types
-            if (isReturnStatement || isReturnStatementAtEnd) {
-                // Apply custom indentation for RETURN statements
-                customIndentSpaces = returnIndent;
+            // NOTE: RETURN statements at function/method end use custom indentation, others use normal
+            if (isReturnStatement) {
+                // Check if this RETURN is at the end of a function/method (indentLevel == 1)
+                // or inside control structures (indentLevel > 1)
+                if (inFunctionBody && indentLevel == 1) {
+                    // RETURN at the end of function/method - use custom indentation
+                    customIndentSpaces = returnIndent;
+                } else {
+                    // RETURN inside control structures - use normal indentation
+                    customIndentSpaces = -1;
+                }
             } else if (isLocalDeclaration && inFunctionBody) {
                 // Apply custom indentation for LOCAL declarations
                 customIndentSpaces = localIndent;
             } else if (isDataDeclaration) {
                 // Apply custom indentation for DATA declarations
                 customIndentSpaces = dataIndent;
-            } else if (isMethodDeclaration) {
-                // Apply custom indentation for METHOD declarations
+            } else if (isMethodDeclaration && inClassDefinition) {
+                // Apply custom indentation for METHOD declarations only inside CLASS/ENDCLASS
                 customIndentSpaces = methodIndent;
             }
 
@@ -312,8 +308,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     lowerLine.startsWith("endcase") ||
                     lowerLine.startsWith("next");
 
-            // Additional block end check for endswitch
-            if (isEndSwitchStatement) {
+            // Additional block end check for endswitch and endclass
+            if (isEndSwitchStatement || isEndClassStatement) {
                 isBlockEnd = true;
             }
 
@@ -328,9 +324,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 effectiveIndentLevel = Math.min(effectiveIndentLevel, (indentLevel - 1) + 1);
             }
 
-            // Reduce indentation for endings
-            if (isBlockEnd || lowerLine.equals("else") || lowerLine.startsWith("elseif")) {
+            // Check for else/elseif statements that need special handling
+            boolean isElseStatement = lowerLine.equals("else") || lowerLine.startsWith("elseif");
+            
+            // Reduce indentation for block endings
+            if (isBlockEnd) {
                 if (indentLevel > 0) indentLevel--;
+            }
+            
+            // Handle else/elseif indentation - they should be at the same level as their corresponding if
+            if (isElseStatement) {
+                // Temporarily decrease effectiveIndentLevel for this line only
+                if (effectiveIndentLevel > 0) effectiveIndentLevel--;
             }
 
             // Check if this line is a continuation of previous line
@@ -341,13 +346,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String newIndent;
 
             if (isCommentOnlyLine) {
-                // Always use the previous line's indentation for comments, even if it was zero
-                newIndent = previousLineActualIndent;
-                // Using previous indentation for comment line
+                // Comments should never be indented
+                newIndent = "";
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
                 // Using continuation indentation for line line
+            } else if (isClassStatement || isEndClassStatement) {
+                // CLASS and ENDCLASS should never be indented
+                newIndent = "";
             } else if (customIndentSpaces >= 0) {
                 // Use custom indentation for specific statement types
                 newIndent = " ".repeat(customIndentSpaces);
@@ -473,9 +480,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     lowerLine.startsWith("while ") ||
                     lowerLine.startsWith("for ") ||
                     lowerLine.startsWith("do ") ||
-                    (lowerLine.startsWith("case ") && !inSwitchBlock) || // Don't increase indent for case in switch
-                    lowerLine.equals("else") ||
-                    lowerLine.startsWith("elseif")) {
+                    (lowerLine.startsWith("case ") && !inSwitchBlock)) { // Don't increase indent for case in switch
+                indentLevel++;
+            }
+            
+            // elseif increases indent like if, but else does NOT increase indent
+            if (lowerLine.startsWith("elseif")) {
                 indentLevel++;
             }
 
@@ -485,9 +495,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Function body indentation
-            if (inFunctionBody && functionStartMatcher.matches()) {
+            if (functionStartMatcher.matches() || isMethodImplementation) {
+                // For function/method declarations, start with indent level 1 for the body
                 indentLevel = 1;
-                // Setting indent level to 1 for function body
+                inFunctionBody = true;
+                // Setting indent level to 1 for function/method body
             }
         }
 

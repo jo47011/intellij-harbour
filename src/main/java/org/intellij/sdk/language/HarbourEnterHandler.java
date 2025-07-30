@@ -70,6 +70,14 @@ public class HarbourEnterHandler implements EnterHandlerDelegate {
             boolean shouldAddExtraIndent = !shouldDecreaseIndent && shouldIndentAfter(trimmedPrevLine);
             HarbourLogger.log("EnterHandler", "Should increase indent: " + shouldAddExtraIndent);
 
+            // Special handling for else/elseif - they should align with their corresponding if
+            if (currentLineText.equals("else") || currentLineText.startsWith("elseif")) {
+                // Else should unindent to match the if level, but the NEXT line after else should indent
+                shouldDecreaseIndent = true; // This will decrease by one indent level to match if
+                shouldAddExtraIndent = false; // Don't add extra indent for this line
+                HarbourLogger.log("EnterHandler", "Special handling for else/elseif - unindenting to match if level");
+            }
+
             // Get indentation size from settings
             HarbourSettings settings = HarbourSettings.getInstance(file.getProject());
             int indentSize = settings != null ? settings.getIndentationSize() : 2;
@@ -138,7 +146,8 @@ public class HarbourEnterHandler implements EnterHandlerDelegate {
                 line.startsWith("while ") || line.equals("while") ||
                 line.startsWith("procedure ") || line.equals("procedure") ||
                 line.startsWith("function ") || line.equals("function") ||
-                line.equals("else") || line.equals("elseif") ||
+                line.equals("else") || line.startsWith("else ") ||
+                line.equals("elseif") || line.startsWith("elseif ") ||
                 line.startsWith("case ") || line.equals("case") ||
                 line.startsWith("switch ") || line.equals("switch") ||
                 line.startsWith("class ") || line.equals("class");
@@ -149,11 +158,11 @@ public class HarbourEnterHandler implements EnterHandlerDelegate {
         return line.equals("endif") ||
                 line.equals("enddo") ||
                 line.equals("endcase") ||
+                line.equals("endswitch") ||
                 line.equals("next") ||
                 line.equals("end") ||
                 line.equals("endclass") ||
-                line.startsWith("return") ||
-                line.startsWith("else") ||
-                line.startsWith("elseif");
+                line.equals("else") || line.startsWith("else ") ||
+                line.equals("elseif") || line.startsWith("elseif ");
     }
 }
