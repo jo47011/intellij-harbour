@@ -31,6 +31,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             Pattern.compile("^\\s*RETURN(?:\\s+.*)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern LOCAL_DECLARATION_PATTERN =
             Pattern.compile("^\\s*LOCAL\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DATA_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*DATA\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern METHOD_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*METHOD\\s+\\w+.*$", Pattern.CASE_INSENSITIVE);
 
     // Patterns for detecting string continuations
     private static final Pattern STRING_CONTINUATION_PATTERN =
@@ -65,13 +69,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         Project project = file.getProject();
-        HarbourSettings harbourSettings = HarbourSettings.getInstance(project);
-        if (harbourSettings == null) {
-            log("No Harbour settings found for file: " + file.getName());
-            return textRange;
-        }
-
-        int lineBreakPosition = harbourSettings.getLineBreakPosition();
+        
+        // Get Harbour custom code style settings
+        HarbourCodeStyleSettings harbourCodeStyleSettings = settings.getCustomSettings(HarbourCodeStyleSettings.class);
+        
+        // Get line break position from common code style settings (RIGHT_MARGIN)
+        int lineBreakPosition = settings.getRightMargin(HarbourLanguage.INSTANCE);
+        
         log("Processing file: " + file.getName() + " with line break position: " + lineBreakPosition);
 
         PsiDocumentManager documentManager = PsiDocumentManager.getInstance(project);
@@ -93,7 +97,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             log("Original trailing whitespace: '" + originalTrailingWhitespace.replace("\n", "\\n") + "'");
 
             // Process step by step
-            String formattedText = formatHarbourCode(originalText, lineBreakPosition, harbourSettings);
+            String formattedText = formatHarbourCode(originalText, lineBreakPosition, harbourCodeStyleSettings);
 
             // Make sure to restore exact original trailing whitespace
             formattedText = ensureTrailingWhitespace(formattedText, originalTrailingWhitespace);
@@ -154,21 +158,22 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     /**
      * Main formatting method
      */
-    private String formatHarbourCode(String text, int lineBreakPosition, HarbourSettings settings) {
+    private String formatHarbourCode(String text, int lineBreakPosition, HarbourCodeStyleSettings settings) {
         String[] lines = text.split("\n", -1);
         StringBuilder result = new StringBuilder(text.length());
 
         int indentLevel = 0;
         boolean inFunctionBody = false;
         boolean inSwitchBlock = false;
-        int indentSize = settings.getIndentationSize();
-        boolean formatReturnAtLevel0 = settings.isReturnStatementsAtLevel0();
-        boolean formatLocalAtLevel0 = settings.isLocalStatementsAtLevel0();
+        int indentSize = 2; // Default indentation size for Harbour
+        
+        // Get custom indentation settings
+        int localIndent = settings.LOCAL_INDENT;
+        int returnIndent = settings.RETURN_INDENT;
+        int dataIndent = settings.DATA_INDENT;
+        int methodIndent = settings.METHOD_INDENT;
 
-        log("Formatting with indentSize: " + indentSize +
-                ", lineBreak: " + lineBreakPosition +
-                ", formatReturn: " + formatReturnAtLevel0 +
-                ", formatLocal: " + formatLocalAtLevel0);
+        // Removed verbose logging for performance
 
         // Lines to skip (continuation lines)
         List<Integer> skipLines = new ArrayList<>();
@@ -183,13 +188,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // String continuation pattern
             if (STRING_CONTINUATION_PATTERN.matcher(line).matches() &&
                     STRING_START_PATTERN.matcher(nextLine).matches()) {
-                log("Found string continuation at line " + (i+1));
                 skipLines.add(i+1); // Skip the next line
             }
 
             // Regular line continuation with semicolon
             if (LINE_CONTINUATION_PATTERN.matcher(line).matches() && !nextLine.isEmpty()) {
-                log("Found line continuation with semicolon at line " + (i+1));
                 continuationLines.add(i+1); // Mark the next line as a continuation
             }
         }
@@ -201,7 +204,6 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         for (int i = 0; i < lines.length; i++) {
             // Skip lines that are part of continuation pairs
             if (skipLines.contains(i)) {
-                log("Skipping continuation line at index " + i);
                 continue;
             }
 
@@ -225,7 +227,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for function/procedure start
             Matcher functionStartMatcher = FUNCTION_START_PATTERN.matcher(line);
             if (functionStartMatcher.matches()) {
-                log("Found function/procedure start: " + line);
+                // Found function/procedure start
                 indentLevel = 0;
                 inFunctionBody = true;
                 inSwitchBlock = false;
@@ -234,7 +236,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for switch statement
             boolean isSwitchStatement = SWITCH_PATTERN.matcher(line).matches();
             if (isSwitchStatement) {
-                log("Found switch statement: " + line);
+                // Found switch statement
                 inSwitchBlock = true;
             }
 
@@ -244,7 +246,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for endswitch statement
             boolean isEndSwitchStatement = ENDSWITCH_PATTERN.matcher(line).matches();
             if (isEndSwitchStatement) {
-                log("Found endswitch statement: " + line);
+                // Found endswitch statement
                 inSwitchBlock = false;
             }
 
@@ -275,25 +277,33 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
 
                 if (isEndOfFunction) {
-                    log("Found function/procedure end: " + line);
+                    // Found function/procedure end
                     inFunctionBody = false;
                     isReturnStatementAtEnd = true;
                 }
             }
 
-            // Special handling for LOCAL declarations if configured
+            // Check for statement types
             boolean isLocalDeclaration = LOCAL_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isDataDeclaration = DATA_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isMethodDeclaration = METHOD_DECLARATION_PATTERN.matcher(line).matches();
+            
             int effectiveIndentLevel = indentLevel;
+            int customIndentSpaces = -1; // -1 means use standard indentation
 
-            // FIX: Apply indentation settings for RETURN and LOCAL
-            // Make sure we format ALL return statements if formatReturnAtLevel0 is true
-            if ((isReturnStatement && formatReturnAtLevel0) ||
-                    (isReturnStatementAtEnd && formatReturnAtLevel0)) {
-                log("Applying zero indentation for RETURN statement");
-                effectiveIndentLevel = 0;
-            } else if (isLocalDeclaration && formatLocalAtLevel0 && inFunctionBody) {
-                log("Applying zero indentation for LOCAL declaration");
-                effectiveIndentLevel = 0;
+            // Apply custom indentation for specific statement types
+            if (isReturnStatement || isReturnStatementAtEnd) {
+                // Apply custom indentation for RETURN statements
+                customIndentSpaces = returnIndent;
+            } else if (isLocalDeclaration && inFunctionBody) {
+                // Apply custom indentation for LOCAL declarations
+                customIndentSpaces = localIndent;
+            } else if (isDataDeclaration) {
+                // Apply custom indentation for DATA declarations
+                customIndentSpaces = dataIndent;
+            } else if (isMethodDeclaration) {
+                // Apply custom indentation for METHOD declarations
+                customIndentSpaces = methodIndent;
             }
 
             // Block ending check
@@ -309,7 +319,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Adjust indentation for case statements in switch blocks and content inside them
             if (isCaseStatement && inSwitchBlock) {
-                log("Handling case statement in switch block");
+                // Handling case statement in switch block
                 // Case statements are at the same level as switch
                 effectiveIndentLevel = indentLevel - 1;
             } else if (inSwitchBlock && !isEndSwitchStatement) {
@@ -333,22 +343,21 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (isCommentOnlyLine) {
                 // Always use the previous line's indentation for comments, even if it was zero
                 newIndent = previousLineActualIndent;
-                log("Using previous indentation for comment line: '" + line + "'");
+                // Using previous indentation for comment line
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
-                log("Using continuation indentation for line: '" + line + "'");
+                // Using continuation indentation for line line
+            } else if (customIndentSpaces >= 0) {
+                // Use custom indentation for specific statement types
+                newIndent = " ".repeat(customIndentSpaces);
             } else {
                 // Apply standard indent
                 int finalIndentLevel = isBlockEnd ? indentLevel : effectiveIndentLevel;
                 newIndent = " ".repeat(finalIndentLevel * indentSize);
             }
 
-            // Log indentation decisions for debugging
-            log("Line: '" + line + "', indentLevel: " + indentLevel +
-                    ", effectiveLevel: " + effectiveIndentLevel +
-                    (isCommentOnlyLine ? ", comment line" : "") +
-                    (isLineContinuation ? ", continuation line" : ""));
+            // Indentation decisions handled above
 
             // Remove double spaces while preserving strings
             StringBuilder processedContent = new StringBuilder();
@@ -395,7 +404,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             if (hasStringContinuation && i < lines.length - 1) {
                 // This is a line with string continuation
-                log("Processing continuation line: " + processedLine);
+                // Processing continuation line
 
                 // Add the first line as is
                 result.append(processedLine);
@@ -436,8 +445,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         result.append("\n");
                     }
                 }
-            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition) {
-                // Line needs breaking
+            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000) {
+                // Line needs breaking (skip for very large files to improve performance)
                 List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
 
                 for (int j = 0; j < brokenLines.size(); j++) {
@@ -478,7 +487,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Function body indentation
             if (inFunctionBody && functionStartMatcher.matches()) {
                 indentLevel = 1;
-                log("Setting indent level to 1 for function body");
+                // Setting indent level to 1 for function body
             }
         }
 
@@ -502,7 +511,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
         // Check if this line already contains string continuation
         if (STRING_CONTINUATION_PATTERN.matcher(line).matches()) {
-            log("Not breaking line with existing string continuation");
+            // Not breaking line with existing string continuation
             result.add(line);
             return result;
         }
@@ -519,6 +528,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Calculate available space
             int availableSpace = lineBreakPosition - currentLine.length();
 
+            // Safety check: ensure we have positive available space
+            if (availableSpace <= 0) {
+                // Line is already too long, force a break
+                result.add(currentLine);
+                currentLine = indent + " ".repeat(indentSize);
+                availableSpace = lineBreakPosition - currentLine.length();
+            }
+
             // Check if remaining content fits
             if (pos + availableSpace >= content.length()) {
                 currentLine += content.substring(pos);
@@ -529,6 +546,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Find break point
             int breakPos = findBreakPoint(content, pos, pos + availableSpace);
+            
+            // Safety check: ensure we're making progress
+            if (breakPos <= pos) {
+                // Force progress by breaking at least one character ahead
+                breakPos = Math.min(pos + 1, content.length());
+            }
 
             // Update string context
             for (int i = pos; i < breakPos; i++) {
@@ -548,7 +571,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Handle string breaks
             if (inString) {
-                log("Breaking inside string at position " + breakPos);
+                // Removed excessive logging that can cause memory issues
 
                 // Check for space at break point
                 boolean breakAtSpace = breakPos < content.length() && content.charAt(breakPos) == ' ';

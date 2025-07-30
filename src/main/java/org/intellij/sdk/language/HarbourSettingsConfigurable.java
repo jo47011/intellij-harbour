@@ -44,11 +44,7 @@ public class HarbourSettingsConfigurable implements Configurable {
     private JTextField myDocumentationBaseUrlField;
     private JTextField myDebugLogPathField;
     private JTextField myBuildOutputDirField;
-    private JSpinner myIndentationSizeSpinner;
-    private JCheckBox myReturnStatementsAtLevel0CheckBox;
-    private JCheckBox myLocalStatementsAtLevel0CheckBox;
     private JCheckBox myAutoCompletionEnabledCheckBox;
-    private JSpinner myLineBreakPositionSpinner;
 
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
@@ -218,69 +214,12 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         excludedFilesPanel.add(excludedFilesListPanel, BorderLayout.CENTER);
 
-        // FORMATTER SETTINGS TAB
-        JPanel formatterPanel = new JPanel(new GridBagLayout());
-        formatterPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-        GridBagConstraints formatterConstraints = new GridBagConstraints();
-        formatterConstraints.fill = GridBagConstraints.HORIZONTAL;
-        formatterConstraints.weightx = 1.0;
-        formatterConstraints.gridx = 0;
-        formatterConstraints.gridy = 0;
-        formatterConstraints.insets = new Insets(5, 5, 5, 5);
-
-        // Indentation size
-        JLabel indentationSizeLabel = new JLabel("Indentation size (spaces):");
-        formatterPanel.add(indentationSizeLabel, formatterConstraints);
-
-        formatterConstraints.gridx = 1;
-        myIndentationSizeSpinner = new JSpinner(new SpinnerNumberModel(2, 1, 8, 1));
-        JComponent editor = myIndentationSizeSpinner.getEditor();
-        JFormattedTextField ftf = ((JSpinner.DefaultEditor) editor).getTextField();
-        ftf.setColumns(2);
-        formatterPanel.add(myIndentationSizeSpinner, formatterConstraints);
-
-        // Line break position
-        formatterConstraints.gridx = 0;
-        formatterConstraints.gridy = 1;
-        JLabel lineBreakPositionLabel = new JLabel("Line break position (0 = no breaking):");
-        formatterPanel.add(lineBreakPositionLabel, formatterConstraints);
-
-        formatterConstraints.gridx = 1;
-        myLineBreakPositionSpinner = new JSpinner(new SpinnerNumberModel(99, 0, 999, 1));
-        JComponent lineBreakEditor = myLineBreakPositionSpinner.getEditor();
-        JFormattedTextField lineBreakFtf = ((JSpinner.DefaultEditor) lineBreakEditor).getTextField();
-        lineBreakFtf.setColumns(3);
-        formatterPanel.add(myLineBreakPositionSpinner, formatterConstraints);
-
-        // Return statements checkbox
-        formatterConstraints.gridx = 0;
-        formatterConstraints.gridy = 2;
-        formatterConstraints.gridwidth = 2;
-        myReturnStatementsAtLevel0CheckBox = new JCheckBox("Format 'return' statements at level 0 at the end of functions");
-        formatterPanel.add(myReturnStatementsAtLevel0CheckBox, formatterConstraints);
-
-        // Local statements checkbox
-        formatterConstraints.gridx = 0;
-        formatterConstraints.gridy = 3;
-        formatterConstraints.gridwidth = 2;
-        myLocalStatementsAtLevel0CheckBox = new JCheckBox("Format 'local' declarations at level 0");
-        formatterPanel.add(myLocalStatementsAtLevel0CheckBox, formatterConstraints);
-
-        // Add spacer
-        formatterConstraints.gridx = 0;
-        formatterConstraints.gridy = 4;
-        formatterConstraints.weighty = 1.0;
-        formatterConstraints.gridwidth = 2;
-        formatterConstraints.fill = GridBagConstraints.BOTH;
-        formatterPanel.add(new JPanel(), formatterConstraints);
 
         // Add all tabs to the tabbed pane (General first)
         tabbedPane.addTab("General", generalPanel);
         tabbedPane.addTab("Include Paths", includePathsPanel);
         tabbedPane.addTab("Excluded Files", excludedFilesPanel);
         tabbedPane.addTab("Commands", createCommandsPanel());
-        tabbedPane.addTab("Formatting", formatterPanel);
 
         myMainPanel.add(tabbedPane, BorderLayout.CENTER);
 
@@ -577,10 +516,6 @@ public class HarbourSettingsConfigurable implements Configurable {
                 !settings.getDocumentationBaseUrl().equals(myDocumentationBaseUrlField.getText()) ||
                 !settings.getDebugLogPath().equals(myDebugLogPathField.getText()) ||
                 !settings.getBuildOutputDirectory().equals(myBuildOutputDirField.getText()) ||
-                settings.getIndentationSize() != (Integer) myIndentationSizeSpinner.getValue() ||
-                settings.getLineBreakPosition() != (Integer) myLineBreakPositionSpinner.getValue() ||
-                settings.isReturnStatementsAtLevel0() != myReturnStatementsAtLevel0CheckBox.isSelected() ||
-                settings.isLocalStatementsAtLevel0() != myLocalStatementsAtLevel0CheckBox.isSelected() ||
                 settings.isAutoCompletionEnabled() != myAutoCompletionEnabledCheckBox.isSelected();
     }
 
@@ -599,16 +534,6 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Save build output directory
         settings.setBuildOutputDirectory(myBuildOutputDirField.getText());
-
-        // Save indentation size
-        settings.setIndentationSize((Integer) myIndentationSizeSpinner.getValue());
-
-        // Save line break position
-        settings.setLineBreakPosition((Integer) myLineBreakPositionSpinner.getValue());
-
-        // Save formatting settings
-        settings.setReturnStatementsAtLevel0(myReturnStatementsAtLevel0CheckBox.isSelected());
-        settings.setLocalStatementsAtLevel0(myLocalStatementsAtLevel0CheckBox.isSelected());
 
         // Save auto-completion setting
         settings.setAutoCompletionEnabled(myAutoCompletionEnabledCheckBox.isSelected());
@@ -662,16 +587,6 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Load build output directory
         myBuildOutputDirField.setText(settings.getBuildOutputDirectory());
-
-        // Load indentation size
-        myIndentationSizeSpinner.setValue(settings.getIndentationSize());
-
-        // Load line break position
-        myLineBreakPositionSpinner.setValue(settings.getLineBreakPosition());
-
-        // Load formatting settings
-        myReturnStatementsAtLevel0CheckBox.setSelected(settings.isReturnStatementsAtLevel0());
-        myLocalStatementsAtLevel0CheckBox.setSelected(settings.isLocalStatementsAtLevel0());
 
         // Load auto-completion setting
         myAutoCompletionEnabledCheckBox.setSelected(settings.isAutoCompletionEnabled());

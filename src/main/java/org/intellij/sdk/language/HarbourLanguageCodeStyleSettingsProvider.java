@@ -1,5 +1,7 @@
 package org.intellij.sdk.language;
 
+import com.intellij.application.options.IndentOptionsEditor;
+import com.intellij.lang.Language;
 import com.intellij.psi.codeStyle.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,13 +50,34 @@ public class HarbourLanguageCodeStyleSettingsProvider extends LanguageCodeStyleS
             consumer.showStandardOptions("SPACE_AROUND_RELATIONAL_OPERATORS");
             consumer.showStandardOptions("SPACE_AFTER_COMMA");
             consumer.showStandardOptions("SPACE_BEFORE_COMMA");
-        } else if (settingsType == SettingsType.WRAPPING_AND_BRACES_SETTINGS) {
-            consumer.showStandardOptions("RIGHT_MARGIN");
-            consumer.showStandardOptions("WRAP_ON_TYPING");
         } else if (settingsType == SettingsType.INDENT_SETTINGS) {
             consumer.showStandardOptions("INDENT_SIZE");
             consumer.showStandardOptions("TAB_SIZE");
             consumer.showStandardOptions("USE_TAB_CHARACTER");
+        } else if (settingsType == SettingsType.WRAPPING_AND_BRACES_SETTINGS) {
+            consumer.showStandardOptions("RIGHT_MARGIN");
+            consumer.showStandardOptions("WRAP_ON_TYPING");
+            consumer.showStandardOptions("VISUAL_GUIDES");
+            consumer.showStandardOptions("HARD_WRAP_AT");
         }
+    }
+    
+    @Override
+    public IndentOptionsEditor getIndentOptionsEditor() {
+        return new IndentOptionsEditor() {
+            @Override
+            protected void addComponents() {
+                super.addComponents();
+                // Additional components could be added here if needed
+            }
+        };
+    }
+    
+    @Override
+    public void customizeDefaults(@NotNull CommonCodeStyleSettings commonSettings, @NotNull CommonCodeStyleSettings.IndentOptions indentOptions) {
+        // Set default indentation to 2 spaces
+        indentOptions.INDENT_SIZE = 2;
+        indentOptions.TAB_SIZE = 2;
+        indentOptions.USE_TAB_CHARACTER = false;
     }
 }
