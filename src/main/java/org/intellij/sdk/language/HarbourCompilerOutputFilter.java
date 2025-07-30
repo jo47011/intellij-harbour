@@ -9,10 +9,6 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.find.FindManager;
 import com.intellij.find.FindModel;
-import com.intellij.find.FindSettings;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.fileEditor.FileEditorManager;
-import com.intellij.openapi.util.TextRange;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -77,16 +73,6 @@ public class HarbourCompilerOutputFilter implements Filter {
     public HarbourCompilerOutputFilter(Project project, String workingDirectory) {
         this.project = project;
         this.workingDirectory = workingDirectory;
-        HarbourLogger.log("HarbourCompilerOutputFilter", "Filter initialized with working dir: " + workingDirectory);
-        
-        // Direct file logging to ensure we capture filter creation
-        try {
-            java.io.FileWriter writer = new java.io.FileWriter("/home/developer/workspace/log/filter_init.log", true);
-            writer.write("[" + new java.util.Date() + "] FILTER INITIALIZED: workingDir=" + workingDirectory + "\n");
-            writer.close();
-        } catch (Exception e) {
-            // Ignore logging errors
-        }
     }
 
     /**
@@ -98,19 +84,6 @@ public class HarbourCompilerOutputFilter implements Filter {
     @Nullable
     @Override
     public Result applyFilter(@NotNull String line, int entireLength) {
-        // Minimal debug logging only for .prg files to avoid log flooding
-        if (line.contains(".prg(")) {
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Processing .prg line: " + line);
-            
-            // Direct file logging for critical lines only
-            try {
-                java.io.FileWriter writer = new java.io.FileWriter("/home/developer/workspace/log/prg_filter.log", true);
-                writer.write("[" + new java.util.Date() + "] PRG LINE: " + line + "\n");
-                writer.close();
-            } catch (Exception e) {
-                // Ignore logging errors
-            }
-        }
 
         Result result = null;
         Matcher fileMatcher = FILE_PATTERN.matcher(line);
@@ -126,7 +99,6 @@ public class HarbourCompilerOutputFilter implements Filter {
             String functionName = functionMatcher.group(2);
             String filePath = functionMatcher.group(3);
             int lineNumber = Integer.parseInt(functionMatcher.group(4));
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Found function reference: " + functionName + " in " + filePath + ":" + lineNumber);
 
             int start = functionMatcher.start(3);  // Start of filepath
             int end = functionMatcher.end(4) + 1;  // End of line number including ')'
@@ -136,7 +108,6 @@ public class HarbourCompilerOutputFilter implements Filter {
         else if (stackTraceMatcher.find()) {
             String filePath = stackTraceMatcher.group(1);
             int lineNumber = Integer.parseInt(stackTraceMatcher.group(2));
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Found stack trace file reference: " + filePath + ":" + lineNumber);
 
             int start = stackTraceMatcher.start(1);  // Start of filepath
             int end = stackTraceMatcher.end(2) + 1;  // End of line number including ')'
@@ -146,16 +117,6 @@ public class HarbourCompilerOutputFilter implements Filter {
         else if (fileMatcher.find()) {
             String filePath = fileMatcher.group(1);
             int lineNumber = Integer.parseInt(fileMatcher.group(2));
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Found file reference: " + filePath + ":" + lineNumber);
-
-            // Log successful match for debugging
-            try {
-                java.io.FileWriter writer = new java.io.FileWriter("/home/developer/workspace/log/match_found.log", true);
-                writer.write("[" + new java.util.Date() + "] MATCH FOUND: " + filePath + "(" + lineNumber + ") in line: " + line + "\n");
-                writer.close();
-            } catch (Exception e) {
-                // Ignore logging errors
-            }
 
             int start = fileMatcher.start();
             int end = fileMatcher.end();
@@ -165,7 +126,6 @@ public class HarbourCompilerOutputFilter implements Filter {
         else if (includeFileMatcher.find()) {
             String includeFile = extractIncludeFileName(includeFileMatcher);
             if (includeFile != null) {
-                HarbourLogger.log("HarbourCompilerOutputFilter", "Found include file reference: " + includeFile);
                 
                 // Create hyperlink for the include file
                 int start = findIncludeFileStart(includeFileMatcher, includeFile);
@@ -176,7 +136,6 @@ public class HarbourCompilerOutputFilter implements Filter {
         // Check for missing function references: "Referenced, missing, but unknown function(s): FOO()"
         else if (missingFunctionMatcher.find()) {
             String functionName = missingFunctionMatcher.group(1);
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Found missing function reference: " + functionName);
             
             // Create hyperlink for the function name to search for its usage
             int start = missingFunctionMatcher.start(1);  // Start of function name
@@ -185,7 +144,6 @@ public class HarbourCompilerOutputFilter implements Filter {
         }
         // Check for generic error with code
         else if (errorMatcher.find()) {
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Found error: " + errorMatcher.group(0));
 
             // Just mark as error without link
             result = new Result(entireLength - line.length(), entireLength, null,
@@ -237,9 +195,7 @@ public class HarbourCompilerOutputFilter implements Filter {
             String absolutePath = new File(workingDirectory, filePath).getAbsolutePath();
             vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
             
-            if (vFile != null) {
-                HarbourLogger.log("HarbourCompilerOutputFilter", "Resolved relative path: " + filePath + " -> " + absolutePath);
-            }
+            // Resolved relative path
         }
         
         return vFile;
@@ -300,7 +256,6 @@ public class HarbourCompilerOutputFilter implements Filter {
      * Find an include file by searching in include paths with case-insensitive matching.
      */
     private VirtualFile findIncludeFile(String includeFile) {
-        HarbourLogger.log("HarbourCompilerOutputFilter", "Searching for include file: " + includeFile);
         
         // First try in working directory
         VirtualFile vFile = findIncludeFileWithCaseVariations(includeFile, workingDirectory);
@@ -320,7 +275,6 @@ public class HarbourCompilerOutputFilter implements Filter {
                 for (String includePath : settings.getResolvedIncludePaths(project)) {
                     vFile = findIncludeFileWithCaseVariations(includeFile, includePath);
                     if (vFile != null) {
-                        HarbourLogger.log("HarbourCompilerOutputFilter", "Found include file in settings path: " + includePath);
                         return vFile;
                     }
                 }
@@ -336,12 +290,10 @@ public class HarbourCompilerOutputFilter implements Filter {
         for (String basePath : commonPaths) {
             vFile = findIncludeFileWithCaseVariations(includeFile, basePath);
             if (vFile != null) {
-                HarbourLogger.log("HarbourCompilerOutputFilter", "Found include file at: " + basePath);
                 return vFile;
             }
         }
         
-        HarbourLogger.log("HarbourCompilerOutputFilter", "Include file not found: " + includeFile);
         return null;
     }
     
@@ -363,7 +315,6 @@ public class HarbourCompilerOutputFilter implements Filter {
             String fullPath = new File(searchDir, variation).getAbsolutePath();
             VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(fullPath);
             if (vFile != null) {
-                HarbourLogger.log("HarbourCompilerOutputFilter", "Found " + includeFile + " as " + variation + " in " + searchDir);
                 return vFile;
             }
         }
@@ -403,7 +354,6 @@ public class HarbourCompilerOutputFilter implements Filter {
      * Search for function usage in the project using IntelliJ's Find functionality.
      */
     private void searchForFunctionUsage(Project project, String functionName) {
-        HarbourLogger.log("HarbourCompilerOutputFilter", "Searching for function usage: " + functionName);
         
         // Create find model for searching
         FindModel findModel = new FindModel();
@@ -420,7 +370,6 @@ public class HarbourCompilerOutputFilter implements Filter {
         FindManager findManager = FindManager.getInstance(project);
         findManager.showFindDialog(findModel, () -> {
             // Callback after find dialog is closed
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Find dialog closed for function: " + functionName);
         });
     }
 }
