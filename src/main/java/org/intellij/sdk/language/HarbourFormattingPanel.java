@@ -133,7 +133,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         // METHOD indentation
         c.gridx = 0;
         c.gridy = 4;
-        JBLabel methodLabel = new JBLabel("METHOD:");
+        JBLabel methodLabel = new JBLabel("METHOD (declaration only):");
         panel.add(methodLabel, c);
         
         c.gridx = 1;

@@ -55,10 +55,8 @@ public class HarbourLanguageCodeStyleSettingsProvider extends LanguageCodeStyleS
             consumer.showStandardOptions("TAB_SIZE");
             consumer.showStandardOptions("USE_TAB_CHARACTER");
         } else if (settingsType == SettingsType.WRAPPING_AND_BRACES_SETTINGS) {
-            consumer.showStandardOptions("RIGHT_MARGIN");
-            consumer.showStandardOptions("WRAP_ON_TYPING");
-            consumer.showStandardOptions("VISUAL_GUIDES");
-            consumer.showStandardOptions("HARD_WRAP_AT");
+            // Show all standard wrapping options
+            consumer.showAllStandardOptions();
         }
     }
     
@@ -79,5 +77,8 @@ public class HarbourLanguageCodeStyleSettingsProvider extends LanguageCodeStyleS
         indentOptions.INDENT_SIZE = 2;
         indentOptions.TAB_SIZE = 2;
         indentOptions.USE_TAB_CHARACTER = false;
+        
+        // Set default hard wrap to 0 (disabled)
+        commonSettings.RIGHT_MARGIN = 0;
     }
 }
