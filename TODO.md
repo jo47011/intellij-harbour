@@ -10,8 +10,6 @@ The following files are still written to the project dir, either remove or move 
 - debug_entry_handler.log  debug_trace.log  error_handler_init.log  init_called.log  sendlocals_trace.log
 
 code formatting
-- refactor -> reformat no longer there?
-- Tab should have the same as indent (2 in my case)
 - indentation
     - should be correct while you type / after return
     - only return at eof should be left aligned, e.g. this not:

@@ -78,6 +78,15 @@ public class HarbourCompilerOutputFilter implements Filter {
         this.project = project;
         this.workingDirectory = workingDirectory;
         HarbourLogger.log("HarbourCompilerOutputFilter", "Filter initialized with working dir: " + workingDirectory);
+        
+        // Direct file logging to ensure we capture filter creation
+        try {
+            java.io.FileWriter writer = new java.io.FileWriter("/home/developer/workspace/log/filter_init.log", true);
+            writer.write("[" + new java.util.Date() + "] FILTER INITIALIZED: workingDir=" + workingDirectory + "\n");
+            writer.close();
+        } catch (Exception e) {
+            // Ignore logging errors
+        }
     }
 
     /**
@@ -89,9 +98,18 @@ public class HarbourCompilerOutputFilter implements Filter {
     @Nullable
     @Override
     public Result applyFilter(@NotNull String line, int entireLength) {
-        // Temporary debug logging for stacktrace navigation issue
-        if (line.contains("test-gui.prg") || line.contains(".prg(")) {
-            HarbourLogger.log("HarbourCompilerOutputFilter", "Processing line: " + line);
+        // Minimal debug logging only for .prg files to avoid log flooding
+        if (line.contains(".prg(")) {
+            HarbourLogger.log("HarbourCompilerOutputFilter", "Processing .prg line: " + line);
+            
+            // Direct file logging for critical lines only
+            try {
+                java.io.FileWriter writer = new java.io.FileWriter("/home/developer/workspace/log/prg_filter.log", true);
+                writer.write("[" + new java.util.Date() + "] PRG LINE: " + line + "\n");
+                writer.close();
+            } catch (Exception e) {
+                // Ignore logging errors
+            }
         }
 
         Result result = null;
@@ -103,17 +121,8 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher includeFileMatcher = INCLUDE_FILE_PATTERN.matcher(line);
         Matcher missingFunctionMatcher = MISSING_FUNCTION_PATTERN.matcher(line);
 
-        // Check for runtime errors first (highest priority)
-        if (runtimeErrorMatcher.find()) {
-            // REMOVED: HarbourLogger.error causes flooding when output filter runs repeatedly
-            // The error is already displayed in console, no need to log it again
-            
-            // Mark as error in console with red text
-            result = new Result(entireLength - line.length(), entireLength, null,
-                    ConsoleViewContentType.ERROR_OUTPUT.getAttributes());
-        }
-        // Check for function pattern with file reference "1: FUNCTION in filepath(line)"
-        else if (functionMatcher.find()) {
+        // Check for function pattern with file reference "1: FUNCTION in filepath(line)" (HIGHEST PRIORITY)
+        if (functionMatcher.find()) {
             String functionName = functionMatcher.group(2);
             String filePath = functionMatcher.group(3);
             int lineNumber = Integer.parseInt(functionMatcher.group(4));
@@ -133,11 +142,20 @@ public class HarbourCompilerOutputFilter implements Filter {
             int end = stackTraceMatcher.end(2) + 1;  // End of line number including ')'
             result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
-        // Check for compiler error with file and line
+        // Check for compiler error with file and line (HIGH PRIORITY - must be before runtime error check)
         else if (fileMatcher.find()) {
             String filePath = fileMatcher.group(1);
             int lineNumber = Integer.parseInt(fileMatcher.group(2));
             HarbourLogger.log("HarbourCompilerOutputFilter", "Found file reference: " + filePath + ":" + lineNumber);
+
+            // Log successful match for debugging
+            try {
+                java.io.FileWriter writer = new java.io.FileWriter("/home/developer/workspace/log/match_found.log", true);
+                writer.write("[" + new java.util.Date() + "] MATCH FOUND: " + filePath + "(" + lineNumber + ") in line: " + line + "\n");
+                writer.close();
+            } catch (Exception e) {
+                // Ignore logging errors
+            }
 
             int start = fileMatcher.start();
             int end = fileMatcher.end();
@@ -170,6 +188,15 @@ public class HarbourCompilerOutputFilter implements Filter {
             HarbourLogger.log("HarbourCompilerOutputFilter", "Found error: " + errorMatcher.group(0));
 
             // Just mark as error without link
+            result = new Result(entireLength - line.length(), entireLength, null,
+                    ConsoleViewContentType.ERROR_OUTPUT.getAttributes());
+        }
+        // Check for runtime errors last (LOWEST PRIORITY - only for highlighting, no hyperlinks)
+        else if (runtimeErrorMatcher.find()) {
+            // REMOVED: HarbourLogger.error causes flooding when output filter runs repeatedly
+            // The error is already displayed in console, no need to log it again
+            
+            // Mark as error in console with red text
             result = new Result(entireLength - line.length(), entireLength, null,
                     ConsoleViewContentType.ERROR_OUTPUT.getAttributes());
         }

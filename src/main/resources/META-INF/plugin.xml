@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.512</version>
+    <version>1.0.515</version>
     <vendor email="support@example.com" url="http://www.example.com">Harbour Development</vendor>
 
     <description><![CDATA[
@@ -100,6 +100,8 @@
         <!-- Windows-specific registration fix -->
         <projectActivity implementation="org.intellij.sdk.language.HarbourDebuggerRunnerRegistration"/>
         
+        <!-- Console Filter for clickable error messages -->
+        <consoleFilterProvider implementation="org.intellij.sdk.language.HarbourConsoleFilterProvider"/>
         
         <!-- Formatting -->
         <lang.formatter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFormattingModelBuilder"/>
