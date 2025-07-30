@@ -10,7 +10,6 @@ import com.intellij.execution.filters.TextConsoleBuilder;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.openapi.util.text.StringUtil;
@@ -20,8 +19,6 @@ import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 
-import java.io.*;
-import java.util.*;
 import com.intellij.xdebugger.breakpoints.XBreakpointManager;
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
 import org.jetbrains.annotations.NotNull;
@@ -163,7 +160,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "UNIFIED: Using same approach as successful Unix implementation");
             
+            // HANGING ISSUE DEBUG v1.0.516: Add timing logging around startNotify()
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "HANGING DEBUG: About to call handler.startNotify()");
+            long startTime = System.currentTimeMillis();
+            
             handler.startNotify();
+            
+            long endTime = System.currentTimeMillis();
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "HANGING DEBUG: startNotify() completed in " + (endTime - startTime) + "ms");
             
             // Log process start status
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
@@ -1515,16 +1521,15 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Executor mode: " + (this.isDebugMode ? "DEBUG" : "RUN") + " (ID: " + executor.getId() + ")");
         
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call startProcess()");
-        
-        ProcessHandler processHandler = startProcess();
-        
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "startProcess() completed");
-
+        // Create console BEFORE starting process to capture all output
         TextConsoleBuilder consoleBuilder = TextConsoleBuilderFactory.getInstance()
                 .createBuilder(env.getProject());
         consoleBuilder.filters(new HarbourCompilerOutputFilter(env.getProject(), runConfig.getWorkingDirectory()));
         ConsoleView console = consoleBuilder.getConsole();
+        
+        ProcessHandler processHandler = startProcess();
+        
+        // Attach console immediately after process creation to ensure no output is lost
         console.attachToProcess(processHandler);
         
         // Set the console in HarbourLogger

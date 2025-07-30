@@ -63,7 +63,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     // Formatting settings
     private boolean returnStatementsAtLevel0 = true;
-    private boolean localStatementsAtLevel0 = false; // Default is false to match current behavior
+    private boolean localStatementsAtLevel0 = true; // Default is true - LOCAL statements should be left-aligned
 
     // Auto-completion setting
     private boolean autoCompletionEnabled = false; // Default to false (only show on Ctrl+Space)
