@@ -88,9 +88,9 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
     public JComponent getPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints c = new GridBagConstraints();
-        c.fill = GridBagConstraints.HORIZONTAL;
-        c.anchor = GridBagConstraints.NORTHWEST;
-        c.insets = new Insets(4, 4, 4, 4);
+        c.fill = GridBagConstraints.NONE;
+        c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(20, 16, 8, 8);
         
         // Title label
         c.gridx = 0;
@@ -140,11 +140,24 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         myMethodIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
         panel.add(myMethodIndentSpinner, c);
         
+        // Add horizontal glue to push everything to the left
+        c.gridx = 2;
+        c.gridy = 0;
+        c.gridwidth = 1;
+        c.gridheight = 5;
+        c.weightx = 1.0;
+        c.weighty = 0.0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(Box.createHorizontalGlue(), c);
+        
         // Add vertical glue to push everything to the top
         c.gridx = 0;
         c.gridy = 5;
-        c.gridwidth = 2;
+        c.gridwidth = 3;
+        c.gridheight = 1;
+        c.weightx = 0.0;
         c.weighty = 1.0;
+        c.fill = GridBagConstraints.VERTICAL;
         panel.add(Box.createVerticalGlue(), c);
         
         return panel;

@@ -569,6 +569,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (!StringUtil.isEmpty(runConfig.getCompilerOptions())) {
             parameters.addAll(StringUtil.split(runConfig.getCompilerOptions(), " "));
         }
+        
+        // Add rebuild flag if requested
+        if (runConfig.isUseRebuildFlag()) {
+            parameters.add("-rebuild");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "Added -rebuild flag to compiler arguments");
+        }
 
         // Add debug library only in debug mode
         if (isDebugMode && !finalBuildTarget.endsWith("harbour_debug.prg")) {

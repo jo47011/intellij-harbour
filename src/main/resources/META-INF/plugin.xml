@@ -18,7 +18,7 @@
       • Function classification and error detection
       • Custom notification system for browser configuration
       
-      Supports .prg and .hb file extensions with comprehensive Harbour/xHarbour syntax support.
+      Supports .prg and .ch file extensions with comprehensive Harbour syntax support.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -27,7 +27,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
         <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
-                  fieldName="INSTANCE" language="Harbour" extensions="prg;hb"/>
+                  fieldName="INSTANCE" language="Harbour" extensions="prg;ch"/>
 
         <!-- Language -->
         <lang.parserDefinition language="Harbour"
