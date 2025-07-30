@@ -42,8 +42,7 @@ public class HarbourCodeStyleSettingsProvider extends CodeStyleSettingsProvider 
         @Override
         protected void initTabs(CodeStyleSettings settings) {
             addIndentOptionsTab(settings);
-            addSpacesTab(settings);
-            addWrappingAndBracesTab(settings);
+            addTab(new HarbourWrappingAndBracesPanel(settings));
             addTab(new HarbourFormattingPanel(settings));
         }
     }

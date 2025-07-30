@@ -43,20 +43,13 @@ public class HarbourLanguageCodeStyleSettingsProvider extends LanguageCodeStyleS
 
     @Override
     public void customizeSettings(@NotNull CodeStyleSettingsCustomizable consumer, @NotNull SettingsType settingsType) {
-        if (settingsType == SettingsType.SPACING_SETTINGS) {
-            consumer.showStandardOptions("SPACE_AROUND_ASSIGNMENT_OPERATORS");
-            consumer.showStandardOptions("SPACE_AROUND_LOGICAL_OPERATORS");
-            consumer.showStandardOptions("SPACE_AROUND_EQUALITY_OPERATORS");
-            consumer.showStandardOptions("SPACE_AROUND_RELATIONAL_OPERATORS");
-            consumer.showStandardOptions("SPACE_AFTER_COMMA");
-            consumer.showStandardOptions("SPACE_BEFORE_COMMA");
-        } else if (settingsType == SettingsType.INDENT_SETTINGS) {
+        if (settingsType == SettingsType.INDENT_SETTINGS) {
             consumer.showStandardOptions("INDENT_SIZE");
             consumer.showStandardOptions("TAB_SIZE");
             consumer.showStandardOptions("USE_TAB_CHARACTER");
         } else if (settingsType == SettingsType.WRAPPING_AND_BRACES_SETTINGS) {
-            // Show all standard wrapping options
-            consumer.showAllStandardOptions();
+            // Show wrapping options
+            consumer.showStandardOptions("WRAP_ON_TYPING");
         }
     }
     
@@ -80,5 +73,8 @@ public class HarbourLanguageCodeStyleSettingsProvider extends LanguageCodeStyleS
         
         // Set default hard wrap to 0 (disabled)
         commonSettings.RIGHT_MARGIN = 0;
+        
+        // Enable hard wrap editing
+        commonSettings.WRAP_LONG_LINES = false;
     }
 }
