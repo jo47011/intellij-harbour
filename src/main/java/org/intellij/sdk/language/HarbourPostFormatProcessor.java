@@ -60,7 +60,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
     // Pattern for detecting comment-only lines
     private static final Pattern COMMENT_LINE_PATTERN =
-            Pattern.compile("^\\s*(?://.*|/\\*.*\\*/\\s*)$");
+            Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
 
     @Override
     public @NotNull PsiElement processElement(@NotNull PsiElement element, @NotNull CodeStyleSettings settings) {
@@ -243,8 +243,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Check for class start/end
+            boolean isClassStatement = CLASS_START_PATTERN.matcher(line).matches();
             boolean isEndClassStatement = CLASS_END_PATTERN.matcher(line).matches();
-            if (CLASS_START_PATTERN.matcher(line).matches()) {
+            if (isClassStatement) {
                 inClassDefinition = true;
             } else if (isEndClassStatement) {
                 inClassDefinition = false;
@@ -345,15 +346,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String newIndent;
 
             if (isCommentOnlyLine) {
-                // Always use the previous line's indentation for comments, even if it was zero
-                newIndent = previousLineActualIndent;
-                // Using previous indentation for comment line
+                // Comments should never be indented
+                newIndent = "";
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
                 // Using continuation indentation for line line
-            } else if (isEndClassStatement) {
-                // ENDCLASS should never be indented
+            } else if (isClassStatement || isEndClassStatement) {
+                // CLASS and ENDCLASS should never be indented
                 newIndent = "";
             } else if (customIndentSpaces >= 0) {
                 // Use custom indentation for specific statement types
