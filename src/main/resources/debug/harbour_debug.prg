@@ -65,26 +65,8 @@ INIT PROCEDURE SetGlobalErrorHandler()
    // which may not be available yet during INIT procedures
    // The socket connection will be established when __dbgEntry is called
    
-   // Log that the error handler has been set
-   hLog := FCreate("error_handler_init.log", 0)
-   IF hLog != -1
-      FWrite(hLog, "=== GLOBAL ERROR HANDLER INITIALIZED ===" + CRLF)
-      FWrite(hLog, "Time: " + Time() + CRLF)
-      FWrite(hLog, "Date: " + DToC(Date()) + CRLF)
-      FWrite(hLog, "Version: 1.0.398" + CRLF)
-      FWrite(hLog, "Previous handler: " + IF(oCurrentHandler == NIL, "NIL", "EXISTS") + CRLF)
-      FWrite(hLog, "Error handler set successfully" + CRLF)
-      FWrite(hLog, "INIT procedure called - this should happen early" + CRLF)
-      FWrite(hLog, "Socket connection will be established when debugger activates" + CRLF)
-      FClose(hLog)
-   ENDIF
-   
-   // Also create a test file to verify this INIT was called
-   hLog := FCreate("init_called.log", 0)
-   IF hLog != -1
-      FWrite(hLog, "INIT PROCEDURE WAS CALLED at " + Time() + CRLF)
-      FClose(hLog)
-   ENDIF
+   // Removed hardcoded log files - using stderr for essential debug messages only
+   // Use environment variable HB_REMOTE_DEBUG_LOG to enable debug logging if needed
 RETURN
 
 // Get or create debug info
@@ -127,15 +109,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    // Don't check if empty - always override to ensure our handler is active
    ErrorBlock({|oError| GlobalErrorHandler(oError)})
    
-   // Log that we've set the error handler
-   hLog := FCreate("debug_entry_handler.log", 0)
-   IF hLog != -1
-      FWrite(hLog, "Global error handler ALWAYS set from __dbgEntry" + CRLF)
-      FWrite(hLog, "Time: " + Time() + CRLF)
-      FWrite(hLog, "Mode: " + AllTrim(Str(nMode)) + CRLF)
-      FWrite(hLog, "Previous error block overridden" + CRLF)
-      FClose(hLog)
-   ENDIF
+   // Removed hardcoded debug log file - error handler is set silently
 
    DO CASE
    CASE nMode == HB_DBG_GETENTRY
@@ -292,27 +266,8 @@ STATIC PROCEDURE ErrorHandler(oError, nMode)
    // Suppress unused parameter warnings
    HB_SYMBOL_UNUSED(nMode)
    
-   // Create error log
-   hErrorLog := FCreate("debug_error.log", 0)
-   IF hErrorLog != -1
-      FWrite(hErrorLog, "=== DEBUG ERROR at " + Time() + " ===" + CRLF)
-      FWrite(hErrorLog, "Error: " + oError:Description + CRLF)
-      FWrite(hErrorLog, "Operation: " + oError:Operation + CRLF)
-      FWrite(hErrorLog, "Mode: " + AllTrim(Str(nMode)) + CRLF)
-      FWrite(hErrorLog, "Subsystem: " + AllTrim(Str(oError:SubSystem)) + CRLF)
-      FWrite(hErrorLog, "Error Code: " + AllTrim(Str(oError:GenCode)) + CRLF)
-      
-      // Generate stack trace
-      FWrite(hErrorLog, "=== STACK TRACE ===" + CRLF)
-      FOR i := 1 TO 20
-         IF !Empty(ProcName(i))
-            FWrite(hErrorLog, "  " + AllTrim(Str(i)) + ": " + ProcName(i) + "(" + AllTrim(Str(ProcLine(i))) + ") in " + ProcFile(i) + CRLF)
-         ELSE
-            EXIT
-         ENDIF
-      NEXT
-      FClose(hErrorLog)
-   ENDIF
+   // Log to stderr instead of file for essential error tracking
+   FWrite(2, "DEBUG ERROR: " + oError:Description + " at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ")" + CRLF)
    
    // Send error to PyCharm console if socket is available
    IF !Empty(oDebugInfo["socket"])
@@ -320,14 +275,7 @@ STATIC PROCEDURE ErrorHandler(oError, nMode)
       hb_inetSend(oDebugInfo["socket"], "ERROR:" + cErrorMsg + CRLF)
    ENDIF
    
-   // Also log to debug trace
-   hErrorLog := FOpen("debug_trace.log", 1)
-   IF hErrorLog != -1
-      FSeek(hErrorLog, 0, 2)  // Append
-      FWrite(hErrorLog, "*** CRITICAL ERROR: " + oError:Description + " ***" + CRLF)
-      FWrite(hErrorLog, "*** at " + ProcName(1) + "(" + AllTrim(Str(ProcLine(1))) + ") ***" + CRLF)
-      FClose(hErrorLog)
-   ENDIF
+   // Removed hardcoded debug trace log file
    
    // REMOVED: Print error to stdout - causes popup console
    // Errors should only go to PyCharm console via socket or file logging
@@ -351,35 +299,14 @@ FUNCTION GlobalErrorHandler(oError)
    ENDIF
    s_lInErrorHandler := .T.
    
-   // FIRST: Create a log that proves this handler was called
-   hErrorLog := FCreate("error_handler_called.log", 0)
-   IF hErrorLog != -1
-      FWrite(hErrorLog, "=== GLOBAL ERROR HANDLER CALLED ===" + CRLF)
-      FWrite(hErrorLog, "Time: " + Time() + CRLF)
-      FWrite(hErrorLog, "Error: " + oError:Description + CRLF)
-      FWrite(hErrorLog, "This proves the error handler is working!" + CRLF)
-      FClose(hErrorLog)
-   ENDIF
+   // Removed hardcoded error handler log file
    
    oDebugInfo := __DEBUGITEM()
    
    // Send error to PyCharm console via socket only (no file monitoring)
    // Let's examine the error object more carefully to find the right location
    
-   // First, log what's available in the error object for debugging
-   hErrorLog := FCreate("error_object_debug.log", 0)
-   IF hErrorLog != -1
-      FWrite(hErrorLog, "=== ERROR OBJECT PROPERTIES ===" + CRLF)
-      FWrite(hErrorLog, "Description: " + oError:Description + CRLF)
-      FWrite(hErrorLog, "Operation: " + oError:Operation + CRLF)
-      FWrite(hErrorLog, "SubSystem: " + AllTrim(Str(oError:SubSystem)) + CRLF)
-      FWrite(hErrorLog, "GenCode: " + AllTrim(Str(oError:GenCode)) + CRLF)
-      FWrite(hErrorLog, "Severity: " + AllTrim(Str(oError:Severity)) + CRLF)
-      FWrite(hErrorLog, "ProcName: " + AllTrim(Str(ProcName(2))) + CRLF)
-      FWrite(hErrorLog, "ProcLine: " + AllTrim(Str(ProcLine(2))) + CRLF)
-      FWrite(hErrorLog, "ProcFile: " + ProcFile(2) + CRLF)
-      FClose(hErrorLog)
-   ENDIF
+   // Removed error object debug log file
    
    // Use ProcName(2), ProcLine(2) to skip the error handler frame
    cProcName := ProcName(2)
@@ -393,43 +320,14 @@ FUNCTION GlobalErrorHandler(oError)
       hb_inetSend(oDebugInfo["socket"], "ERROR_MSG:" + cErrorMsg + CRLF)
       hb_inetSend(oDebugInfo["socket"], "ERROR_STACK:" + cProcName + "(" + cProcLine + ") in " + cFileName + CRLF)
    ELSE
-      // If no socket connection, write to PyCharm error file for potential monitoring
-      hPyCharmLog := FCreate("pycharm_error.log", 0)
-      IF hPyCharmLog != -1
-         FWrite(hPyCharmLog, "[" + Time() + "] " + cErrorMsg + CRLF)
-         FWrite(hPyCharmLog, "Stack: " + cProcName + "(" + cProcLine + ") in " + cFileName + CRLF)
-         FClose(hPyCharmLog)
-      ENDIF
+      // No socket connection - fallback to stderr only (no hardcoded files)
       
       // Also try stderr as fallback
       FWrite(2, cErrorMsg + CRLF)
       FWrite(2, "Stack: " + cProcName + "(" + cProcLine + ") in " + cFileName + CRLF)
    ENDIF
    
-   // Also log to file for debugging
-   hErrorLog := FCreate("global_error.log", 0)
-   IF hErrorLog != -1
-      FWrite(hErrorLog, "=== GLOBAL ERROR at " + Time() + " ===" + CRLF)
-      FWrite(hErrorLog, "Error: " + oError:Description + CRLF)
-      FWrite(hErrorLog, "Operation: " + oError:Operation + CRLF)
-      FWrite(hErrorLog, "Subsystem: " + AllTrim(Str(oError:SubSystem)) + CRLF)
-      FWrite(hErrorLog, "Error Code: " + AllTrim(Str(oError:GenCode)) + CRLF)
-      FWrite(hErrorLog, "Called from: " + cProcName + "(" + cProcLine + ") in " + cFileName + CRLF)
-      
-      // Debug socket connection status and debug info
-      IF !Empty(oDebugInfo["socket"])
-         FWrite(hErrorLog, "Socket status: CONNECTED - Error sent to PyCharm" + CRLF)
-         FWrite(hErrorLog, "Socket handle: " + AllTrim(Str(oDebugInfo["socket"])) + CRLF)
-      ELSE
-         FWrite(hErrorLog, "Socket status: NOT CONNECTED - Error written to pycharm_error.log" + CRLF)
-         FWrite(hErrorLog, "Debug info: " + IF(oDebugInfo == NIL, "NIL", "EXISTS") + CRLF)
-      ENDIF
-      
-      FWrite(hErrorLog, "Global error handler version: 1.0.398" + CRLF)
-      FWrite(hErrorLog, "IMPORTANT: This error should appear in PyCharm console if debug mode is active" + CRLF)
-      
-      FClose(hErrorLog)
-   ENDIF
+   // Removed global error log file - errors are sent via socket or stderr
    
    // Reset recursion flag before re-raising error
    s_lInErrorHandler := .F.
@@ -447,14 +345,7 @@ FUNCTION GlobalErrorHandler(oError)
 FUNCTION TestErrorHandler()
    LOCAL hLog, aTest
    
-   // Log that test function was called
-   hLog := FCreate("test_error_handler.log", 0)
-   IF hLog != -1
-      FWrite(hLog, "=== TEST ERROR HANDLER CALLED ===" + CRLF)
-      FWrite(hLog, "Time: " + Time() + CRLF)
-      FWrite(hLog, "About to trigger array bounds error (this SHOULD trigger ErrorBlock)" + CRLF)
-      FClose(hLog)
-   ENDIF
+   // Removed test error handler log file
    
    // Division by zero doesn't trigger ErrorBlock() in Harbour!
    // Use array bounds error instead - this WILL trigger ErrorBlock()
@@ -476,41 +367,21 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    // Simple error handling to prevent crashes
    BEGIN SEQUENCE
    
-   // Create comprehensive trace log to identify GUI crash cause
-   hLog := FOpen("debug_trace.log", 1)  // Open for writing, append mode
-   IF hLog == -1
-      hLog := FCreate("debug_trace.log", 0)  // Create if doesn't exist
-   ELSE
-      FSeek(hLog, 0, 2)  // Seek to end for append
-   ENDIF
-   IF hLog != -1
-      FWrite(hLog, "=== CheckSocket ENTRY #" + Time() + " v1.0.357 TRACE ===" + CRLF)
-      FWrite(hLog, "Time: " + Time() + " Date: " + DToC(Date()) + CRLF)
-      FWrite(hLog, "lStopSent: " + IF(lStopSent, "TRUE", "FALSE") + CRLF)
-      FWrite(hLog, "Current Function: " + ProcName(1) + " Line: " + AllTrim(Str(ProcLine(1))) + CRLF)
-      FWrite(hLog, "Socket exists: " + IF(Empty(oDebugInfo["socket"]), "NO", "YES") + CRLF)
-      FWrite(hLog, "lRunning: " + IF(oDebugInfo["lRunning"], "TRUE", "FALSE") + CRLF)
-      FWrite(hLog, "timeCheckForDebug: " + AllTrim(Str(oDebugInfo["timeCheckForDebug"])) + CRLF)
-   ENDIF
+   // Removed debug trace log file - socket debugging disabled to avoid file clutter
+   LOCAL hLog := -1  // Keep variable for existing code compatibility
    
    // Try to connect if not connected
    IF Empty(oDebugInfo["socket"]) .AND. oDebugInfo["timeCheckForDebug"] <= 14
-      IF hLog != -1
-         FWrite(hLog, "ATTEMPTING CONNECTION - timeCheck: " + AllTrim(Str(oDebugInfo["timeCheckForDebug"])) + CRLF)
-      ENDIF
+      // Connection attempt (logging removed)
       hb_inetInit()
       oDebugInfo["socket"] := hb_inetCreate(140 - oDebugInfo["timeCheckForDebug"]*10)
       hb_inetConnect("127.0.0.1", DBG_PORT, oDebugInfo["socket"])
       
       IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
-         IF hLog != -1
-            FWrite(hLog, "CONNECTION FAILED - Error: " + AllTrim(Str(hb_inetErrorCode(oDebugInfo["socket"]))) + CRLF)
-         ENDIF
+         // Connection failed (logging removed)
          tmp := "NO"
       ELSE
-         IF hLog != -1
-            FWrite(hLog, "CONNECTION SUCCESS - sending handshake" + CRLF)
-         ENDIF
+         // Connection success (logging removed)
          // Send handshake
          hb_inetSend(oDebugInfo["socket"], HB_ARGV(0) + CRLF + Str(__PIDNum()) + CRLF)
          
@@ -520,58 +391,39 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDDO
          
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
-         IF hLog != -1
-            FWrite(hLog, "HANDSHAKE RESPONSE: '" + tmp + "'" + CRLF)
-         ENDIF
+         // Handshake response (logging removed)
       ENDIF
       
       IF tmp != "HELLO"
-         IF hLog != -1
-            FWrite(hLog, "HANDSHAKE FAILED - Expected HELLO, got: '" + tmp + "'" + CRLF)
-         ENDIF
+         // Handshake failed (logging removed)
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
-         IF hLog != -1
-            FWrite(hLog, "HANDSHAKE SUCCESS - Debugger connected" + CRLF)
-         ENDIF
+         // Handshake success (logging removed)
       ENDIF
    ENDIF
    
    IF Empty(oDebugInfo["socket"])
-      IF hLog != -1
-         FWrite(hLog, "NO SOCKET - RETURNING" + CRLF)
-         FClose(hLog)
-      ENDIF
+      // No socket - returning (logging removed)
       BREAK
    ENDIF
    
-   IF hLog != -1
-      FWrite(hLog, "SOCKET AVAILABLE - ENTERING MAIN LOOP" + CRLF)
-   ENDIF
+   // Socket available - entering main loop (logging removed)
    
    // CRITICAL FIX v1.0.350: Add timeout to prevent GUI crashes from infinite loops
    nLoopCount := 0
    nMaxLoops := 1000  // Variables already declared at function start
    
-   // Log timeout configuration
-   IF hLog != -1
-      FWrite(hLog, "Starting loop with timeout: " + AllTrim(Str(nMaxLoops)) + " iterations" + CRLF)
-   ENDIF
+   // Loop with timeout (logging removed)
    
    // Main command loop with safety timeout
    DO WHILE .T. .AND. nLoopCount < nMaxLoops
       nLoopCount++
       
-      IF hLog != -1 .AND. nLoopCount % 100 == 1  // Log every 100 iterations
-         FWrite(hLog, "MAIN LOOP iteration: " + AllTrim(Str(nLoopCount)) + CRLF)
-      ENDIF
+      // Main loop iteration (logging removed)
       
       IF Empty(oDebugInfo["socket"]) .OR. hb_inetErrorCode(oDebugInfo["socket"]) != 0
-         IF hLog != -1
-            FWrite(hLog, "SOCKET ERROR - ErrorCode: " + AllTrim(Str(hb_inetErrorCode(oDebugInfo["socket"]))) + CRLF)
-            FClose(hLog)
-         ENDIF
+         // Socket error (logging removed)
          oDebugInfo["socket"] := NIL
          oDebugInfo["lRunning"] := .T.
          oDebugInfo["aBreaks"] := {=>}
@@ -582,26 +434,18 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       DO WHILE hb_inetDataReady(oDebugInfo["socket"]) == 1
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
          
-         IF hLog != -1 .AND. !Empty(tmp)
-            FWrite(hLog, "RECEIVED COMMAND: '" + tmp + "'" + CRLF)
-         ENDIF
+         // Received command (logging removed)
          
          IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
-            IF hLog != -1
-               FWrite(hLog, "SOCKET ERROR IN COMMAND LOOP - ErrorCode: " + AllTrim(Str(hb_inetErrorCode(oDebugInfo["socket"]))) + CRLF)
-            ENDIF
+            // Socket error in command loop (logging removed)
             EXIT
          ENDIF
          
          IF !Empty(tmp)
-            IF hLog != -1
-               FWrite(hLog, "PROCESSING COMMAND: '" + tmp + "'" + CRLF)
-            ENDIF
+            // Processing command (logging removed)
             DO CASE
                CASE tmp == "GO"
-                  IF hLog != -1
-                     FWrite(hLog, "GO COMMAND - Setting lRunning=TRUE, lNeedExit=TRUE" + CRLF)
-                  ENDIF
+                  // GO command (logging removed)
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
@@ -637,91 +481,55 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   SendStack()
                   
                CASE Left(tmp, 6) == "LOCALS"
-                  IF hLog != -1
-                     FWrite(hLog, "LOCALS COMMAND: '" + tmp + "'" + CRLF)
-                  ENDIF
+                  // LOCALS command (logging removed)
                   IF ":" $ tmp
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendLocals with: '" + SubStr(tmp, 8) + "'" + CRLF)
-                     ENDIF
+                     // Calling SendLocals (logging removed)
                      SendLocals(SubStr(tmp, 8))  // LOCALS: = 7 chars, so 8 gets after colon
                   ELSE
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendLocals with: '0'" + CRLF)
-                     ENDIF
+                     // Calling SendLocals with 0 (logging removed)
                      SendLocals("0")
                   ENDIF
-                  IF hLog != -1
-                     FWrite(hLog, "SendLocals completed" + CRLF)
-                  ENDIF
+                  // SendLocals completed (logging removed)
                   
                CASE Left(tmp, 7) == "STATICS"
-                  IF hLog != -1
-                     FWrite(hLog, "STATICS COMMAND: '" + tmp + "'" + CRLF)
-                  ENDIF
+                  // STATICS command (logging removed)
                   IF ":" $ tmp
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendStatics with: '" + SubStr(tmp, 8) + "'" + CRLF)
-                     ENDIF
+                     // Calling SendStatics (logging removed)
                      SendStatics(SubStr(tmp, 8))  // STATICS: = 8 chars  
                   ELSE
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendStatics with: '0'" + CRLF)
-                     ENDIF
+                     // Calling SendStatics with 0 (logging removed)
                      SendStatics("0")
                   ENDIF
-                  IF hLog != -1
-                     FWrite(hLog, "SendStatics completed" + CRLF)
-                  ENDIF
+                  // SendStatics completed (logging removed)
                   
                CASE Left(tmp, 8) == "PRIVATES"
-                  IF hLog != -1
-                     FWrite(hLog, "PRIVATES COMMAND: '" + tmp + "'" + CRLF)
-                  ENDIF
+                  // PRIVATES command (logging removed)
                   IF ":" $ tmp
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendPrivates with: '" + SubStr(tmp, 9) + "'" + CRLF)
-                     ENDIF
+                     // Calling SendPrivates (logging removed)
                      SendPrivates(SubStr(tmp, 9))  // PRIVATES: = 9 chars
                   ELSE
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendPrivates with: '0'" + CRLF)
-                     ENDIF
+                     // Calling SendPrivates with 0 (logging removed)
                      SendPrivates("0")
                   ENDIF
-                  IF hLog != -1
-                     FWrite(hLog, "SendPrivates completed" + CRLF)
-                  ENDIF
+                  // SendPrivates completed (logging removed)
                   
                CASE Left(tmp, 7) == "PUBLICS"
-                  IF hLog != -1
-                     FWrite(hLog, "PUBLICS COMMAND: '" + tmp + "'" + CRLF)
-                  ENDIF
+                  // PUBLICS command (logging removed)
                   IF ":" $ tmp
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendPublics with: '" + SubStr(tmp, 8) + "'" + CRLF)
-                     ENDIF
+                     // Calling SendPublics (logging removed)
                      SendPublics(SubStr(tmp, 8))  // PUBLICS: = 8 chars
                   ELSE
-                     IF hLog != -1
-                        FWrite(hLog, "Calling SendPublics with: '0'" + CRLF)
-                     ENDIF
+                     // Calling SendPublics with 0 (logging removed)
                      SendPublics("0")
                   ENDIF
-                  IF hLog != -1
-                     FWrite(hLog, "SendPublics completed" + CRLF)
-                  ENDIF
+                  // SendPublics completed (logging removed)
                   
                CASE tmp == "BREAKPOINT"
-                  IF hLog != -1
-                     FWrite(hLog, "BREAKPOINT COMMAND - Acknowledgment only (breakpoints set separately)" + CRLF)
-                  ENDIF
+                  // BREAKPOINT command (logging removed)
                   // BREAKPOINT command is just an acknowledgment - actual breakpoints come as ADDBREAK commands
                   
                CASE Left(tmp, 1) == "+" .OR. Left(tmp, 1) == "-"
-                  IF hLog != -1
-                     FWrite(hLog, "BREAKPOINT SET/REMOVE: '" + tmp + "'" + CRLF)
-                  ENDIF
+                  // BREAKPOINT set/remove (logging removed)
                   SetBreakpoint(tmp)
                   
                CASE Left(tmp, 8) == "ADDBREAK"
@@ -740,10 +548,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       ENDDO
       
       IF lNeedExit
-         IF hLog != -1
-            FWrite(hLog, "lNeedExit=TRUE - EXITING CheckSocket" + CRLF)
-            FClose(hLog)
-         ENDIF
+         // lNeedExit=TRUE - exiting CheckSocket (logging removed)
          BREAK
       ENDIF
       
@@ -852,20 +657,13 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    
    // CRITICAL FIX v1.0.350: Safety exit if loop limit exceeded 
    IF nLoopCount >= nMaxLoops
-      IF hLog != -1
-         FWrite(hLog, "TIMEOUT REACHED - EMERGENCY EXIT after " + AllTrim(Str(nLoopCount)) + " iterations" + CRLF)
-         FWrite(hLog, "This prevents GUI crashes from infinite loops" + CRLF)
-         FClose(hLog)
-      ENDIF
+      // Timeout reached - emergency exit (logging removed)
       // Emergency exit to prevent GUI crashes
       oDebugInfo["socket"] := NIL
       oDebugInfo["lRunning"] := .T.
       oDebugInfo["aBreaks"] := {=>}
    ELSE
-      IF hLog != -1
-         FWrite(hLog, "NORMAL EXIT from CheckSocket after " + AllTrim(Str(nLoopCount)) + " iterations" + CRLF)
-         FClose(hLog)
-      ENDIF
+      // Normal exit from CheckSocket (logging removed)
    ENDIF
    
    END SEQUENCE
@@ -903,17 +701,7 @@ STATIC PROCEDURE SendLocals(cParams)
    LOCAL aVarData := {}
    LOCAL hLog
    
-   // Create trace log for SendLocals  
-   hLog := FOpen("sendlocals_trace.log", 1)  // Open for writing, append mode
-   IF hLog == -1
-      hLog := FCreate("sendlocals_trace.log", 0)  // Create if doesn't exist
-   ELSE
-      FSeek(hLog, 0, 2)  // Seek to end for append
-   ENDIF
-   IF hLog != -1
-      FWrite(hLog, "=== SendLocals ENTRY ===" + CRLF)
-      FWrite(hLog, "Time: " + Time() + " Params: '" + cParams + "'" + CRLF)
-   ENDIF
+   // Removed sendlocals trace log file - no hardcoded logging
    
    // Parse parameters: level:start:count
    aParams := hb_ATokens(cParams, ":")
