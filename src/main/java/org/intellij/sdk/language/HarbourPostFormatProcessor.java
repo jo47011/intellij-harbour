@@ -279,10 +279,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             int customIndentSpaces = -1; // -1 means use standard indentation
 
             // Apply custom indentation for specific statement types
-            // NOTE: RETURN statements now always use normal indentation based on context
+            // NOTE: RETURN statements at function/method end use custom indentation, others use normal
             if (isReturnStatement) {
-                // All RETURN statements use normal indentation based on their surrounding context
-                customIndentSpaces = -1; // Use normal indentation
+                // Check if this RETURN is at the end of a function/method (indentLevel == 1)
+                // or inside control structures (indentLevel > 1)
+                if (inFunctionBody && indentLevel == 1) {
+                    // RETURN at the end of function/method - use custom indentation
+                    customIndentSpaces = returnIndent;
+                } else {
+                    // RETURN inside control structures - use normal indentation
+                    customIndentSpaces = -1;
+                }
             } else if (isLocalDeclaration && inFunctionBody) {
                 // Apply custom indentation for LOCAL declarations
                 customIndentSpaces = localIndent;
