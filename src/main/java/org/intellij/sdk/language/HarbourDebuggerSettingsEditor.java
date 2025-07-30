@@ -36,6 +36,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
     private JTextField breakpointFileField;
     private JTextField debugPortField;
     private JCheckBox useDirectExecutionCheckbox;
+    private JCheckBox useRebuildFlagCheckbox;
 
     public HarbourDebuggerSettingsEditor() {
         createUIComponents();
@@ -117,6 +118,10 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         compilerOptionsField = new JTextField();
         compilePanel.add(createLabeledField("Compiler Options:", compilerOptionsField), c);
 
+        // Rebuild flag checkbox
+        useRebuildFlagCheckbox = new JCheckBox("Add -rebuild flag to compiler arguments");
+        compilePanel.add(useRebuildFlagCheckbox, c);
+
         // Create the direct panel (for direct execution)
         directPanel = new JPanel(new GridBagLayout());
 
@@ -174,6 +179,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         hbmk2PathField.setText(StringUtil.notNullize(configuration.getHbmk2Path()));
         sourceFileField.setText(StringUtil.notNullize(configuration.getSourceFile()));
         compilerOptionsField.setText(StringUtil.notNullize(configuration.getCompilerOptions()));
+        useRebuildFlagCheckbox.setSelected(configuration.isUseRebuildFlag());
 
         // Direct execution settings
         executablePathField.setText(StringUtil.notNullize(configuration.getExecutablePath()));
@@ -202,6 +208,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         configuration.setHbmk2Path(hbmk2PathField.getText());
         configuration.setSourceFile(sourceFileField.getText());
         configuration.setCompilerOptions(compilerOptionsField.getText());
+        configuration.setUseRebuildFlag(useRebuildFlagCheckbox.isSelected());
 
         // Direct execution settings
         configuration.setExecutablePath(executablePathField.getText());

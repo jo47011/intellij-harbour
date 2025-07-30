@@ -6,8 +6,6 @@
 
 - **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
 
-The following files are still written to the project dir, either remove or move to.hbmk (from settings):
-- debug_entry_handler.log  debug_trace.log  error_handler_init.log  init_called.log  sendlocals_trace.log
 
 code formatting
 - indentation
