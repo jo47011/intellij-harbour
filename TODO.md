@@ -23,10 +23,6 @@ code formatting
 
 - Debugger not showing static vars
 
-- Settings: provide for flag rebuild yes/no
-
-- Settings: Harbour Fily Types should support *.prg and *.ch not *.hb
-
 
 - Linting, see https://github.com/APerricone/harbourCodeExtension/wiki/Diagnostics-Lint
 

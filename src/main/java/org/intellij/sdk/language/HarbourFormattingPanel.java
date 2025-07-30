@@ -89,8 +89,8 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints c = new GridBagConstraints();
         c.fill = GridBagConstraints.HORIZONTAL;
-        c.anchor = GridBagConstraints.NORTHWEST;
-        c.insets = new Insets(4, 4, 4, 4);
+        c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(20, 8, 8, 8);
         
         // Title label
         c.gridx = 0;
