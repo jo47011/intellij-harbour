@@ -2,9 +2,8 @@
 
 ## Debugging Improvements
 
-- **Process Coupling**: Debugging process in PyCharm and running GUI should be coupled - if one ends or crashes, the other should be stopped
-
-- **Console Output**: Improve stderr/stacktrace handling in PyCharm console (rolled back pending redesign)
+- **Process Coupling**: Debugging process in PyCharm and running GUI should be coupled
+  - if one ends or crashes, the other should be stopped
 
 
 code formatting

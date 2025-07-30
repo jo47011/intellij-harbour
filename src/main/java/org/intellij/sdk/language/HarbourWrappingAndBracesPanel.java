@@ -97,9 +97,9 @@ public class HarbourWrappingAndBracesPanel extends CodeStyleAbstractPanel {
     public JComponent getPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints c = new GridBagConstraints();
-        c.fill = GridBagConstraints.HORIZONTAL;
+        c.fill = GridBagConstraints.NONE;
         c.anchor = GridBagConstraints.WEST;
-        c.insets = new Insets(20, 8, 8, 8);
+        c.insets = new Insets(20, 16, 8, 8);
         
         // Hard wrap setting
         c.gridx = 0;
@@ -137,11 +137,24 @@ public class HarbourWrappingAndBracesPanel extends CodeStyleAbstractPanel {
         JBLabel visualGuideColumnLabel = new JBLabel("columns (0 = none)");
         panel.add(visualGuideColumnLabel, c);
         
+        // Add horizontal glue to push everything to the left
+        c.gridx = 3;
+        c.gridy = 0;
+        c.gridwidth = 1;
+        c.gridheight = 3;
+        c.weightx = 1.0;
+        c.weighty = 0.0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(Box.createHorizontalGlue(), c);
+        
         // Add vertical glue to push everything to the top
         c.gridx = 0;
         c.gridy = 3;
-        c.gridwidth = 3;
+        c.gridwidth = 4;
+        c.gridheight = 1;
+        c.weightx = 0.0;
         c.weighty = 1.0;
+        c.fill = GridBagConstraints.VERTICAL;
         panel.add(Box.createVerticalGlue(), c);
         
         return panel;
