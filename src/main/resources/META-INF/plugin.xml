@@ -47,6 +47,15 @@
         <!-- Commenter -->
         <lang.commenter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourCommenter"/>
 
+        <!-- Quote Handler -->
+        <lang.quoteHandler language="Harbour" implementationClass="org.intellij.sdk.language.HarbourQuoteHandler"/>
+
+        <!-- Brace Matcher -->
+        <lang.braceMatcher language="Harbour" implementationClass="org.intellij.sdk.language.HarbourBraceMatcher"/>
+
+        <!-- Smart Backspace Handler -->
+        <backspaceHandlerDelegate implementation="org.intellij.sdk.language.HarbourBackspaceHandler"/>
+
         <!-- Code Completion -->
         <completion.contributor language="Harbour"
                                 implementationClass="org.intellij.sdk.language.HarbourCompletionContributor"/>
