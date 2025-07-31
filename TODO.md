@@ -8,8 +8,19 @@
 - code completion should propose local and public vars as well
   as well as constants, e.g. Error(TRY_AGAIN)
 
-- ctrl-shift-F7 toggle comment for selection block
-  (comment w/ line comment)
+indentation:
+- indent newly type code to current level, e.g.
+  if ! valtype(objErr)=="O"
+    Error("Kein Error-Objekt übergeben: Art.Bestand"+SCHWERER_FEHLER)
+  endif
+
+Qout("This is added afterwards and should be indented as other code, works on reformat action")
+
+  if ( objErr:genCode == EG_DATAWIDTH  )
+
+- code inside BEGIN SEQUENCE, RECOVER USING and END SEQUENCE should be indented. 
+  The keywords BEGIN SEQUENCE, RECOVER USING and END SEQUENCE should be highlighted like if,endif, etc.
+
 
 - Linting, see https://github.com/APerricone/harbourCodeExtension/wiki/Diagnostics-Lint
 

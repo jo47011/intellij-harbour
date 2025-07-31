@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.PsiDocumentManager;
@@ -95,6 +96,12 @@ public class HarbourCompletionContributor extends CompletionContributor {
 
                             // Add local variables from current scope
                             addLocalVariablesFromCurrentScope(caseInsensitiveResult, parameters);
+
+                            // Add public variables from current file scope
+                            addPublicVariablesFromCurrentFile(caseInsensitiveResult, parameters);
+
+                            // Add constants/defines from current file and included .ch files
+                            addConstantsAndDefines(caseInsensitiveResult, parameters);
 
                             // Add user-defined functions from project
                             addUserDefinedFunctions(caseInsensitiveResult, project, parameters);
@@ -460,6 +467,249 @@ public class HarbourCompletionContributor extends CompletionContributor {
                 .withCaseSensitivity(false)
                 .withTypeText(isParameter ? "Parameter" : "Local Variable")
                 .withIcon(HarbourIcons.FILE);
+    }
+
+    /**
+     * Adds public variables from current file scope to completion results
+     */
+    private void addPublicVariablesFromCurrentFile(CompletionResultSet result, CompletionParameters parameters) {
+        try {
+            // Get the current file
+            PsiFile file = parameters.getOriginalFile();
+            if (file == null || !(file instanceof HarbourFile)) {
+                return;
+            }
+
+            // Get the entire file text
+            String fileText = file.getText();
+            
+            // Find all PUBLIC variable declarations in the file
+            Set<String> publicVariables = new HashSet<>();
+
+            // Pattern for PUBLIC variable declarations: must be at start of line (with optional whitespace)
+            // and stop at line end or comment to avoid matching comments
+            Pattern publicPattern = Pattern.compile("(?i)^\\s*PUBLIC\\s+([\\w,\\s:=\"'.\\(\\)]+?)(?:\\s*//|\\s*$)", Pattern.MULTILINE);
+            Matcher publicMatcher = publicPattern.matcher(fileText);
+
+            while (publicMatcher.find()) {
+                ProgressManager.checkCanceled(); // Check for cancellation
+
+                // Extract the variable declaration part
+                String declarations = publicMatcher.group(1);
+
+                // Split by commas to get individual variables
+                String[] vars = declarations.split(",");
+                for (String var : vars) {
+                    // Extract variable name (before any assignment or type declaration)
+                    String varName = var.trim();
+
+                    // Handle assignments (:=)
+                    int assignPos = varName.indexOf(":=");
+                    if (assignPos > 0) {
+                        varName = varName.substring(0, assignPos).trim();
+                    }
+
+                    // Handle type declarations (:)
+                    int typePos = varName.indexOf(":");
+                    if (typePos > 0) {
+                        varName = varName.substring(0, typePos).trim();
+                    }
+
+                    // Add the variable if it's valid
+                    if (!varName.isEmpty() && Character.isLetter(varName.charAt(0))) {
+                        publicVariables.add(varName);
+                        HarbourLogger.log("CompletionContributor", "Found public variable: " + varName);
+                    }
+                }
+            }
+
+            // Add each public variable to completion results
+            for (String variable : publicVariables) {
+                ProgressManager.checkCanceled(); // Check for cancellation
+                result.addElement(createPublicVariableLookupElement(variable));
+            }
+
+            HarbourLogger.log("CompletionContributor", "Added " + publicVariables.size() + " public variables from current file");
+
+        } catch (ProcessCanceledException e) {
+            throw e;
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error adding public variables: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Creates a lookup element for a public variable
+     */
+    private LookupElement createPublicVariableLookupElement(String variable) {
+        return LookupElementBuilder.create(variable)
+                .withCaseSensitivity(false)
+                .withTypeText("Public Variable")
+                .withIcon(HarbourIcons.FILE);
+    }
+
+    /**
+     * Adds constants and defines from current file and included .ch files to completion results
+     */
+    private void addConstantsAndDefines(CompletionResultSet result, CompletionParameters parameters) {
+        try {
+            // Get the current file
+            PsiFile file = parameters.getOriginalFile();
+            if (file == null || !(file instanceof HarbourFile)) {
+                return;
+            }
+
+            Set<String> constants = new HashSet<>();
+
+            // Add defines from current .prg file
+            addDefinesFromFile(file.getText(), constants);
+
+            // Add defines from included .ch files
+            addDefinesFromIncludedFiles(file, constants, parameters.getOriginalFile().getProject());
+
+            // Add each constant to completion results
+            for (String constant : constants) {
+                ProgressManager.checkCanceled(); // Check for cancellation
+                result.addElement(createConstantLookupElement(constant));
+            }
+
+            HarbourLogger.log("CompletionContributor", "Added " + constants.size() + " constants/defines");
+
+        } catch (ProcessCanceledException e) {
+            throw e;
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error adding constants: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Adds defines from a file's text content
+     */
+    private void addDefinesFromFile(String fileText, Set<String> constants) {
+        try {
+            // Pattern for #define statements: "#define CONSTANT_NAME value"
+            Pattern definePattern = Pattern.compile("(?i)^\\s*#define\\s+([A-Z_][A-Z0-9_]*)\\s+", Pattern.MULTILINE);
+            Matcher defineMatcher = definePattern.matcher(fileText);
+
+            while (defineMatcher.find()) {
+                ProgressManager.checkCanceled(); // Check for cancellation
+
+                String constantName = defineMatcher.group(1);
+                if (!constantName.isEmpty()) {
+                    constants.add(constantName);
+                    HarbourLogger.log("CompletionContributor", "Found define: " + constantName);
+                }
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error parsing defines from file: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Adds defines from included .ch files (recursive)
+     */
+    private void addDefinesFromIncludedFiles(PsiFile currentFile, Set<String> constants, Project project) {
+        Set<String> processedIncludes = new HashSet<>(); // Avoid circular includes
+        processIncludesRecursively(currentFile.getText(), currentFile, constants, project, processedIncludes);
+    }
+
+    /**
+     * Recursively process include files to find all defines
+     */
+    private void processIncludesRecursively(String fileText, PsiFile currentFile, Set<String> constants, 
+                                           Project project, Set<String> processedIncludes) {
+        try {
+            // Pattern for #include statements: "#include "filename.ch"" or "#include <filename.ch>"
+            Pattern includePattern = Pattern.compile("(?i)^\\s*#include\\s+[\"<]([^\">\n]+\\.ch)[\">\n]", Pattern.MULTILINE);
+            Matcher includeMatcher = includePattern.matcher(fileText);
+
+            while (includeMatcher.find()) {
+                ProgressManager.checkCanceled(); // Check for cancellation
+
+                String includeFileName = includeMatcher.group(1);
+                
+                // Skip if already processed (prevent circular includes)
+                if (processedIncludes.contains(includeFileName.toLowerCase())) {
+                    continue;
+                }
+                processedIncludes.add(includeFileName.toLowerCase());
+
+                // Find the include file
+                VirtualFile includeFile = findIncludeFile(includeFileName, currentFile, project);
+                if (includeFile != null) {
+                    try {
+                        // Read the include file content
+                        String includeContent = new String(includeFile.contentsToByteArray(), includeFile.getCharset());
+                        
+                        // Add defines from this include file
+                        addDefinesFromFile(includeContent, constants);
+                        
+                        HarbourLogger.log("CompletionContributor", "Processed include file: " + includeFileName);
+                        
+                        // RECURSIVE: Process includes within this include file
+                        processIncludesRecursively(includeContent, currentFile, constants, project, processedIncludes);
+                        
+                    } catch (Exception e) {
+                        HarbourLogger.log("CompletionContributor", "Error reading include file " + includeFileName + ": " + e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error processing include files recursively: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Find an include file (.ch) by searching in include paths
+     */
+    private VirtualFile findIncludeFile(String fileName, PsiFile currentFile, Project project) {
+        try {
+            // First try relative to current file
+            VirtualFile currentDir = currentFile.getVirtualFile().getParent();
+            if (currentDir != null) {
+                VirtualFile includeFile = currentDir.findChild(fileName);
+                if (includeFile != null && includeFile.exists()) {
+                    return includeFile;
+                }
+            }
+
+            // Try in project root
+            VirtualFile projectRoot = project.getBaseDir();
+            if (projectRoot != null) {
+                VirtualFile includeFile = projectRoot.findChild(fileName);
+                if (includeFile != null && includeFile.exists()) {
+                    return includeFile;
+                }
+            }
+
+            // Try in include paths from settings
+            HarbourSettings settings = HarbourSettings.getInstance(project);
+            if (settings != null) {
+                for (String includePath : settings.getResolvedIncludePaths(project)) {
+                    VirtualFile includeDir = LocalFileSystem.getInstance().findFileByPath(includePath);
+                    if (includeDir != null && includeDir.exists()) {
+                        VirtualFile includeFile = includeDir.findChild(fileName);
+                        if (includeFile != null && includeFile.exists()) {
+                            return includeFile;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error finding include file " + fileName + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Creates a lookup element for a constant/define
+     */
+    private LookupElement createConstantLookupElement(String constant) {
+        return LookupElementBuilder.create(constant)
+                .withCaseSensitivity(false)
+                .withTypeText("Constant")
+                .withIcon(HarbourIcons.FILE)
+                .withBoldness(true);
     }
 
     /**
