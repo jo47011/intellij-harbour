@@ -120,8 +120,8 @@ public class HarbourCompilerOutputFilter implements Filter {
             if (runtimeFunctionMatcher.group(1) != null) {
                 functionName = runtimeFunctionMatcher.group(1);
                 lineNumber = Integer.parseInt(runtimeFunctionMatcher.group(2));
-                // For "at FUNCTION(line)", we need to find the source file in the current working directory
-                filePath = findSourceFileForFunction(functionName);
+                // For "at FUNCTION(line)", search for the function and check line ranges
+                filePath = findSourceFileForFunction(functionName, lineNumber);
                 start = runtimeFunctionMatcher.start(1);  // Start of function name
                 end = runtimeFunctionMatcher.end(2) + 1;  // End of line number including ')'
             }
@@ -408,12 +408,48 @@ public class HarbourCompilerOutputFilter implements Filter {
     }
     
     /**
+     * Open search dialog with function name as fallback when function location cannot be determined.
+     */
+    private void openSearchForFunction(String functionName) {
+        if (project == null) {
+            return; // Can't open search without project context
+        }
+        
+        // Create find model for searching function definitions
+        FindModel findModel = new FindModel();
+        findModel.setStringToFind(functionName + "(");  // Search for function definitions like "main("
+        findModel.setCaseSensitive(false);
+        findModel.setWholeWordsOnly(false);
+        findModel.setRegularExpressions(false);
+        findModel.setFromCursor(false);
+        findModel.setForward(true);
+        findModel.setGlobal(true);
+        findModel.setFindAll(true);
+        
+        // Open Find in Files dialog
+        FindManager findManager = FindManager.getInstance(project);
+        findManager.showFindDialog(findModel, () -> {
+            // Callback after find dialog is closed - nothing special needed
+        });
+    }
+    
+    /**
      * Find the source file for a function when only the function name is given.
      * This is used for runtime errors like "at MAIN(11)" where we need to find which file contains MAIN.
      */
     private String findSourceFileForFunction(String functionName) {
-        // For runtime errors, we typically know the current working directory contains the main file
-        // Try common patterns: if function is MAIN, look for .prg files in working directory
+        return findSourceFileForFunction(functionName, -1);
+    }
+    
+    /**
+     * Find the source file for a function with optional line number for range checking.
+     * This implements the user's suggested approach:
+     * 1. Search for "function(" in all .prg files
+     * 2. If only one occurrence, return that file
+     * 3. If multiple, check which function covers the line number
+     * 4. If no line number or no match, fallback to search dialog
+     */
+    private String findSourceFileForFunction(String functionName, int lineNumber) {
         if (workingDirectory == null) {
             return null;
         }
@@ -423,51 +459,103 @@ public class HarbourCompilerOutputFilter implements Filter {
             return null;
         }
         
-        // List all .prg files in working directory, sorted alphabetically for consistent results
+        // Get all .prg files in working directory
         File[] prgFiles = workDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".prg"));
-        if (prgFiles != null && prgFiles.length > 0) {
-            // Sort files to ensure consistent ordering
-            java.util.Arrays.sort(prgFiles, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
-            
-            // For MAIN function, prioritize files in this order:
-            if ("MAIN".equalsIgnoreCase(functionName)) {
-                // 1. Look for files with "main" in the name first
-                for (File file : prgFiles) {
-                    String fileName = file.getName().toLowerCase();
-                    if (fileName.contains("main") && !fileName.contains("test")) {
-                        return file.getAbsolutePath();
+        if (prgFiles == null || prgFiles.length == 0) {
+            return null;
+        }
+        
+        // Search for function definitions like "PROCEDURE main(" or "FUNCTION main("
+        String searchPattern = functionName.toLowerCase() + "(";
+        java.util.List<FunctionMatch> matches = new java.util.ArrayList<>();
+        
+        for (File file : prgFiles) {
+            try {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i).trim().toLowerCase();
+                    
+                    // Look for function/procedure declarations
+                    if ((line.startsWith("function ") || line.startsWith("procedure ")) 
+                        && line.contains(searchPattern)) {
+                        
+                        // Found a function definition - calculate its range
+                        int startLine = i + 1; // 1-based line numbers
+                        int endLine = findFunctionEndLine(lines, i);
+                        
+                        matches.add(new FunctionMatch(file.getAbsolutePath(), startLine, endLine));
                     }
                 }
-                
-                // 2. Look for the most recently compiled file (test_simple.prg has priority)
-                for (File file : prgFiles) {
-                    String fileName = file.getName().toLowerCase();
-                    if (fileName.equals("test_simple.prg")) {
-                        return file.getAbsolutePath();
-                    }
-                }
-                
-                // 3. Look for files with "simple" (like test_simple.prg)
-                for (File file : prgFiles) {
-                    String fileName = file.getName().toLowerCase();
-                    if (fileName.contains("simple")) {
-                        return file.getAbsolutePath();
-                    }
-                }
-                
-                // 4. Look for test files but exclude generic ones
-                for (File file : prgFiles) {
-                    String fileName = file.getName().toLowerCase();
-                    if (fileName.startsWith("test_") || fileName.equals("test.prg")) {
-                        return file.getAbsolutePath();
-                    }
-                }
-                
-                // 5. If no specific match, return the first .prg file (sorted order)
-                return prgFiles[0].getAbsolutePath();
+            } catch (Exception e) {
+                // Skip files that can't be read
+                continue;
             }
         }
         
-        return null;
+        // If no matches found, open search dialog as fallback
+        if (matches.isEmpty()) {
+            openSearchForFunction(functionName);
+            return null; // No specific file to navigate to
+        }
+        
+        // If only one match, return it
+        if (matches.size() == 1) {
+            return matches.get(0).filePath;
+        }
+        
+        // Multiple matches - if we have a line number, check which function contains it
+        if (lineNumber > 0) {
+            for (FunctionMatch match : matches) {
+                if (lineNumber >= match.startLine && lineNumber <= match.endLine) {
+                    return match.filePath;
+                }
+            }
+        }
+        
+        // Multiple matches but no line number or line doesn't match any function
+        // Return the first match as fallback
+        return matches.get(0).filePath;
+    }
+    
+    /**
+     * Find the end line of a function by looking for RETURN statement or next function
+     */
+    private int findFunctionEndLine(java.util.List<String> lines, int functionStartIndex) {
+        for (int i = functionStartIndex + 1; i < lines.size(); i++) {
+            String line = lines.get(i).trim().toLowerCase();
+            
+            // End at next function/procedure declaration
+            if (line.startsWith("function ") || line.startsWith("procedure ")) {
+                return i; // Line before next function
+            }
+            
+            // End at standalone RETURN (not inside control structures)
+            if (line.equals("return") || line.startsWith("return ")) {
+                // Simple heuristic: if RETURN is not indented much, it's likely the function end
+                String originalLine = lines.get(i);
+                int indent = originalLine.length() - originalLine.trim().length();
+                if (indent <= 4) { // Reasonable assumption for function-ending RETURN
+                    return i + 1;
+                }
+            }
+        }
+        
+        // If no explicit end found, assume it goes to end of file
+        return lines.size();
+    }
+    
+    /**
+     * Helper class to store function match information
+     */
+    private static class FunctionMatch {
+        final String filePath;
+        final int startLine;
+        final int endLine;
+        
+        FunctionMatch(String filePath, int startLine, int endLine) {
+            this.filePath = filePath;
+            this.startLine = startLine;
+            this.endLine = endLine;
+        }
     }
 }
