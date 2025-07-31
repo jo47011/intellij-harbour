@@ -359,7 +359,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL tmp, lNeedExit := .F.
    LOCAL cCurrentFile, nCurrentLine, aStack, i
-   LOCAL hLog  // Add detailed logging to trace GUI crash
+   LOCAL hLog  // Keep variable for existing code compatibility
    LOCAL nLoopCount, nMaxLoops  // Prevent infinite loops that crash GUI
    
    lStopSent := IF(Empty(lStopSent), .F., lStopSent)
@@ -368,7 +368,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    BEGIN SEQUENCE
    
    // Removed debug trace log file - socket debugging disabled to avoid file clutter
-   LOCAL hLog := -1  // Keep variable for existing code compatibility
+   hLog := -1  // Keep variable for existing code compatibility
    
    // Try to connect if not connected
    IF Empty(oDebugInfo["socket"]) .AND. oDebugInfo["timeCheckForDebug"] <= 14
