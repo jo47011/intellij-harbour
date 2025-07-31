@@ -21,6 +21,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
     private JSpinner myReturnIndentSpinner;
     private JSpinner myDataIndentSpinner;
     private JSpinner myMethodIndentSpinner;
+    private JCheckBox mySequenceCheckBox;
     
     protected HarbourFormattingPanel(CodeStyleSettings settings) {
         super(settings);
@@ -72,6 +73,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         harbourSettings.RETURN_INDENT = (Integer) myReturnIndentSpinner.getValue();
         harbourSettings.DATA_INDENT = (Integer) myDataIndentSpinner.getValue();
         harbourSettings.METHOD_INDENT = (Integer) myMethodIndentSpinner.getValue();
+        harbourSettings.SEQUENCE_LIKE_NORMAL_CODE = mySequenceCheckBox.isSelected();
     }
     
     @Override
@@ -80,7 +82,8 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         return harbourSettings.LOCAL_INDENT != (Integer) myLocalIndentSpinner.getValue() ||
                harbourSettings.RETURN_INDENT != (Integer) myReturnIndentSpinner.getValue() ||
                harbourSettings.DATA_INDENT != (Integer) myDataIndentSpinner.getValue() ||
-               harbourSettings.METHOD_INDENT != (Integer) myMethodIndentSpinner.getValue();
+               harbourSettings.METHOD_INDENT != (Integer) myMethodIndentSpinner.getValue() ||
+               harbourSettings.SEQUENCE_LIKE_NORMAL_CODE != mySequenceCheckBox.isSelected();
     }
     
     @Nullable
@@ -140,11 +143,20 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         myMethodIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
         panel.add(myMethodIndentSpinner, c);
         
+        // SEQUENCE indentation
+        c.gridx = 0;
+        c.gridy = 5;
+        c.gridwidth = 2;
+        mySequenceCheckBox = new JCheckBox("Indent BEGIN SEQUENCE like normal code (if/endif style)");
+        mySequenceCheckBox.setToolTipText("When checked, BEGIN SEQUENCE blocks indent like other control structures. When unchecked, they use custom indentation.");
+        panel.add(mySequenceCheckBox, c);
+        c.gridwidth = 1; // Reset gridwidth
+        
         // Add horizontal glue to push everything to the left
         c.gridx = 2;
         c.gridy = 0;
         c.gridwidth = 1;
-        c.gridheight = 5;
+        c.gridheight = 6;
         c.weightx = 1.0;
         c.weighty = 0.0;
         c.fill = GridBagConstraints.HORIZONTAL;
@@ -152,7 +164,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         
         // Add vertical glue to push everything to the top
         c.gridx = 0;
-        c.gridy = 5;
+        c.gridy = 6;
         c.gridwidth = 3;
         c.gridheight = 1;
         c.weightx = 0.0;
@@ -170,5 +182,6 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         myReturnIndentSpinner.setValue(harbourSettings.RETURN_INDENT);
         myDataIndentSpinner.setValue(harbourSettings.DATA_INDENT);
         myMethodIndentSpinner.setValue(harbourSettings.METHOD_INDENT);
+        mySequenceCheckBox.setSelected(harbourSettings.SEQUENCE_LIKE_NORMAL_CODE);
     }
 }

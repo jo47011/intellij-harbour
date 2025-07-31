@@ -82,6 +82,11 @@
     RETURN='return'
     EXIT='exit'
     LOOP='loop'
+    BEGIN='begin'
+    SEQUENCE='sequence'
+    RECOVER='recover'
+    USING='using'
+    END='end'
 
     // Logical operators
     AND='and'
@@ -139,6 +144,7 @@ Statement ::=
   | IfStatement
   | DoWhileStatement
   | ForStatement
+  | BeginSequenceStatement
   | ReturnStatement
   | DataStatement
   | DefaultStatement
@@ -159,6 +165,12 @@ DoWhileStatement ::=
 
 ForStatement ::=
     FOR IDENT EQ Expr TO Expr Statement* NEXT? {
+      pin=1
+      psi=true
+    }
+
+BeginSequenceStatement ::=
+    BEGIN SEQUENCE Statement* (RECOVER USING IDENT Statement*)? END SEQUENCE? {
       pin=1
       psi=true
     }

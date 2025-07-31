@@ -105,6 +105,11 @@ public class HarbourSyntaxHighlighter extends com.intellij.openapi.fileTypes.Syn
             tokenType == HarbourCustomTypes.RETURN ||
             tokenType == HarbourCustomTypes.EXIT ||
             tokenType == HarbourCustomTypes.LOOP ||
+            tokenType == HarbourCustomTypes.BEGIN ||
+            tokenType == HarbourCustomTypes.SEQUENCE ||
+            tokenType == HarbourCustomTypes.RECOVER ||
+            tokenType == HarbourCustomTypes.USING ||
+            tokenType == HarbourCustomTypes.END ||
             tokenType == HarbourCustomTypes.AND ||
             tokenType == HarbourCustomTypes.OR ||
             tokenType == HarbourCustomTypes.NOT) {

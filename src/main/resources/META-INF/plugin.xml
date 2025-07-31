@@ -114,6 +114,12 @@
         <!-- Enter Handler for auto-indentation -->
         <enterHandlerDelegate implementation="org.intellij.sdk.language.HarbourEnterHandler"/>
         
+        <!-- Typed Handler for end keyword indentation correction -->
+        <typedHandler implementation="org.intellij.sdk.language.HarbourTypedHandlerDelegate"/>
+        
+        <!-- Line Indent Provider for fast auto-indentation - TEMPORARILY DISABLED -->
+        <!-- <codeInsight.lineIndentProvider language="Harbour" implementationClass="org.intellij.sdk.language.HarbourLineIndentProvider"/> -->
+        
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
     </extensions>

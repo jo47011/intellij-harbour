@@ -61,6 +61,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     // Pattern for detecting comment-only lines
     private static final Pattern COMMENT_LINE_PATTERN =
             Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
+    
+    // Patterns for BEGIN SEQUENCE constructs
+    private static final Pattern BEGIN_SEQUENCE_PATTERN =
+            Pattern.compile("^\\s*BEGIN\\s+SEQUENCE.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern RECOVER_USING_PATTERN =
+            Pattern.compile("^\\s*RECOVER\\s+USING.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern END_SEQUENCE_PATTERN =
+            Pattern.compile("^\\s*END\\s+SEQUENCE.*$", Pattern.CASE_INSENSITIVE);
 
     @Override
     public @NotNull PsiElement processElement(@NotNull PsiElement element, @NotNull CodeStyleSettings settings) {
@@ -179,6 +187,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int returnIndent = settings.RETURN_INDENT;
         int dataIndent = settings.DATA_INDENT;
         int methodIndent = settings.METHOD_INDENT;
+        boolean sequenceLikeNormalCode = settings.SEQUENCE_LIKE_NORMAL_CODE;
 
         // Removed verbose logging for performance
 
@@ -275,6 +284,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             boolean isLocalDeclaration = LOCAL_DECLARATION_PATTERN.matcher(line).matches();
             boolean isDataDeclaration = DATA_DECLARATION_PATTERN.matcher(line).matches();
             boolean isMethodDeclaration = METHOD_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isBeginSequence = BEGIN_SEQUENCE_PATTERN.matcher(line).matches();
+            boolean isRecoverUsing = RECOVER_USING_PATTERN.matcher(line).matches();
+            boolean isEndSequence = END_SEQUENCE_PATTERN.matcher(line).matches();
             
             int effectiveIndentLevel = indentLevel;
             int customIndentSpaces = -1; // -1 means use standard indentation
@@ -300,6 +312,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             } else if (isMethodDeclaration && inClassDefinition) {
                 // Apply custom indentation for METHOD declarations only inside CLASS/ENDCLASS
                 customIndentSpaces = methodIndent;
+            } else if (isBeginSequence || isRecoverUsing || isEndSequence) {
+                // BEGIN SEQUENCE should always be indented like normal code
+                // The checkbox only controls whether content inside gets extra indentation
+                customIndentSpaces = -1; // Use normal indentation
             }
 
             // Block ending check
@@ -308,8 +324,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     lowerLine.startsWith("endcase") ||
                     lowerLine.startsWith("next");
 
-            // Additional block end check for endswitch and endclass
-            if (isEndSwitchStatement || isEndClassStatement) {
+            // Additional block end check for endswitch, endclass, and end sequence
+            if (isEndSwitchStatement || isEndClassStatement || isEndSequence) {
                 isBlockEnd = true;
             }
 
@@ -346,8 +362,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String newIndent;
 
             if (isCommentOnlyLine) {
-                // Comments should never be indented
-                newIndent = "";
+                // Comments should be indented like normal code (use previous line's actual indentation)
+                newIndent = previousLineActualIndent;
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
@@ -482,6 +498,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     lowerLine.startsWith("do ") ||
                     (lowerLine.startsWith("case ") && !inSwitchBlock)) { // Don't increase indent for case in switch
                 indentLevel++;
+            }
+            
+            // Handle BEGIN SEQUENCE block indentation
+            if (isBeginSequence || isRecoverUsing) {
+                if (sequenceLikeNormalCode) {
+                    // With checkbox: content inside gets extra indentation
+                    indentLevel++;
+                } else {
+                    // Without checkbox: content inside gets NO extra indentation
+                    // Don't change indentLevel
+                }
             }
             
             // elseif increases indent like if, but else does NOT increase indent

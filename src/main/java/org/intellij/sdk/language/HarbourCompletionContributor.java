@@ -178,7 +178,10 @@ public class HarbourCompletionContributor extends CompletionContributor {
                 command.equals("endswitch") || command.equals("next") ||
                 command.equals("else") || command.equals("elseif") ||
                 command.equals("return") || command.equals("exit") ||
-                command.equals("loop");
+                command.equals("loop") ||
+                // BEGIN SEQUENCE block end keywords
+                command.equals("recover") || command.equals("end sequence") ||
+                command.equals("end");
     }
 
     /**

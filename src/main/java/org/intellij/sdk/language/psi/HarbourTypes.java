@@ -35,6 +35,11 @@ public interface HarbourTypes {
     IElementType RETURN = new HarbourTokenType("RETURN");
     IElementType EXIT = new HarbourTokenType("EXIT");
     IElementType LOOP = new HarbourTokenType("LOOP");
+    IElementType BEGIN = new HarbourTokenType("BEGIN");
+    IElementType SEQUENCE = new HarbourTokenType("SEQUENCE");
+    IElementType RECOVER = new HarbourTokenType("RECOVER");
+    IElementType USING = new HarbourTokenType("USING");
+    IElementType END = new HarbourTokenType("END");
     IElementType AND = new HarbourTokenType("AND");
     IElementType OR = new HarbourTokenType("OR");
     IElementType NOT = new HarbourTokenType("NOT");

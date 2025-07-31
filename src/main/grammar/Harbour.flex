@@ -89,6 +89,11 @@ SPECIAL_CHARS = [ÄÖÜäöüß]
     "return"                { return HarbourCustomTypes.RETURN; }
     "exit"                  { return HarbourCustomTypes.EXIT; }
     "loop"                  { return HarbourCustomTypes.LOOP; }
+    "begin"                 { return HarbourCustomTypes.BEGIN; }
+    "sequence"              { return HarbourCustomTypes.SEQUENCE; }
+    "recover"               { return HarbourCustomTypes.RECOVER; }
+    "using"                 { return HarbourCustomTypes.USING; }
+    "end"                   { return HarbourCustomTypes.END; }
     "and"                   { return HarbourCustomTypes.AND; }
     "or"                    { return HarbourCustomTypes.OR; }
     "not"                   { return HarbourCustomTypes.NOT; }

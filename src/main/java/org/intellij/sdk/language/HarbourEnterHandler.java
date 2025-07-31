@@ -150,7 +150,10 @@ public class HarbourEnterHandler implements EnterHandlerDelegate {
                 line.equals("elseif") || line.startsWith("elseif ") ||
                 line.startsWith("case ") || line.equals("case") ||
                 line.startsWith("switch ") || line.equals("switch") ||
-                line.startsWith("class ") || line.equals("class");
+                line.startsWith("class ") || line.equals("class") ||
+                // BEGIN SEQUENCE block support
+                line.equals("begin sequence") || line.startsWith("begin sequence ") ||
+                line.equals("recover using") || line.startsWith("recover using ");
     }
 
     private boolean shouldUnindent(String line) {
@@ -163,6 +166,9 @@ public class HarbourEnterHandler implements EnterHandlerDelegate {
                 line.equals("end") ||
                 line.equals("endclass") ||
                 line.equals("else") || line.startsWith("else ") ||
-                line.equals("elseif") || line.startsWith("elseif ");
+                line.equals("elseif") || line.startsWith("elseif ") ||
+                // BEGIN SEQUENCE block support
+                line.equals("recover using") || line.startsWith("recover using ") ||
+                line.equals("end sequence") || line.startsWith("end sequence ");
     }
 }

@@ -74,6 +74,11 @@ public class HarbourCustomTypes {
     public static final IElementType RETURN = HarbourTypes.RETURN;
     public static final IElementType EXIT = HarbourTypes.EXIT;
     public static final IElementType LOOP = HarbourTypes.LOOP;
+    public static final IElementType BEGIN = HarbourTypes.BEGIN;
+    public static final IElementType SEQUENCE = HarbourTypes.SEQUENCE;
+    public static final IElementType RECOVER = HarbourTypes.RECOVER;
+    public static final IElementType USING = HarbourTypes.USING;
+    public static final IElementType END = HarbourTypes.END;
 
     // Logical operators
     public static final IElementType AND = HarbourTypes.AND;
