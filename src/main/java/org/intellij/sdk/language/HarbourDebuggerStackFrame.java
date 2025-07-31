@@ -8,6 +8,7 @@ import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XCompositeNode;
 import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XValueChildrenList;
+import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -105,5 +106,11 @@ public class HarbourDebuggerStackFrame extends XStackFrame {
                     SimpleTextAttributes.REGULAR_ATTRIBUTES);
         }
         component.setIcon(AllIcons.Debugger.Frame);
+    }
+
+    @Nullable
+    @Override
+    public XDebuggerEvaluator getEvaluator() {
+        return new HarbourDebuggerEvaluator(debugProcess);
     }
 }
