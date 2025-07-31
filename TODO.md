@@ -8,6 +8,9 @@
 - code completion should propose local and public vars as well
   as well as constants, e.g. Error(TRY_AGAIN)
 
+- ctrl-shift-F7 toggle comment for selection block
+  (comment w/ line comment)
+
 - Linting, see https://github.com/APerricone/harbourCodeExtension/wiki/Diagnostics-Lint
 
 - making-of schreiben:

@@ -23,20 +23,23 @@ public class HarbourCompilerOutputFilter implements Filter {
     private final Project project;
     private final String workingDirectory;
 
-    // Pattern to match file:line references in compiler output
-    private static final Pattern FILE_PATTERN = Pattern.compile("([^:]+)\\((\\d+)\\)");
+    // Pattern to match file:line references in compiler output (must be more specific to avoid matching function references)
+    private static final Pattern FILE_PATTERN = Pattern.compile("([^\\s:]+\\.(prg|c|cpp|h|ch))\\((\\d+)\\)");
     
     // Pattern to match include file references like 'filename.ch' or "filename.ch"
     private static final Pattern INCLUDE_FILE_PATTERN = Pattern.compile("['\"]([^'\"]+\\.(ch|hbh|h))['\"]|Can't open #include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|#include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|'([^']+\\.(ch|hbh|h))'|\"([^\"]+\\.(ch|hbh|h))\"");
     
-    // Pattern to match stack trace file references: "in filepath(line)"
-    private static final Pattern STACK_TRACE_PATTERN = Pattern.compile("in\\s+([^\\s]+)\\((\\d+)\\)");
+    // Pattern to match stack trace file references: "in filepath(line)" - must be actual file paths, not function names
+    private static final Pattern STACK_TRACE_PATTERN = Pattern.compile("in\\s+([^\\s]+\\.prg)\\((\\d+)\\)");
     
     // Pattern to match function names in stack traces: "FUNCTION_NAME in filepath(line)"
     private static final Pattern FUNCTION_PATTERN = Pattern.compile("(\\d+):\\s+(\\w+)\\s+in\\s+([^\\s]+)\\((\\d+)\\)");
     
     // Pattern to match runtime error function references: "at FUNCTION_NAME(line)" or "Stack: FUNCTION_NAME(line) in filename"
     private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile("at\\s+(\\w+)\\((\\d+)\\)|Stack:\\s+(\\w+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
+    
+    // Pattern to match function references in compiler warnings: "in function 'MAIN(6)'" (must be very specific to avoid conflicts)
+    private static final Pattern COMPILER_FUNCTION_PATTERN = Pattern.compile("in\\s+function\\s+['\"]([A-Z_][A-Z0-9_]*)\\((\\d+)\\)['\"]");
 
     // Pattern to match error codes in compiler output
     private static final Pattern ERROR_PATTERN = Pattern.compile("Error [A-Z]\\d+");
@@ -93,10 +96,19 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher stackTraceMatcher = STACK_TRACE_PATTERN.matcher(line);
         Matcher functionMatcher = FUNCTION_PATTERN.matcher(line);
         Matcher runtimeFunctionMatcher = RUNTIME_FUNCTION_PATTERN.matcher(line);
+        Matcher compilerFunctionMatcher = COMPILER_FUNCTION_PATTERN.matcher(line);
         Matcher errorMatcher = ERROR_PATTERN.matcher(line);
         Matcher runtimeErrorMatcher = RUNTIME_ERROR_PATTERN.matcher(line);
         Matcher includeFileMatcher = INCLUDE_FILE_PATTERN.matcher(line);
         Matcher missingFunctionMatcher = MISSING_FUNCTION_PATTERN.matcher(line);
+
+        // Pre-check if we have both file and function matches in the same line
+        boolean hasFileMatch = fileMatcher.find();
+        boolean hasFunctionMatch = compilerFunctionMatcher.find();
+        
+        // Reset matchers for actual processing
+        fileMatcher.reset();
+        compilerFunctionMatcher.reset();
 
         // Check for function pattern with file reference "1: FUNCTION in filepath(line)" (HIGHEST PRIORITY)
         if (functionMatcher.find()) {
@@ -147,13 +159,24 @@ public class HarbourCompilerOutputFilter implements Filter {
             int end = stackTraceMatcher.end(2) + 1;  // End of line number including ')'
             result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
-        // Check for compiler error with file and line (HIGH PRIORITY - must be before runtime error check)
+        // Check for compiler function references: "in function 'MAIN(6)'" (HIGH PRIORITY for compiler warnings)
+        else if (compilerFunctionMatcher.find()) {
+            String functionName = compilerFunctionMatcher.group(1);
+            int lineNumber = Integer.parseInt(compilerFunctionMatcher.group(2));
+            
+            // Create hyperlink for the function reference using our generic function search
+            int start = compilerFunctionMatcher.start(1);  // Start of function name
+            int end = compilerFunctionMatcher.end(2) + 1;  // End of line number including ')'
+            result = createCompilerFunctionResult(line, entireLength, functionName, lineNumber, start, end);
+        }
+        // Check for compiler error with file and line (LOWER PRIORITY than function references)
         else if (fileMatcher.find()) {
             String filePath = fileMatcher.group(1);
-            int lineNumber = Integer.parseInt(fileMatcher.group(2));
+            int lineNumber = Integer.parseInt(fileMatcher.group(3));
 
             int start = fileMatcher.start();
             int end = fileMatcher.end();
+            
             result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
         // Check for include file references (like miki.ch in error messages)
@@ -221,15 +244,28 @@ public class HarbourCompilerOutputFilter implements Filter {
      * Find a file, trying both absolute and relative paths.
      */
     private VirtualFile findFile(String filePath) {
+        // Clean up the file path (remove .\ prefix common in Windows)
+        String cleanPath = filePath;
+        if (cleanPath.startsWith(".\\") || cleanPath.startsWith("./")) {
+            cleanPath = cleanPath.substring(2);
+        }
+        
         // First try as absolute path
-        VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(filePath);
+        VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(cleanPath);
         
         // If not found and we have a working directory, try as relative path
-        if (vFile == null && workingDirectory != null && !new File(filePath).isAbsolute()) {
-            String absolutePath = new File(workingDirectory, filePath).getAbsolutePath();
+        if (vFile == null && workingDirectory != null && !new File(cleanPath).isAbsolute()) {
+            String absolutePath = new File(workingDirectory, cleanPath).getAbsolutePath();
             vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
-            
-            // Resolved relative path
+        }
+        
+        // If still not found, try with original path
+        if (vFile == null) {
+            vFile = LocalFileSystem.getInstance().findFileByPath(filePath);
+            if (vFile == null && workingDirectory != null && !new File(filePath).isAbsolute()) {
+                String absolutePath = new File(workingDirectory, filePath).getAbsolutePath();
+                vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+            }
         }
         
         return vFile;
@@ -373,6 +409,35 @@ public class HarbourCompilerOutputFilter implements Filter {
             public void navigate(Project project) {
                 // Search for function usage in the project
                 searchForFunctionUsage(project, functionName);
+            }
+        };
+        
+        // Calculate actual positions in the entire output
+        int lineStartInEntireText = entireLength - line.length();
+        int hyperlinkStart = lineStartInEntireText + matchStart;
+        int hyperlinkEnd = lineStartInEntireText + matchEnd;
+        
+        return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Create a result with compiler function hyperlink that navigates to function definition.
+     */
+    private Result createCompilerFunctionResult(String line, int entireLength, String functionName, int lineNumber, int matchStart, int matchEnd) {
+        HyperlinkInfo hyperlinkInfo = new HyperlinkInfo() {
+            @Override
+            public void navigate(Project project) {
+                // Use our existing function search logic to find the function definition
+                String filePath = findSourceFileForFunction(functionName, lineNumber);
+                if (filePath != null) {
+                    VirtualFile vFile = findFile(filePath);
+                    if (vFile != null) {
+                        new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1).navigate(project);
+                    }
+                } else {
+                    // Fallback to search dialog if function not found
+                    openSearchForFunction(functionName);
+                }
             }
         };
         
