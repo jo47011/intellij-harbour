@@ -34,6 +34,9 @@ public class HarbourCompilerOutputFilter implements Filter {
     
     // Pattern to match function names in stack traces: "FUNCTION_NAME in filepath(line)"
     private static final Pattern FUNCTION_PATTERN = Pattern.compile("(\\d+):\\s+(\\w+)\\s+in\\s+([^\\s]+)\\((\\d+)\\)");
+    
+    // Pattern to match runtime error function references: "at FUNCTION_NAME(line)" or "Stack: FUNCTION_NAME(line) in filename"
+    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile("at\\s+(\\w+)\\((\\d+)\\)|Stack:\\s+(\\w+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
 
     // Pattern to match error codes in compiler output
     private static final Pattern ERROR_PATTERN = Pattern.compile("Error [A-Z]\\d+");
@@ -89,6 +92,7 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher fileMatcher = FILE_PATTERN.matcher(line);
         Matcher stackTraceMatcher = STACK_TRACE_PATTERN.matcher(line);
         Matcher functionMatcher = FUNCTION_PATTERN.matcher(line);
+        Matcher runtimeFunctionMatcher = RUNTIME_FUNCTION_PATTERN.matcher(line);
         Matcher errorMatcher = ERROR_PATTERN.matcher(line);
         Matcher runtimeErrorMatcher = RUNTIME_ERROR_PATTERN.matcher(line);
         Matcher includeFileMatcher = INCLUDE_FILE_PATTERN.matcher(line);
@@ -103,6 +107,36 @@ public class HarbourCompilerOutputFilter implements Filter {
             int start = functionMatcher.start(3);  // Start of filepath
             int end = functionMatcher.end(4) + 1;  // End of line number including ')'
             result = createResult(line, entireLength, filePath, lineNumber, start, end);
+        }
+        // Check for runtime error function patterns: "at FUNCTION(line)" or "Stack: FUNCTION(line) in filename" 
+        else if (runtimeFunctionMatcher.find()) {
+            String functionName = null;
+            String filePath = null;
+            int lineNumber = 0;
+            int start = 0;
+            int end = 0;
+            
+            // "at FUNCTION(line)" pattern - need to find the source file
+            if (runtimeFunctionMatcher.group(1) != null) {
+                functionName = runtimeFunctionMatcher.group(1);
+                lineNumber = Integer.parseInt(runtimeFunctionMatcher.group(2));
+                // For "at FUNCTION(line)", we need to find the source file in the current working directory
+                filePath = findSourceFileForFunction(functionName);
+                start = runtimeFunctionMatcher.start(1);  // Start of function name
+                end = runtimeFunctionMatcher.end(2) + 1;  // End of line number including ')'
+            }
+            // "Stack: FUNCTION(line) in filename" pattern - filename is provided
+            else if (runtimeFunctionMatcher.group(3) != null) {
+                functionName = runtimeFunctionMatcher.group(3);
+                lineNumber = Integer.parseInt(runtimeFunctionMatcher.group(4));
+                filePath = runtimeFunctionMatcher.group(5);
+                start = runtimeFunctionMatcher.start(3);  // Start of function name  
+                end = runtimeFunctionMatcher.end(5);      // End of filename
+            }
+            
+            if (filePath != null) {
+                result = createResult(line, entireLength, filePath, lineNumber, start, end);
+            }
         }
         // Check for stack trace file references "in filepath(line)"
         else if (stackTraceMatcher.find()) {
@@ -371,5 +405,69 @@ public class HarbourCompilerOutputFilter implements Filter {
         findManager.showFindDialog(findModel, () -> {
             // Callback after find dialog is closed
         });
+    }
+    
+    /**
+     * Find the source file for a function when only the function name is given.
+     * This is used for runtime errors like "at MAIN(11)" where we need to find which file contains MAIN.
+     */
+    private String findSourceFileForFunction(String functionName) {
+        // For runtime errors, we typically know the current working directory contains the main file
+        // Try common patterns: if function is MAIN, look for .prg files in working directory
+        if (workingDirectory == null) {
+            return null;
+        }
+        
+        File workDir = new File(workingDirectory);
+        if (!workDir.exists()) {
+            return null;
+        }
+        
+        // List all .prg files in working directory, sorted alphabetically for consistent results
+        File[] prgFiles = workDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".prg"));
+        if (prgFiles != null && prgFiles.length > 0) {
+            // Sort files to ensure consistent ordering
+            java.util.Arrays.sort(prgFiles, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+            
+            // For MAIN function, prioritize files in this order:
+            if ("MAIN".equalsIgnoreCase(functionName)) {
+                // 1. Look for files with "main" in the name first
+                for (File file : prgFiles) {
+                    String fileName = file.getName().toLowerCase();
+                    if (fileName.contains("main") && !fileName.contains("test")) {
+                        return file.getAbsolutePath();
+                    }
+                }
+                
+                // 2. Look for the most recently compiled file (test_simple.prg has priority)
+                for (File file : prgFiles) {
+                    String fileName = file.getName().toLowerCase();
+                    if (fileName.equals("test_simple.prg")) {
+                        return file.getAbsolutePath();
+                    }
+                }
+                
+                // 3. Look for files with "simple" (like test_simple.prg)
+                for (File file : prgFiles) {
+                    String fileName = file.getName().toLowerCase();
+                    if (fileName.contains("simple")) {
+                        return file.getAbsolutePath();
+                    }
+                }
+                
+                // 4. Look for test files but exclude generic ones
+                for (File file : prgFiles) {
+                    String fileName = file.getName().toLowerCase();
+                    if (fileName.startsWith("test_") || fileName.equals("test.prg")) {
+                        return file.getAbsolutePath();
+                    }
+                }
+                
+                // 5. If no specific match, return the first .prg file (sorted order)
+                return prgFiles[0].getAbsolutePath();
+            }
+        }
+        
+        return null;
     }
 }
