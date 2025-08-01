@@ -339,33 +339,58 @@ public class HarbourCompilerOutputFilter implements Filter {
     }
     
     /**
-     * Find a file, trying both absolute and relative paths.
+     * Find a file, trying both absolute and relative paths with enhanced debug support.
      */
     private VirtualFile findFile(String filePath) {
+        HarbourLogger.log("CompilerOutputFilter", "findFile called with: " + filePath + ", workingDirectory: " + workingDirectory);
+        
         // Clean up the file path (remove .\ prefix common in Windows)
         String cleanPath = filePath;
         if (cleanPath.startsWith(".\\") || cleanPath.startsWith("./")) {
             cleanPath = cleanPath.substring(2);
         }
         
+        // Normalize path separators for cross-platform compatibility
+        cleanPath = cleanPath.replace('\\', '/');
+        
         // First try as absolute path
         VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(cleanPath);
+        HarbourLogger.log("CompilerOutputFilter", "Absolute path attempt: " + cleanPath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
         
         // If not found and we have a working directory, try as relative path
         if (vFile == null && workingDirectory != null && !new File(cleanPath).isAbsolute()) {
-            String absolutePath = new File(workingDirectory, cleanPath).getAbsolutePath();
+            String absolutePath = new File(workingDirectory, cleanPath).getAbsolutePath().replace('\\', '/');
             vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+            HarbourLogger.log("CompilerOutputFilter", "Working directory attempt: " + absolutePath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
         }
         
         // If still not found, try with original path
         if (vFile == null) {
-            vFile = LocalFileSystem.getInstance().findFileByPath(filePath);
+            String originalNormalized = filePath.replace('\\', '/');
+            vFile = LocalFileSystem.getInstance().findFileByPath(originalNormalized);
+            HarbourLogger.log("CompilerOutputFilter", "Original path attempt: " + originalNormalized + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
+            
             if (vFile == null && workingDirectory != null && !new File(filePath).isAbsolute()) {
-                String absolutePath = new File(workingDirectory, filePath).getAbsolutePath();
+                String absolutePath = new File(workingDirectory, filePath).getAbsolutePath().replace('\\', '/');
                 vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+                HarbourLogger.log("CompilerOutputFilter", "Final working directory attempt: " + absolutePath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
             }
         }
         
+        // Force refresh if file still not found but might exist
+        if (vFile == null) {
+            LocalFileSystem.getInstance().refresh(false);
+            HarbourLogger.log("CompilerOutputFilter", "Refreshed file system, retrying...");
+            
+            // Quick retry after refresh
+            if (workingDirectory != null && !new File(cleanPath).isAbsolute()) {
+                String absolutePath = new File(workingDirectory, cleanPath).getAbsolutePath().replace('\\', '/');
+                vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+                HarbourLogger.log("CompilerOutputFilter", "Post-refresh attempt: " + absolutePath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
+            }
+        }
+        
+        HarbourLogger.log("CompilerOutputFilter", "findFile result: " + (vFile != null ? vFile.getPath() : "null"));
         return vFile;
     }
     
@@ -569,27 +594,44 @@ public class HarbourCompilerOutputFilter implements Filter {
                 
                 // Find the file directly (no complex search needed)
                 VirtualFile vFile = findFile(filePath);
-                if (vFile != null) {
+                if (vFile != null && vFile.exists()) {
                     // Open the file at the function line number (user's simple solution)
                     HarbourLogger.log("CompilerOutputFilter", "Opening file directly: " + vFile.getPath() + " at line " + functionLineNumber);
                     new OpenFileHyperlinkInfo(project, vFile, functionLineNumber - 1).navigate(project);
                 } else {
-                    // Fallback: if file not found, try to find it in working directory
-                    HarbourLogger.log("CompilerOutputFilter", "File not found directly, trying working directory");
+                    // Enhanced fallback logic for debug mode files
+                    HarbourLogger.log("CompilerOutputFilter", "File not found directly, trying enhanced resolution");
                     String fileName = new java.io.File(filePath).getName();
-                    if (workingDirectory != null) {
-                        String absolutePath = new java.io.File(workingDirectory, fileName).getAbsolutePath();
-                        VirtualFile vFileAbs = LocalFileSystem.getInstance().findFileByPath(absolutePath);
-                        if (vFileAbs != null) {
-                            HarbourLogger.log("CompilerOutputFilter", "Found file in working directory: " + vFileAbs.getPath() + " at line " + functionLineNumber);
-                            new OpenFileHyperlinkInfo(project, vFileAbs, functionLineNumber - 1).navigate(project);
-                            return;
+                    
+                    // Try multiple fallback paths for debug mode
+                    String[] fallbackPaths = {
+                        filePath,  // Original path
+                        fileName,  // Just filename
+                        ".hbmk/" + fileName,  // Debug directory
+                        "hbmk/" + fileName   // Without leading dot
+                    };
+                    
+                    VirtualFile foundFile = null;
+                    for (String path : fallbackPaths) {
+                        if (workingDirectory != null) {
+                            String absolutePath = new java.io.File(workingDirectory, path).getAbsolutePath().replace('\\', '/');
+                            foundFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+                            HarbourLogger.log("CompilerOutputFilter", "Trying fallback path: " + absolutePath + " -> " + (foundFile != null ? "FOUND" : "NOT FOUND"));
+                            if (foundFile != null && foundFile.exists()) {
+                                break;
+                            }
                         }
                     }
                     
-                    // Final fallback: open search dialog
-                    HarbourLogger.log("CompilerOutputFilter", "File not found anywhere, opening search dialog");
-                    openSearchForFunction(filePath.substring(0, filePath.lastIndexOf('.')));
+                    if (foundFile != null) {
+                        HarbourLogger.log("CompilerOutputFilter", "Found file via fallback: " + foundFile.getPath() + " at line " + functionLineNumber);
+                        new OpenFileHyperlinkInfo(project, foundFile, functionLineNumber - 1).navigate(project);
+                    } else {
+                        // Final fallback: open search dialog
+                        HarbourLogger.log("CompilerOutputFilter", "File not found anywhere, opening search dialog");
+                        String searchName = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+                        openSearchForFunction(searchName);
+                    }
                 }
             }
         };
