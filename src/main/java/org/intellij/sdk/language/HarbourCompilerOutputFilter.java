@@ -24,7 +24,7 @@ public class HarbourCompilerOutputFilter implements Filter {
     private final String workingDirectory;
 
     // Pattern to match file:line references in compiler output (must be more specific to avoid matching function references)
-    private static final Pattern FILE_PATTERN = Pattern.compile("([^\\s:]+\\.(prg|c|cpp|h|ch))\\((\\d+)\\)");
+    private static final Pattern FILE_PATTERN = Pattern.compile("((?:\\.[\\\\/])?[^\\s:()]+\\.(prg|c|cpp|h|ch))\\((\\d+)\\)(?:\\s+Warning|\\s+Error|\\s|$)");
     
     // Pattern to match include file references like 'filename.ch' or "filename.ch"
     private static final Pattern INCLUDE_FILE_PATTERN = Pattern.compile("['\"]([^'\"]+\\.(ch|hbh|h))['\"]|Can't open #include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|#include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|'([^']+\\.(ch|hbh|h))'|\"([^\"]+\\.(ch|hbh|h))\"");
@@ -40,6 +40,12 @@ public class HarbourCompilerOutputFilter implements Filter {
     
     // Pattern to match function references in compiler warnings: "in function 'MAIN(6)'" (must be very specific to avoid conflicts)
     private static final Pattern COMPILER_FUNCTION_PATTERN = Pattern.compile("in\\s+function\\s+['\"]([A-Z_][A-Z0-9_]*)\\((\\d+)\\)['\"]");
+    
+    // Pattern to match warning lines with file and function references: ".\myinit.prg(23) Warning ... in function 'MAIN(20)'"
+    private static final Pattern WARNING_WITH_FUNCTION_PATTERN = Pattern.compile("^((?:\\.[\\\\/])?[^\\s:()]+\\.(prg|c|cpp|h|ch))\\((\\d+)\\)\\s+Warning.*in\\s+function\\s+['\"]([A-Z_][A-Z0-9_]*)\\((\\d+)\\)['\"]");
+
+    // Pattern to match linker errors with function symbols: "multiple definition of `HB_FUN_MAIN'"
+    private static final Pattern LINKER_FUNCTION_PATTERN = Pattern.compile("multiple\\s+definition\\s+of\\s+[`']HB_FUN_([A-Z_][A-Z0-9_]*)[`']");
 
     // Pattern to match error codes in compiler output
     private static final Pattern ERROR_PATTERN = Pattern.compile("Error [A-Z]\\d+");
@@ -90,6 +96,9 @@ public class HarbourCompilerOutputFilter implements Filter {
     @Nullable
     @Override
     public Result applyFilter(@NotNull String line, int entireLength) {
+        
+        // Log every line for debugging
+        HarbourLogger.log("CompilerOutputFilter", "Processing line: " + line);
 
         Result result = null;
         Matcher fileMatcher = FILE_PATTERN.matcher(line);
@@ -97,6 +106,8 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher functionMatcher = FUNCTION_PATTERN.matcher(line);
         Matcher runtimeFunctionMatcher = RUNTIME_FUNCTION_PATTERN.matcher(line);
         Matcher compilerFunctionMatcher = COMPILER_FUNCTION_PATTERN.matcher(line);
+        Matcher warningWithFunctionMatcher = WARNING_WITH_FUNCTION_PATTERN.matcher(line);
+        Matcher linkerFunctionMatcher = LINKER_FUNCTION_PATTERN.matcher(line);
         Matcher errorMatcher = ERROR_PATTERN.matcher(line);
         Matcher runtimeErrorMatcher = RUNTIME_ERROR_PATTERN.matcher(line);
         Matcher includeFileMatcher = INCLUDE_FILE_PATTERN.matcher(line);
@@ -110,8 +121,35 @@ public class HarbourCompilerOutputFilter implements Filter {
         fileMatcher.reset();
         compilerFunctionMatcher.reset();
 
-        // Check for function pattern with file reference "1: FUNCTION in filepath(line)" (HIGHEST PRIORITY)
-        if (functionMatcher.find()) {
+        // Check for warning lines with function references: ".\myinit.prg(23) Warning ... in function 'MAIN(20)'" (HIGHEST PRIORITY)
+        if (warningWithFunctionMatcher.find()) {
+            String filePath = warningWithFunctionMatcher.group(1);
+            int warningLineNumber = Integer.parseInt(warningWithFunctionMatcher.group(3));
+            String functionName = warningWithFunctionMatcher.group(4);
+            int functionLineNumber = Integer.parseInt(warningWithFunctionMatcher.group(5));
+
+            HarbourLogger.log("CompilerOutputFilter", "WARNING_WITH_FUNCTION_PATTERN matched - filePath: " + filePath + 
+                             ", warningLine: " + warningLineNumber + ", functionName: " + functionName + 
+                             ", functionLine: " + functionLineNumber);
+
+            // Create two hyperlinks: one for the file reference and one for the function reference
+            // According to user's request: "just open myinit.prg at line 20 when I click on Main(20)"
+            
+            // First create hyperlink for the file reference (line number from warning)
+            int fileStart = warningWithFunctionMatcher.start(1);
+            int fileEnd = warningWithFunctionMatcher.end(3) + 1; // Include closing parenthesis
+            Result fileResult = createResult(line, entireLength, filePath, warningLineNumber, fileStart, fileEnd);
+            
+            // Then create hyperlink for the function reference (line number from function)
+            int functionStart = warningWithFunctionMatcher.start(4);
+            int functionEnd = warningWithFunctionMatcher.end(5) + 1; // Include closing parenthesis
+            Result functionResult = createWarningFunctionResult(line, entireLength, filePath, functionLineNumber, functionStart, functionEnd);
+            
+            // Return the function result as it's what the user specifically requested
+            result = functionResult;
+        }
+        // Check for function pattern with file reference "1: FUNCTION in filepath(line)" (HIGH PRIORITY)
+        else if (functionMatcher.find()) {
             String functionName = functionMatcher.group(2);
             String filePath = functionMatcher.group(3);
             int lineNumber = Integer.parseInt(functionMatcher.group(4));
@@ -159,6 +197,15 @@ public class HarbourCompilerOutputFilter implements Filter {
             int end = stackTraceMatcher.end(2) + 1;  // End of line number including ')'
             result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
+        // Check for linker function errors: "multiple definition of `HB_FUN_MAIN'" (HIGH PRIORITY for linker errors)
+        else if (linkerFunctionMatcher.find()) {
+            String functionName = linkerFunctionMatcher.group(1);  // Extract MAIN from HB_FUN_MAIN
+            
+            // Create hyperlink that immediately opens find dialog for the function
+            int start = linkerFunctionMatcher.start(1);  // Start of function name
+            int end = linkerFunctionMatcher.end(1);      // End of function name
+            result = createLinkerFunctionResult(line, entireLength, functionName, start, end);
+        }
         // Check for compiler function references: "in function 'MAIN(6)'" (HIGH PRIORITY for compiler warnings)
         else if (compilerFunctionMatcher.find()) {
             String functionName = compilerFunctionMatcher.group(1);
@@ -173,6 +220,8 @@ public class HarbourCompilerOutputFilter implements Filter {
         else if (fileMatcher.find()) {
             String filePath = fileMatcher.group(1);
             int lineNumber = Integer.parseInt(fileMatcher.group(3));
+            
+            HarbourLogger.log("CompilerOutputFilter", "FILE_PATTERN matched - filePath: " + filePath + ", lineNumber: " + lineNumber);
 
             int start = fileMatcher.start();
             int end = fileMatcher.end();
@@ -224,11 +273,32 @@ public class HarbourCompilerOutputFilter implements Filter {
      * Create a result with file hyperlink.
      */
     private Result createResult(String line, int entireLength, String filePath, int lineNumber, int matchStart, int matchEnd) {
+        HarbourLogger.log("CompilerOutputFilter", "createResult called - filePath: " + filePath + ", lineNumber: " + lineNumber);
+        
         VirtualFile vFile = findFile(filePath);
         HyperlinkInfo hyperlinkInfo = null;
 
         if (vFile != null) {
-            hyperlinkInfo = new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1);
+            // Validate that the resolved file actually matches the expected filename
+            String expectedFileName = new File(filePath).getName().toLowerCase();
+            String actualFileName = vFile.getName().toLowerCase();
+            
+            HarbourLogger.log("CompilerOutputFilter", "File found - expected: " + expectedFileName + ", actual: " + actualFileName + ", path: " + vFile.getPath());
+            
+            if (expectedFileName.equals(actualFileName)) {
+                // File names match - create normal hyperlink
+                HarbourLogger.log("CompilerOutputFilter", "File names match - creating normal hyperlink");
+                hyperlinkInfo = new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1);
+            } else {
+                // File names don't match - this indicates wrong file resolution
+                // Use the enhanced search logic instead
+                HarbourLogger.log("CompilerOutputFilter", "File names don't match - using enhanced search logic");
+                hyperlinkInfo = createFileNotInProjectHyperlink(filePath, lineNumber);
+            }
+        } else {
+            // File not found - use enhanced search logic
+            HarbourLogger.log("CompilerOutputFilter", "File not found - using enhanced search logic");
+            hyperlinkInfo = createFileNotInProjectHyperlink(filePath, lineNumber);
         }
 
         // Calculate actual positions in the entire output
@@ -238,6 +308,34 @@ public class HarbourCompilerOutputFilter implements Filter {
         
         // Create result with hyperlink only for the matched part
         return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Create a hyperlink for files not in project that uses enhanced search logic.
+     */
+    private HyperlinkInfo createFileNotInProjectHyperlink(String filePath, int lineNumber) {
+        return new HyperlinkInfo() {
+            @Override
+            public void navigate(Project project) {
+                HarbourLogger.log("CompilerOutputFilter", "createFileNotInProjectHyperlink.navigate called - filePath: " + filePath + ", lineNumber: " + lineNumber);
+                
+                // Extract function name from file path for search
+                String fileName = new File(filePath).getName();
+                String functionName = fileName.substring(0, fileName.lastIndexOf('.')); // Remove extension
+                
+                HarbourLogger.log("CompilerOutputFilter", "Extracted functionName: " + functionName + " from fileName: " + fileName);
+                
+                // If this looks like a main file, search for "main" function specifically
+                if (functionName.toLowerCase().contains("main") || functionName.toLowerCase().equals("myinit")) {
+                    functionName = "main";
+                    HarbourLogger.log("CompilerOutputFilter", "Changed functionName to: main");
+                }
+                
+                // Use the enhanced search logic for files not in project
+                HarbourLogger.log("CompilerOutputFilter", "Calling handleFileNotInProject with functionName: " + functionName + ", lineNumber: " + lineNumber);
+                handleFileNotInProject(functionName, lineNumber);
+            }
+        };
     }
     
     /**
@@ -432,12 +530,87 @@ public class HarbourCompilerOutputFilter implements Filter {
                 if (filePath != null) {
                     VirtualFile vFile = findFile(filePath);
                     if (vFile != null) {
-                        new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1).navigate(project);
+                        // Check if file is in project or if it exists
+                        if (vFile.exists()) {
+                            new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1).navigate(project);
+                        } else {
+                            // File doesn't exist - search for main occurrences and open find dialog
+                            openSearchForFunction(functionName);
+                        }
+                    } else {
+                        // File not found - this triggers the enhanced search behavior
+                        // When navigation goes to files not in project, search for main occurrences
+                        handleFileNotInProject(functionName, lineNumber);
                     }
                 } else {
-                    // Fallback to search dialog if function not found
+                    // No function found at all - fallback to search dialog
                     openSearchForFunction(functionName);
                 }
+            }
+        };
+        
+        // Calculate actual positions in the entire output
+        int lineStartInEntireText = entireLength - line.length();
+        int hyperlinkStart = lineStartInEntireText + matchStart;
+        int hyperlinkEnd = lineStartInEntireText + matchEnd;
+        
+        return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Create a result with warning function hyperlink that directly opens the specified file at the function line.
+     * This implements the user's request: "just open myinit.prg at line 20 when I click on Main(20)"
+     */
+    private Result createWarningFunctionResult(String line, int entireLength, String filePath, int functionLineNumber, int matchStart, int matchEnd) {
+        HyperlinkInfo hyperlinkInfo = new HyperlinkInfo() {
+            @Override
+            public void navigate(Project project) {
+                HarbourLogger.log("CompilerOutputFilter", "createWarningFunctionResult.navigate called - filePath: " + filePath + ", functionLineNumber: " + functionLineNumber);
+                
+                // Find the file directly (no complex search needed)
+                VirtualFile vFile = findFile(filePath);
+                if (vFile != null) {
+                    // Open the file at the function line number (user's simple solution)
+                    HarbourLogger.log("CompilerOutputFilter", "Opening file directly: " + vFile.getPath() + " at line " + functionLineNumber);
+                    new OpenFileHyperlinkInfo(project, vFile, functionLineNumber - 1).navigate(project);
+                } else {
+                    // Fallback: if file not found, try to find it in working directory
+                    HarbourLogger.log("CompilerOutputFilter", "File not found directly, trying working directory");
+                    String fileName = new java.io.File(filePath).getName();
+                    if (workingDirectory != null) {
+                        String absolutePath = new java.io.File(workingDirectory, fileName).getAbsolutePath();
+                        VirtualFile vFileAbs = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+                        if (vFileAbs != null) {
+                            HarbourLogger.log("CompilerOutputFilter", "Found file in working directory: " + vFileAbs.getPath() + " at line " + functionLineNumber);
+                            new OpenFileHyperlinkInfo(project, vFileAbs, functionLineNumber - 1).navigate(project);
+                            return;
+                        }
+                    }
+                    
+                    // Final fallback: open search dialog
+                    HarbourLogger.log("CompilerOutputFilter", "File not found anywhere, opening search dialog");
+                    openSearchForFunction(filePath.substring(0, filePath.lastIndexOf('.')));
+                }
+            }
+        };
+        
+        // Calculate actual positions in the entire output
+        int lineStartInEntireText = entireLength - line.length();
+        int hyperlinkStart = lineStartInEntireText + matchStart;
+        int hyperlinkEnd = lineStartInEntireText + matchEnd;
+        
+        return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
+    }
+    
+    /**
+     * Create a result with linker function hyperlink that immediately opens find dialog.
+     */
+    private Result createLinkerFunctionResult(String line, int entireLength, String functionName, int matchStart, int matchEnd) {
+        HyperlinkInfo hyperlinkInfo = new HyperlinkInfo() {
+            @Override
+            public void navigate(Project project) {
+                // For linker errors, immediately open find dialog to search for function definition
+                openSearchForFunction(functionName);
             }
         };
         
@@ -607,6 +780,106 @@ public class HarbourCompilerOutputFilter implements Filter {
         
         // If no explicit end found, assume it goes to end of file
         return lines.size();
+    }
+    
+    /**
+     * Handle case where file is not in project - search for main occurrences and open find dialog if multiple matches.
+     * This implements the user's requirement: "search for occurances of main and if the line number is in range we jump there.
+     * In this case there is multiple files matching this condition, so in that case pls open the prefilled find dialog"
+     */
+    private void handleFileNotInProject(String functionName, int lineNumber) {
+        HarbourLogger.log("CompilerOutputFilter", "handleFileNotInProject called - functionName: " + functionName + ", lineNumber: " + lineNumber + ", workingDirectory: " + workingDirectory);
+        
+        if (workingDirectory == null) {
+            // No working directory - just open search dialog
+            HarbourLogger.log("CompilerOutputFilter", "No working directory - opening search dialog");
+            openSearchForFunction(functionName);
+            return;
+        }
+        
+        File workDir = new File(workingDirectory);
+        if (!workDir.exists()) {
+            openSearchForFunction(functionName);
+            return;
+        }
+        
+        // Get all .prg files in working directory and subdirectories
+        java.util.List<File> prgFiles = findAllPrgFiles(workDir);
+        if (prgFiles.isEmpty()) {
+            openSearchForFunction(functionName);
+            return;
+        }
+        
+        // Search for function definitions like "PROCEDURE main(" or "FUNCTION main("
+        String searchPattern = functionName.toLowerCase() + "(";
+        java.util.List<FunctionMatch> matches = new java.util.ArrayList<>();
+        
+        for (File file : prgFiles) {
+            try {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i).trim().toLowerCase();
+                    
+                    // Look for function/procedure declarations
+                    if ((line.startsWith("function ") || line.startsWith("procedure ")) 
+                        && line.contains(searchPattern)) {
+                        
+                        // Found a function definition - calculate its range
+                        int startLine = i + 1; // 1-based line numbers
+                        int endLine = findFunctionEndLine(lines, i);
+                        
+                        matches.add(new FunctionMatch(file.getAbsolutePath(), startLine, endLine));
+                    }
+                }
+            } catch (Exception e) {
+                // Skip files that can't be read
+                continue;
+            }
+        }
+        
+        // Check if line number is in range for any function
+        if (lineNumber > 0) {
+            for (FunctionMatch match : matches) {
+                if (lineNumber >= match.startLine && lineNumber <= match.endLine) {
+                    // Found exact match - try to open it
+                    VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(match.filePath);
+                    if (vFile != null) {
+                        new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1).navigate(project);
+                        return; // Successfully navigated
+                    }
+                }
+            }
+        }
+        
+        // Multiple files match or line number doesn't match any function range
+        // Open prefilled find dialog as requested
+        openSearchForFunction(functionName);
+    }
+    
+    /**
+     * Find all .prg files recursively in directory tree.
+     */
+    private java.util.List<File> findAllPrgFiles(File directory) {
+        java.util.List<File> prgFiles = new java.util.ArrayList<>();
+        findPrgFilesRecursive(directory, prgFiles);
+        return prgFiles;
+    }
+    
+    /**
+     * Recursive helper to find .prg files.
+     */
+    private void findPrgFilesRecursive(File directory, java.util.List<File> prgFiles) {
+        File[] files = directory.listFiles();
+        if (files == null) return;
+        
+        for (File file : files) {
+            if (file.isDirectory()) {
+                // Recurse into subdirectories
+                findPrgFilesRecursive(file, prgFiles);
+            } else if (file.getName().toLowerCase().endsWith(".prg")) {
+                prgFiles.add(file);
+            }
+        }
     }
     
     /**
