@@ -43,7 +43,7 @@ Quickly navigate to function definitions with **Ctrl+Click** or **Ctrl+B**. The 
 
 Safely rename functions, procedures, and variables across your entire project with **Shift+F6**. All references are automatically updated while preserving code functionality.
 
-![Rename Refactoring](img/rename-refactoring.png)
+![Rename Refactoring](img/function-rename.png)
 *Safe project-wide rename refactoring for functions and variables*
 
 ### Structure View
