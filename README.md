@@ -71,6 +71,47 @@ The plugin supports standard Harbour/Clipper code syntax:
 
 ![Syntax Highlighting](example.png)
 
+## Runtime Error Handling
+
+### Automatic Error Monitoring
+
+The plugin automatically provides clickable stack traces for runtime errors in the PyCharm/IntelliJ console. This works with any Harbour project by copying error monitoring files to your `.hbmk` directory during compilation.
+
+### Custom ErrorBlock Integration
+
+If your project uses a custom ErrorBlock handler, you can still get clickable stack traces by calling `printDebugStackTrace()` from your error handler:
+
+```harbour
+// Your custom error handling
+ErrorBlock({|oError| MyCustomHandler(oError)})
+
+FUNCTION MyCustomHandler(oError)
+   // Your custom error logic here
+   LogToMyDatabase(oError)
+   SaveToLogFile(oError)
+   
+   // Generate PyCharm-compatible stack trace
+   printDebugStackTrace()
+   
+   // Continue with your error handling
+   QUIT
+RETURN NIL
+```
+
+**Key points:**
+- Add `printDebugStackTrace()` to your custom error handler
+- This generates clickable stack traces in PyCharm console
+- Works alongside your existing error handling logic
+- No need to modify your current error logging
+- Include `harbour_error_handler.prg` in your project to use this function
+
+### Requirements
+
+To use the error monitoring features:
+1. Include the plugin's error handling files in your compilation (automatically done)
+2. For custom ErrorBlock: Call `printDebugStackTrace()` from your error handler
+3. View errors in PyCharm's console with clickable navigation to source lines
+
 ## Building from Source
 
 To build the plugin from source:

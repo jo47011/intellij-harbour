@@ -377,18 +377,8 @@ public class HarbourCompilerOutputFilter implements Filter {
             }
         }
         
-        // Force refresh if file still not found but might exist
-        if (vFile == null) {
-            LocalFileSystem.getInstance().refresh(false);
-            HarbourLogger.log("CompilerOutputFilter", "Refreshed file system, retrying...");
-            
-            // Quick retry after refresh
-            if (workingDirectory != null && !new File(cleanPath).isAbsolute()) {
-                String absolutePath = new File(workingDirectory, cleanPath).getAbsolutePath().replace('\\', '/');
-                vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
-                HarbourLogger.log("CompilerOutputFilter", "Post-refresh attempt: " + absolutePath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
-            }
-        }
+        // Don't perform synchronous refresh under read lock - it causes deadlocks
+        // The file system will be refreshed asynchronously if needed
         
         HarbourLogger.log("CompilerOutputFilter", "findFile result: " + (vFile != null ? vFile.getPath() : "null"));
         return vFile;

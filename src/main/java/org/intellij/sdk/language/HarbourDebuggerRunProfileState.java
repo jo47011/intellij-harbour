@@ -372,7 +372,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (isDebugMode) {
             File debugLibFile = new File(buildDirFile, "harbour_debug.prg");
             try {
-                copyResourceFile(debugLibFile, "/debug/harbour_debug.prg");
+                copyResourceFile(debugLibFile, "/debugger/harbour_debug.prg");
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                         "DEBUG MODE: Copied debug library to: " + debugLibFile.getAbsolutePath());
             } catch (IOException e) {
@@ -380,9 +380,53 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         "Warning: Failed to copy debug library: " + e.getMessage());
                 // Continue without debug library
             }
+            
+            // Also copy harbour_error_handler.prg which is included by harbour_debug.prg
+            File errorHandlerFile = new File(buildDirFile, "harbour_error_handler.prg");
+            try {
+                copyResourceFile(errorHandlerFile, "/debugger/harbour_error_handler.prg");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE: Copied error handler to: " + errorHandlerFile.getAbsolutePath());
+            } catch (IOException e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Warning: Failed to copy error handler: " + e.getMessage());
+                // Continue without error handler
+            }
+            
+            // Copy harbour_error_monitor.prg for debug mode
+            File errorMonitorFile = new File(buildDirFile, "harbour_error_monitor.prg");
+            try {
+                copyResourceFile(errorMonitorFile, "/debugger/harbour_error_monitor.prg");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "DEBUG MODE: Copied error monitor to: " + errorMonitorFile.getAbsolutePath());
+            } catch (IOException e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Warning: Failed to copy error monitor: " + e.getMessage());
+            }
         } else {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "RUN MODE: Skipped copying debug library");
+                    "RUN MODE: Copying error monitoring files");
+            
+            // For run mode, copy error handler and monitor files
+            File errorHandlerFile = new File(buildDirFile, "harbour_error_handler.prg");
+            try {
+                copyResourceFile(errorHandlerFile, "/debugger/harbour_error_handler.prg");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "RUN MODE: Copied error handler to: " + errorHandlerFile.getAbsolutePath());
+            } catch (IOException e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Warning: Failed to copy error handler: " + e.getMessage());
+            }
+            
+            File errorMonitorFile = new File(buildDirFile, "harbour_error_monitor.prg");
+            try {
+                copyResourceFile(errorMonitorFile, "/debugger/harbour_error_monitor.prg");
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "RUN MODE: Copied error monitor to: " + errorMonitorFile.getAbsolutePath());
+            } catch (IOException e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        "Warning: Failed to copy error monitor: " + e.getMessage());
+            }
         }
 
         // Detect if this is a GUI program early - use same logic as in startProcess()
@@ -577,6 +621,21 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     "Added -rebuild flag to compiler arguments");
         }
 
+        // Add error handling libraries - order matters!
+        String errorHandlerPath;
+        String errorMonitorPath;
+        
+        if (currentOS.contains("windows")) {
+            errorHandlerPath = buildDir + "\\" + "harbour_error_handler.prg";
+            errorMonitorPath = buildDir + "\\" + "harbour_error_monitor.prg";
+        } else {
+            errorHandlerPath = buildDir + File.separator + "harbour_error_handler.prg";
+            errorMonitorPath = buildDir + File.separator + "harbour_error_monitor.prg";
+        }
+        
+        // Always add error handler first (provides functions)
+        parameters.add(errorHandlerPath);
+        
         // Add debug library only in debug mode
         if (isDebugMode && !finalBuildTarget.endsWith("harbour_debug.prg")) {
             String debugSourcePath;
@@ -591,12 +650,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         "DEBUG MODE - UNIX: Adding debug library: " + debugSourcePath);
             }
             
+            // Add error monitor then debug library
+            parameters.add(errorMonitorPath);
             parameters.add(debugSourcePath);
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "DEBUG MODE: Added debug library for debugging: " + debugSourcePath);
+                    "DEBUG MODE: Added error handler, monitor and debug library");
         } else if (!isDebugMode) {
+            // For run mode, add error monitor
+            parameters.add(errorMonitorPath);
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "RUN MODE: Skipped debug library");
+                    "RUN MODE: Added error handler and monitor for error capture");
         }
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
@@ -1544,7 +1607,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled", HarbourLogger.LogLevel.DEBUG);
 
         // File monitor for error display in console
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to start error file monitor");
         startHarbourErrorFileMonitor(console, env.getProject());
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Error file monitor started");
+        
+        // Clear console after monitors are set up but before showing command
+        console.clear();
 
         // Print the exact command to the console
         if (lastExecutedCommand != null) {
@@ -1578,16 +1646,32 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Copy unified debug library (for all platforms)
         File standardDebugLibFile = new File(buildDir, "harbour_debug.prg");
         try {
-            copyResourceFile(standardDebugLibFile, "/debug/harbour_debug.prg");
+            copyResourceFile(standardDebugLibFile, "/debugger/harbour_debug.prg");
         } catch (IOException e) {
             throw new ExecutionException("Failed to copy standard debug library: " + e.getMessage(), e);
+        }
+        
+        // Also copy harbour_error_handler.prg which is included by harbour_debug.prg
+        File errorHandlerFile = new File(buildDir, "harbour_error_handler.prg");
+        try {
+            copyResourceFile(errorHandlerFile, "/debugger/harbour_error_handler.prg");
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to copy error handler library: " + e.getMessage(), e);
+        }
+        
+        // Copy harbour_error_monitor.prg for error monitoring
+        File errorMonitorFile = new File(buildDir, "harbour_error_monitor.prg");
+        try {
+            copyResourceFile(errorMonitorFile, "/debugger/harbour_error_monitor.prg");
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to copy error monitor library: " + e.getMessage(), e);
         }
         
     }
     
     
     private void copyResourceFile(File targetFile) throws IOException, ExecutionException {
-        copyResourceFile(targetFile, "/debug/harbour_debug.prg");
+        copyResourceFile(targetFile, "/debugger/harbour_debug.prg");
     }
     
     private void copyResourceFile(File targetFile, String resourcePath) throws IOException, ExecutionException {
@@ -1958,46 +2042,74 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             workingDir = sourceFile.getParent();
         }
         
-        final String errorFilePath = workingDir + File.separator + "pycharm_error.log";
-        final File errorFile = new File(errorFilePath);
+        // Create .hbmk directory if needed
+        File hbmkDir = new File(workingDir, ".hbmk");
+        if (!hbmkDir.exists()) {
+            hbmkDir.mkdirs();
+        }
         
-        HarbourLogger.log(project, "HarbourDebugger", "Starting error file monitor for: " + errorFilePath);
+        // Clean old error logs on startup
+        File oldHbmkErrorFile = new File(hbmkDir, "pycharm_errors.log");
+        if (oldHbmkErrorFile.exists()) {
+            oldHbmkErrorFile.delete();
+            HarbourLogger.log(project, "HarbourDebugger", "Deleted old .hbmk/pycharm_errors.log");
+        }
+        
+        // Monitor universal error log: .hbmk/pycharm_errors.log (works for ALL Harbour projects)
+        final String hbmkErrorPath = workingDir + File.separator + ".hbmk" + File.separator + "pycharm_errors.log";
+        final File hbmkErrorFile = new File(hbmkErrorPath);
+        
+        HarbourLogger.log(project, "HarbourDebugger", "Starting universal error monitor for: " + hbmkErrorPath);
+        HarbourLogger.log(project, "HarbourDebugger", "Error file monitor working directory: " + workingDir);
         
         // Start a background thread to monitor the error file
         Thread errorMonitor = new Thread(() -> {
-            long lastModified = 0;
-            long lastSize = 0;
+            long hbmkLastModified = 0;
+            long hbmkLastSize = 0;
+            int checkCount = 0;
             
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    if (errorFile.exists()) {
-                        long currentModified = errorFile.lastModified();
-                        long currentSize = errorFile.length();
+                    checkCount++;
+                    if (checkCount % 50 == 0) { // Log every 5 seconds (50 * 100ms)
+                        HarbourLogger.log(project, "HarbourDebugger", 
+                            "Error monitor check #" + checkCount + 
+                            ", .hbmk/pycharm_errors.log exists: " + hbmkErrorFile.exists() + 
+                            ", size: " + (hbmkErrorFile.exists() ? hbmkErrorFile.length() : 0));
+                    }
+                    
+                    // Check .hbmk/pycharm_errors.log (PRIMARY)
+                    if (hbmkErrorFile.exists()) {
+                        long currentModified = hbmkErrorFile.lastModified();
+                        long currentSize = hbmkErrorFile.length();
                         
                         // Only read if file was modified and has new content
-                        if (currentModified > lastModified && currentSize > lastSize) {
+                        if (currentModified > hbmkLastModified || currentSize > hbmkLastSize) {
+                            HarbourLogger.log(project, "HarbourDebugger", 
+                                ".hbmk/pycharm_errors.log changed! Modified: " + currentModified + " > " + hbmkLastModified + 
+                                ", Size: " + currentSize + " > " + hbmkLastSize);
                             try {
-                                String content = new String(java.nio.file.Files.readAllBytes(errorFile.toPath()));
+                                String content = new String(java.nio.file.Files.readAllBytes(hbmkErrorFile.toPath()));
                                 if (!content.trim().isEmpty()) {
                                     // Send error to console
-                                    console.print("[Harbour Runtime Error] " + content.trim() + "\n", 
+                                    console.print("\n[Harbour Runtime Error from .hbmk/pycharm_errors.log]\n\n" + content.trim() + "\n", 
                                         com.intellij.execution.ui.ConsoleViewContentType.ERROR_OUTPUT);
                                     
                                     HarbourLogger.log(project, "HarbourDebugger", 
-                                        "Runtime error captured and sent to console: " + content.trim());
-                                    
-                                    // Delete the error file after reading to prevent re-processing
-                                    errorFile.delete();
+                                        "Runtime error captured from .hbmk/pycharm_errors.log");
                                 }
                             } catch (Exception e) {
                                 HarbourLogger.log(project, "HarbourDebugger", 
-                                    "Error reading error file: " + e.getMessage());
+                                    "Error reading .hbmk/pycharm_errors.log: " + e.getMessage());
                             }
                             
-                            lastModified = currentModified;
-                            lastSize = currentSize;
+                            hbmkLastModified = currentModified;
+                            hbmkLastSize = currentSize;
                         }
                     }
+                    
+                    // UNIVERSAL MONITORING: Only .hbmk/pycharm_errors.log 
+                    // This works for ALL Harbour projects through our harbour_error_monitor.prg
                     
                     // Check every 100ms (much less frequent than before)
                     Thread.sleep(100);

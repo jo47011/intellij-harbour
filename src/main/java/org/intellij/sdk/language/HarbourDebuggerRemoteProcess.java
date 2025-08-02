@@ -916,8 +916,6 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             String[] initCldPaths = {
                 currentDir + "/init.cld",
                 projectDir + "/init.cld",
-                projectDir + "/windows/hbmiki-test-windows/init.cld",
-                "/home/developer/workspace/windows/hbmiki-test-windows/init.cld",
                 currentDir + "/../init.cld",
                 currentDir + "/../../init.cld"
             };

@@ -15,3 +15,13 @@
 
 
 ---
+
+from INIT_PROCEDURES_EXPLANATION.md:
+
+### 2. **SetGlobalErrorHandler()** in `harbour_debug.prg:61`
+- **Status**: ❌ INACTIVE - Commented out with `/*`
+- **Purpose**: Was intended to set up global error handling
+- **Why commented**: Says "REMOVED: INIT procedures can interfere with program startup in debug mode"
+- **Result**: This INIT procedure is NOT executed
+
+if it is no longer needed or used, pls remove.

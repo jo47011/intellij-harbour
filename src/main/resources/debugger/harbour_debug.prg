@@ -48,26 +48,50 @@ REQUEST HB_GT_STD_DEFAULT
 
 // STATIC declarations must be at the top before any procedures
 STATIC t_oDebugInfo
-STATIC s_lSocketEnabled := .T.  // Enable socket communication
+STATIC s_lSocketEnabled := .F.  // DISABLED: Socket communication to prevent hanging
 
+// Static variable to track if we've hooked the error handler
+// REMOVED: s_lErrorHandlerHooked - not needed with new monitoring approach
+// REMOVED: s_bOriginalHandler - not needed with new monitoring approach
+
+// REMOVED: INIT procedures can interfere with program startup in debug mode
+// We'll rely on root.inf monitoring instead
+/*
 // Set up global error handler for entire application
 INIT PROCEDURE SetGlobalErrorHandler()
-   LOCAL hLog, oCurrentHandler
+   LOCAL hLogFile, cLogPath
+
+   altd()
    
-   // Get current error handler for debugging
-   oCurrentHandler := ErrorBlock()
+   // Create log directory if it doesn't exist
+   IF !hb_DirExists("log")
+      MakeDir("log")
+   ENDIF
    
-   // Set the global error handler - avoid recursion by using TRY/CATCH
-   ErrorBlock({|oError| IIF(oError != NIL, GlobalErrorHandler(oError), NIL)})
+   // Debug logging
+   cLogPath := "log" + hb_ps() + "init_error_handler.log"
+   hLogFile := FCreate(cLogPath)
+   IF hLogFile != -1
+      FWrite(hLogFile, "===== SetGlobalErrorHandler INIT called at " + Time() + " =====" + CRLF)
+      FWrite(hLogFile, "Working directory: " + CurDir() + CRLF)
+      FWrite(hLogFile, "Installing ErrorBlock monitor" + CRLF)
+   ENDIF
    
-   // Try to establish early socket connection for error reporting
-   // Note: We cannot initialize the debug info here because it uses hash syntax
-   // which may not be available yet during INIT procedures
-   // The socket connection will be established when __dbgEntry is called
+   // Install a monitoring error handler that will detect when user sets their handler
+   ErrorBlock({|oError| MonitoringErrorHandler(oError)})
    
-   // Removed hardcoded log files - using stderr for essential debug messages only
-   // Use environment variable HB_REMOTE_DEBUG_LOG to enable debug logging if needed
+   IF hLogFile != -1
+      FWrite(hLogFile, "Monitoring ErrorBlock installed" + CRLF)
+      FClose(hLogFile)
+   ENDIF
 RETURN
+*/
+
+// REMOVED: MonitoringErrorHandler - unused function causing warning
+
+// REMOVED: HookUserErrorHandler - part of abandoned approach
+
+// REMOVED: ErrorHandlerWrapper - part of abandoned approach
 
 // Get or create debug info
 STATIC FUNCTION __DEBUGITEM(xValue)
@@ -94,7 +118,7 @@ RETURN t_oDebugInfo
 
 // Main debug entry point - exact VSCode pattern with socket integration
 PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
-   LOCAL i, tmp, j, vv, oDebugInfo, lAltDInvoked, hLog
+   LOCAL i, tmp, j, vv, oDebugInfo, lAltDInvoked
 
    // Suppress unused parameter warnings
    HB_SYMBOL_UNUSED(uParam4)
@@ -105,12 +129,15 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
 
    // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
 
-   // ALWAYS set global error handler when debug system is activated
-   // Don't check if empty - always override to ensure our handler is active
-   ErrorBlock({|oError| GlobalErrorHandler(oError)})
+   // REMOVED - Setting error handler here conflicts with user's error handler
+   // Now using EXIT procedure to wrap the error handler after all INIT procedures
+   // ErrorBlock({|oError| GlobalErrorHandler(oError)})
    
    // Removed hardcoded debug log file - error handler is set silently
 
+   // Simple error handling without complex hooks
+   // We'll rely on root.inf monitoring instead
+   
    DO CASE
    CASE nMode == HB_DBG_GETENTRY
       // Register with VM - this works
@@ -261,7 +288,7 @@ RETURN
 // Error handler for debug operations - logs to PyCharm console and files
 STATIC PROCEDURE ErrorHandler(oError, nMode)
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL hErrorLog, i, cErrorMsg
+   LOCAL cErrorMsg
    
    // Suppress unused parameter warnings
    HB_SYMBOL_UNUSED(nMode)
@@ -288,10 +315,32 @@ STATIC PROCEDURE ErrorHandler(oError, nMode)
 
 // Global error handler for entire application (not just debug system)
 // Handles ALL runtime errors uniformly: array bounds, type mismatches, division by zero, file errors, etc.
-// All errors are displayed in PyCharm console via socket (debug mode) or file monitoring (normal run mode)
+// External function declarations from harbour_error_handler.prg  
+EXTERNAL FormatErrorMessage, CollectStackTrace, FormatStackTrace, OutputError, FormatCompleteError
+
+// All errors are displayed in PyCharm console via socket (debug mode) or stderr
 FUNCTION GlobalErrorHandler(oError)
-   LOCAL hErrorLog, oDebugInfo, cErrorMsg, hPyCharmLog, cProcName, cProcLine, cFileName
+   LOCAL oDebugInfo, cCompleteError, hLogFile, cLogPath
    STATIC s_lInErrorHandler := .F.
+   
+   // Debug logging - ensure log directory exists
+   cLogPath := "log" + hb_ps() + "global_error_handler.log"
+   
+   // Create log directory if it doesn't exist
+   IF !hb_DirExists("log")
+      MakeDir("log")
+   ENDIF
+   
+   hLogFile := FCreate(cLogPath)
+   IF hLogFile != -1
+      FWrite(hLogFile, "===== GlobalErrorHandler called at " + Time() + " =====" + CRLF)
+      FWrite(hLogFile, "Error description: " + oError:Description + CRLF)
+      FWrite(hLogFile, "Error subsystem: " + oError:SubSystem + CRLF)
+      FWrite(hLogFile, "Error code: " + Str(oError:GenCode) + CRLF)
+      FWrite(hLogFile, "Error operation: " + IIF(ValType(oError:Operation) == "C", oError:Operation, "<none>") + CRLF)
+      FWrite(hLogFile, "Working directory: " + CurDir() + CRLF)
+      FClose(hLogFile)
+   ENDIF
    
    // Prevent recursion - if we're already in error handler, just exit
    IF s_lInErrorHandler
@@ -299,41 +348,19 @@ FUNCTION GlobalErrorHandler(oError)
    ENDIF
    s_lInErrorHandler := .T.
    
-   // Removed hardcoded error handler log file
-   
    oDebugInfo := __DEBUGITEM()
    
-   // Send error to PyCharm console via socket only (no file monitoring)
-   // Let's examine the error object more carefully to find the right location
+   // Format complete error with stack trace using shared functions
+   cCompleteError := FormatCompleteError(oError)
    
-   // Removed error object debug log file
-   
-   // Use ProcName(2), ProcLine(2) to skip the error handler frame
-   cProcName := ProcName(2)
-   cProcLine := AllTrim(Str(ProcLine(2)))
-   cFileName := ProcFile(2)
-   
-   cErrorMsg := "RUNTIME ERROR: " + oError:Description + " at " + cProcName + "(" + cProcLine + ")"
-   
-   // Try to send via socket first (if connected)
-   IF !Empty(oDebugInfo["socket"])
-      hb_inetSend(oDebugInfo["socket"], "ERROR_MSG:" + cErrorMsg + CRLF)
-      hb_inetSend(oDebugInfo["socket"], "ERROR_STACK:" + cProcName + "(" + cProcLine + ") in " + cFileName + CRLF)
-   ELSE
-      // No socket connection - fallback to stderr only (no hardcoded files)
-      
-      // Also try stderr as fallback
-      FWrite(2, cErrorMsg + CRLF)
-      FWrite(2, "Stack: " + cProcName + "(" + cProcLine + ") in " + cFileName + CRLF)
-   ENDIF
-   
-   // Removed global error log file - errors are sent via socket or stderr
+   // Always output to stderr and log file (for IntelliJ console)
+   OutputError(cCompleteError)
    
    // Reset recursion flag before re-raising error
    s_lInErrorHandler := .F.
    
    // Re-raise the error properly to prevent "Error recovery failure"
-   // ABSOLUTELY NO STDOUT OUTPUT - prevents popup console completely
+   // Let the original error handler deal with it after we've logged it
    IF .T.  // Always true, but avoids unreachable code warning
       BREAK(oError)
    ENDIF
@@ -343,7 +370,7 @@ FUNCTION GlobalErrorHandler(oError)
 
 // Test function to verify error handler is working
 FUNCTION TestErrorHandler()
-   LOCAL hLog, aTest
+   LOCAL aTest
    
    // Removed test error handler log file
    
@@ -1284,7 +1311,7 @@ PROCEDURE AltD()
    LOCAL t_oDebugInfo := __DEBUGITEM()
    
 //    ? "AltD() called"
-   
+
    // Ensure debugger is initialized
    IF !t_oDebugInfo["lInitialized"]
       // Manual initialization since we can't call INIT procedure
