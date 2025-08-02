@@ -1,33 +1,72 @@
-# Harbour Language IntelliJ Plugin
+# Harbour Language Plugin for PyCharm
 
-# Harbour Language Plugin for Pycharm (IntelliJ)
-
-A plugin for Pycharm (x) that provides support for the Harbour/Clipper programming language.
+A comprehensive plugin for [PyCharm](https://www.jetbrains.com/pycharm/) that provides advanced support for the [Harbour/Clipper](https://harbour.github.io/) programming language.
 
 ## Features
 
-- Syntax highlighting
-- Code completion
-- Function and procedure navigation
-- Reference resolution
-- Rename refactoring
-- Structure view
-- Code formatting
-- [Debugging](#debugging-features)
-- Enhanced navigation popup with syntax highlighting
+- **[Syntax Highlighting](#syntax-highlighting)** - Complete color coding for Harbour/Clipper keywords, functions, and syntax
+- **[Code Completion](#code-completion)** - Intelligent auto-completion for functions, methods, and variables
+- **[Function Navigation](#function-navigation)** - Go-to-declaration and reference resolution
+- **[Rename Refactoring](#rename-refactoring)** - Safe renaming of functions and variables across projects
+- **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
+- **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
+- **[Debugging Support](#debugging)** - Full breakpoint debugging for console and GUI applications
 
-## Introduction
+## Installation
 
-This package was purely implemented by O1 pro and Claude 3.7.  No code was written by myself.  I just did the
-orchestration and provided some help here and there.  If you are interested in my experiences see the making-of.
+1. Download the latest plugin from the [releases page](https://github.com/jo47011/intellij-harbour/releases/)
+2. In PyCharm: **Settings** → **Plugins** → ⚙️ → **Install Plugin from Disk...**
+3. Select the downloaded plugin file and restart PyCharm
 
-## Debugging Features
+### Syntax Highlighting
+
+Full color coding support for Harbour/Clipper syntax with customizable color schemes. Keywords, functions, comments, strings, and operators are distinctly highlighted for better code readability.
+
+![Syntax Highlighting](img/syntax-highlighting.png)
+*Enhanced syntax highlighting with customizable color schemes*
+
+### Code Completion
+
+Intelligent auto-completion suggests functions, methods, variables, and Harbour commands as you type. Supports both built-in Harbour functions and user-defined functions from your project.
+
+![Code Completion](img/code-completion.png)
+*Smart auto-completion for Harbour functions and variables*
+
+### Function Navigation
+
+Quickly navigate to function definitions with **Ctrl+Click** or **Ctrl+B**. The plugin resolves references across files and provides external documentation links for built-in functions.
+
+### Rename Refactoring
+
+Safely rename functions, procedures, and variables across your entire project with **Shift+F6**. All references are automatically updated while preserving code functionality.
+
+### Structure View
+
+The structure view panel (**Alt+7**) shows a tree overview of functions, procedures, classes, and variables in the current file for easy navigation.
+
+![Structure View](img/structure-view.png)
+*Structure view showing project organization*
+
+### Code Formatting
+
+Automatic code indentation and formatting follows Harbour conventions. Customize indentation, line breaks, and statement positioning in settings.
+
+![Code Style Settings](img/settings-codestyle.png)
+*Customizable code formatting options*
+
+## Development
+
+This plugin was implemented by [OpenAI O1](https://openai.com/o1/) and [Claude](https://claude.ai/). For detailed development insights and experiences, see the [making-of documentation](./MAKING_OF.md).
+
+## Debugging
 
 The plugin provides **dual debugging support**, automatically choosing the appropriate method:
 
-- **Console Applications**: Full PyCharm debugger integration with conditional breakpoints, variable inspection, step debugging, and watches
+- **Console Applications**: Full PyCharm debugger integration with conditional breakpoints,
+  variable inspection, step debugging, and watches
 - **GUI Applications**: Uses Harbour's internal debugger with breakpoints written to `init.cld`
-- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`) in .hbp files to choose debugging method
+- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`) in .hbp files to choose debugging
+  method
 
 ### Variable Types Supported
 
@@ -36,50 +75,41 @@ The plugin provides **dual debugging support**, automatically choosing the appro
 - **Public Variables**: Public memory variables (`PUBLIC g_nVar`)
 - **Static Variables**: Currently not supported due to Harbour VM limitations
 
-### Setting Up Debugging
+### Setup
 
-1. **Compile with Debug Info**: Ensure your Harbour program is compiled with debug information:
-   ```bash
-   hbmk2 yourprogram.prg -b -D__HARBOUR_DEBUG__
-   ```
-   Note: The `-b` flag creates an executable, and `-D__HARBOUR_DEBUG__` enables debug support. When using the IntelliJ Harbour debug configuration, these flags are automatically added for you.
+1. **Create Debug Configuration** - Use `Harbour Application` type in PyCharm run configurations
+2. **Set Breakpoints** - Click in the gutter next to line numbers
+3. **Start Debugging** - Use Debug button or **Shift+F9**
 
-2. **Create Debug Configuration**: Use the Harbour Debug configuration type in IntelliJ
+![Debug Configuration](img/run-debug-config.png)
+*Harbour Application debug configuration settings*
 
-3. **Set Breakpoints**: Click in the gutter next to line numbers to set breakpoints. Right-click on breakpoints to set conditional breakpoints with expressions like `nCounter > 5` or hit count conditions.
+*Note: Debug flags (`-b -D__HARBOUR_DEBUG__`) are automatically added when using PyCharm debug configurations.*
 
-4. **Start Debugging**: Use the Debug button or Shift+F9 to start debugging
+![Console Debugging](img/debugging-console.png)
+*Console debugging with breakpoints and variable inspection*
 
-### Debug Protocol
+![GUI Debugging](img/debugging-gui.png)
+*GUI debugging with Harbour's internal debugger*
 
-The plugin uses a socket-based debug protocol (default port 9876) to communicate with Harbour programs. The debug server is automatically integrated when compiling with `-D__HARBOUR_DEBUG__`.
 
 ### Limitations
 
-- **Static Variables**: Static variables are not visible in the debugger due to Harbour VM compilation-unit scoping
+- **Static Variables**: Static variables are not visible in the debugger due to Harbour VM
+  compilation-unit scoping
 - **Complex Objects**: Limited support for complex object inspection
-- **Remote Debugging**: Currently supports local debugging only (debugging programs running on the same machine). Remote debugging would allow debugging Harbour programs running on different machines over a network connection.
-
-## Installation
-
-1. Download the latest release from the JetBrains Plugin Repository
-2. Install the plugin from disk in IntelliJ IDEA (Settings → Plugins → ⚙️ → Install Plugin from Disk...)
-
-## Usage Example
-
-The plugin supports standard Harbour/Clipper code syntax:
-
-![Syntax Highlighting](example.png)
-
-## Runtime Error Handling
+- **Remote Debugging**: Currently supports local debugging only (debugging programs running on the
+  same machine). Remote debugging would allow debugging Harbour programs running on different
+  machines over a network connection.
 
 ### Automatic Error Monitoring
 
-The plugin automatically provides clickable stack traces for runtime errors in the PyCharm/IntelliJ console. This works with any Harbour project by copying error monitoring files to your `.hbmk` directory during compilation.
+The plugin automatically provides clickable stack traces for runtime errors in the PyCharm console. This works with any Harbour project by copying error monitoring files to your `.hbmk` directory during compilation.
 
 ### Custom ErrorBlock Integration
 
-If your project uses a custom ErrorBlock handler, you can still get clickable stack traces by calling `printDebugStackTrace()` from your error handler:
+If your project uses a custom ErrorBlock handler, you can still get clickable stack traces by
+calling `printDebugStackTrace()` from your error handler:
 
 ```harbour
 // Your custom error handling
@@ -99,72 +129,98 @@ RETURN NIL
 ```
 
 **Key points:**
+
 - Add `printDebugStackTrace()` to your custom error handler
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
 - No need to modify your current error logging
 - Include `harbour_error_handler.prg` in your project to use this function
 
-### Requirements
-
-To use the error monitoring features:
-1. Include the plugin's error handling files in your compilation (automatically done)
-2. For custom ErrorBlock: Call `printDebugStackTrace()` from your error handler
-3. View errors in PyCharm's console with clickable navigation to source lines
-
 ## Building from Source
 
-To build the plugin from source:
+### Prerequisites
 
+1. **Java Development Kit 11+** - [Download from Oracle](https://www.oracle.com/java/technologies/downloads/) or [OpenJDK](https://openjdk.org/)
+2. **Git** - [Download from git-scm.com](https://git-scm.com/downloads)
+3. **IntelliJ Platform Plugin SDK** - Automatically downloaded by [Gradle](https://gradle.org/)
+
+### Build Steps
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/jo47011/intellij-harbour.git
+   cd intellij-harbour
+   ```
+
+2. **Verify Java version:**
+   ```bash
+   java -version  # Should show Java 11 or higher
+   ```
+
+3. **Build the plugin:**
+   ```bash
+   ./gradlew buildPlugin  # Linux/macOS
+   gradlew.bat buildPlugin  # Windows
+   ```
+   
+   *Note: The `gradlew` (Gradle Wrapper) script is included in the repository and automatically downloads the correct Gradle version.*
+
+4. **Find the built plugin:**
+   ```
+   build/distributions/harbour-language-plugin-x.x.x.zip
+   ```
+
+### Development Setup
+
+For plugin development, you can also run a development instance:
 ```bash
-./gradlew buildPlugin
+./gradlew runIde
 ```
+
+This launches PyCharm with the plugin pre-installed for testing.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the [MIT License](./LICENSE).
 
 
-## Logging
+## Settings
 
-// Simple usage (auto-detects project)
-HarbourLogger.log("ComponentName", "Log message");
+Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 
-// With explicit project reference
-HarbourLogger.log(project, "ComponentName", "Log message");
+![Tools Settings](img/settings-tools.png)
+*Configure Harbour tools, paths, and debugging options*
 
------
+### Configuration Options
 
-## File Exclusion
+- **Documentation URL** - Base URL for external Harbour documentation
+- **Debug Log Directory** - Location for debug logs (empty to disable)
+- **Build Output Directory** - Default `.hbmk` for build artifacts  
+- **Auto-completion** - Enable while typing (default: Ctrl+Space only)
+- **Include Paths** - Add directories for #include file resolution
+- **Excluded Files** - Files to exclude from navigation and indexing
+- **Commands** - Customize code completion command list
 
-The Harbour plugin allows you to exclude specific files from navigation and indexing. This is useful for:
+### Code Style Settings
 
-- Improving performance by skipping large generated files
-- Avoiding navigation to library or third-party code
-- Focusing on your own source code during development
+Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
 
-### How to Configure Excluded Files
+![Code Style Settings](img/settings-codestyle.png)
+*Configure indentation, spacing, and formatting rules*
 
-1. Go to **Settings** > **Languages & Frameworks** > **Harbour**
-2. Under "Files excluded from navigation (won't be indexed)", use:
-  - **+** button to add a new file
-  - **-** button to remove selected files
-  - Up/down arrows to reorder the list
+### Color Scheme Settings
 
-### Effects of Exclusion
+Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
 
-When a file is excluded:
+![Color Scheme](img/settings-colorscheme.png)
+*Customize syntax highlighting colors and themes*
 
-- Its functions won't appear in code completion suggestions
-- Go to Declaration won't navigate to functions defined in excluded files
-- Find Usages won't include references from excluded files
-- Code highlighting for unresolved references won't report references to excluded files
+## VS Code Users
 
-### Best Practices
+For Visual Studio Code users, there's an excellent [Harbour Code Extension](https://github.com/APerricone/harbourCodeExtension) available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing valuable insights into Harbour language support implementation.
 
-- Exclude test files if they're not relevant to your main development
-- Exclude large generated code files that slow down indexing
-- Don't exclude files that contain functions you regularly need to navigate to
+## Roadmap
 
-Changes to excluded files take effect after restarting the IDE or manually refreshing the Harbour indexes.
-
+- **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
+- **Enhanced Debugging** - Remote debugging support and improved object inspection
+- **Code Analysis** - Advanced linting and static analysis features

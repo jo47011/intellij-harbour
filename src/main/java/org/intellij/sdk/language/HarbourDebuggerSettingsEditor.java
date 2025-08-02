@@ -4,11 +4,8 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.components.JBTextField;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -103,13 +100,30 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
 
         // Source file
         sourceFileField = new TextFieldWithBrowseButton();
-        FileChooserDescriptor sourceFileDesc = FileChooserDescriptorFactory.createSingleFileDescriptor("prg");
+        FileChooserDescriptor sourceFileDesc = FileChooserDescriptorFactory.createSingleFileDescriptor();
+        sourceFileDesc.withFileFilter(file -> {
+            String name = file.getName().toLowerCase();
+            return name.endsWith(".prg") || name.endsWith(".hbp");
+        });
+        sourceFileDesc.withTitle("Select Harbour Source File (.prg) or Project File (.hbp)");
         sourceFileField.addActionListener(e -> {
             com.intellij.openapi.fileChooser.FileChooser.chooseFile(
                     sourceFileDesc,
                     null,
                     HarbourFileUtils.getVirtualFileFromPath(sourceFileField.getText()),
-                    file -> sourceFileField.setText(HarbourFileUtils.normalizePathSeparators(file.getPath()))
+                    file -> {
+                        String path = HarbourFileUtils.normalizePathSeparators(file.getPath());
+                        String fileName = file.getName().toLowerCase();
+                        // Reject .ui files explicitly
+                        if (fileName.endsWith(".ui")) {
+                            com.intellij.openapi.ui.Messages.showErrorDialog(
+                                "UI files (.ui) cannot be compiled directly. Please select a .prg source file or .hbp project file instead.",
+                                "Invalid File Type"
+                            );
+                            return;
+                        }
+                        sourceFileField.setText(path);
+                    }
             );
         });
         compilePanel.add(createLabeledField("Source File:", sourceFileField), c);
@@ -206,7 +220,26 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
 
         // Compilation settings
         configuration.setHbmk2Path(hbmk2PathField.getText());
-        configuration.setSourceFile(sourceFileField.getText());
+        
+        // Validate source file
+        String sourceFile = sourceFileField.getText();
+        if (!sourceFile.isEmpty()) {
+            String fileName = sourceFile.toLowerCase();
+            if (fileName.endsWith(".ui")) {
+                throw new ConfigurationException(
+                    "UI files (.ui) cannot be compiled directly. Please select a .prg source file or .hbp project file instead.",
+                    "Invalid Source File"
+                );
+            }
+            if (!fileName.endsWith(".prg") && !fileName.endsWith(".hbp")) {
+                throw new ConfigurationException(
+                    "Source file must be a Harbour source file (.prg) or project file (.hbp).",
+                    "Invalid Source File"
+                );
+            }
+        }
+        
+        configuration.setSourceFile(sourceFile);
         configuration.setCompilerOptions(compilerOptionsField.getText());
         configuration.setUseRebuildFlag(useRebuildFlagCheckbox.isSelected());
 
