@@ -12,3 +12,9 @@
     - mein prompt Vorgaben etc.
 
 
+----
+
+Pls tell me what those settings do and whether they are still needed:
+
+- breakpoint file
+- Use direct execution....
