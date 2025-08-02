@@ -78,19 +78,19 @@ The plugin provides **dual debugging support**, automatically choosing the appro
 ### Setup
 
 1. **Create Debug Configuration** - Use `Harbour Application` type in PyCharm run configurations
-2. **Set Breakpoints** - Click in the gutter next to line numbers
-3. **Start Debugging** - Use Debug button or **Shift+F9**
+   ![Debug Configuration](img/run-debug-config.png)
+   *Harbour Application debug configuration settings*
 
-![Debug Configuration](img/run-debug-config.png)
-*Harbour Application debug configuration settings*
+   *Note: Debug flags (`-b -D__HARBOUR_DEBUG__`) are automatically added when using PyCharm debug configurations.*
 
-*Note: Debug flags (`-b -D__HARBOUR_DEBUG__`) are automatically added when using PyCharm debug configurations.*
-
+2.**Set Breakpoints** - Click in the gutter next to line numbers
 ![Console Debugging](img/debugging-console.png)
 *Console debugging with breakpoints and variable inspection*
 
+3. **Start Debugging** - Use Debug button or **Shift+F9**
+
 ![GUI Debugging](img/debugging-gui.png)
-*GUI debugging with Harbour's internal debugger*
+*GUI debugging with pycharm debugger and variable inspection.*
 
 
 ### Limitations
@@ -104,7 +104,7 @@ The plugin provides **dual debugging support**, automatically choosing the appro
 
 ### Automatic Error Monitoring
 
-The plugin automatically provides clickable stack traces for runtime errors in the PyCharm console. This works with any Harbour project by copying error monitoring files to your `.hbmk` directory during compilation.
+The plugin automatically provides clickable stack traces for runtime errors in the PyCharm console.
 
 ### Custom ErrorBlock Integration
 
@@ -133,16 +133,13 @@ RETURN NIL
 - Add `printDebugStackTrace()` to your custom error handler
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
-- No need to modify your current error logging
-- Include `harbour_error_handler.prg` in your project to use this function
 
 ## Building from Source
 
 ### Prerequisites
 
 1. **Java Development Kit 11+** - [Download from Oracle](https://www.oracle.com/java/technologies/downloads/) or [OpenJDK](https://openjdk.org/)
-2. **Git** - [Download from git-scm.com](https://git-scm.com/downloads)
-3. **IntelliJ Platform Plugin SDK** - Automatically downloaded by [Gradle](https://gradle.org/)
+2. **IntelliJ Platform Plugin SDK** - Automatically downloaded by [Gradle](https://gradle.org/)
 
 ### Build Steps
 
@@ -222,5 +219,4 @@ For Visual Studio Code users, there's an excellent [Harbour Code Extension](http
 ## Roadmap
 
 - **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
-- **Enhanced Debugging** - Remote debugging support and improved object inspection
 - **Code Analysis** - Advanced linting and static analysis features
