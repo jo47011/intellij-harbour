@@ -61,8 +61,6 @@ STATIC s_lSocketEnabled := .F.  // DISABLED: Socket communication to prevent han
 INIT PROCEDURE SetGlobalErrorHandler()
    LOCAL hLogFile, cLogPath
 
-   altd()
-   
    // Create log directory if it doesn't exist
    IF !hb_DirExists("log")
       MakeDir("log")
@@ -126,8 +124,6 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    
    // Add error handling and stacktrace logging
    BEGIN SEQUENCE WITH {|err| ErrorHandler(err, nMode) }
-
-   // altd() // REMOVED - this was triggering Harbour debugger instead of PyCharm
 
    // REMOVED - Setting error handler here conflicts with user's error handler
    // Now using EXIT procedure to wrap the error handler after all INIT procedures
@@ -204,11 +200,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       oDebugInfo := __DEBUGITEM()
       oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
       
-      // Enhanced AltD() detection with debugging
-//       ? "=== HB_DBG_SHOWLINE DEBUG - Line", uParam1, "==="
-//       ? "Checking AltD() status..."
       lAltDInvoked := __dbgInvokeDebug()  // Check without clearing
-//       ? "AltD() result:", lAltDInvoked
       IF lAltDInvoked
          __dbgInvokeDebug(.T.)  // Clear the flag after detecting
       ENDIF
@@ -219,11 +211,8 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       ENDIF
       
       // Check socket and process commands if enabled
-      // Also check if AltD() was invoked to force a stop
       IF s_lSocketEnabled
          IF lAltDInvoked
-//             ? "=== HB_DBG_SHOWLINE: AltD() DETECTED! ==="
-            // Force a stop by setting running to false
             oDebugInfo["lRunning"] := .F.
          ENDIF
          CheckSocket(.F.)
@@ -1128,9 +1117,7 @@ RETURN .F.
 
 // Check if current HB_DBG_ACTIVATE was triggered by AltD()
 STATIC FUNCTION IsAltDStop()
-   // Check if AltD() was invoked using the VM's debug invoke flag
    IF __dbgInvokeDebug()
-//       ? "AltD() invoked - forcing debug stop"
       __dbgInvokeDebug(.T.)  // Clear flag after detecting
       RETURN .T.
    ENDIF
@@ -1310,8 +1297,6 @@ RETURN
 PROCEDURE AltD()
    LOCAL t_oDebugInfo := __DEBUGITEM()
    
-//    ? "AltD() called"
-
    // Ensure debugger is initialized
    IF !t_oDebugInfo["lInitialized"]
       // Manual initialization since we can't call INIT procedure
