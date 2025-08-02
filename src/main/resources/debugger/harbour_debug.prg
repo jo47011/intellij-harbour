@@ -54,38 +54,7 @@ STATIC s_lSocketEnabled := .F.  // DISABLED: Socket communication to prevent han
 // REMOVED: s_lErrorHandlerHooked - not needed with new monitoring approach
 // REMOVED: s_bOriginalHandler - not needed with new monitoring approach
 
-// REMOVED: INIT procedures can interfere with program startup in debug mode
-// We'll rely on root.inf monitoring instead
-/*
-// Set up global error handler for entire application
-INIT PROCEDURE SetGlobalErrorHandler()
-   LOCAL hLogFile, cLogPath
-
-   // Create log directory if it doesn't exist
-   IF !hb_DirExists("log")
-      MakeDir("log")
-   ENDIF
-   
-   // Debug logging
-   cLogPath := "log" + hb_ps() + "init_error_handler.log"
-   hLogFile := FCreate(cLogPath)
-   IF hLogFile != -1
-      FWrite(hLogFile, "===== SetGlobalErrorHandler INIT called at " + Time() + " =====" + CRLF)
-      FWrite(hLogFile, "Working directory: " + CurDir() + CRLF)
-      FWrite(hLogFile, "Installing ErrorBlock monitor" + CRLF)
-   ENDIF
-   
-   // Install a monitoring error handler that will detect when user sets their handler
-   ErrorBlock({|oError| MonitoringErrorHandler(oError)})
-   
-   IF hLogFile != -1
-      FWrite(hLogFile, "Monitoring ErrorBlock installed" + CRLF)
-      FClose(hLogFile)
-   ENDIF
-RETURN
-*/
-
-// REMOVED: MonitoringErrorHandler - unused function causing warning
+// REMOVED: Obsolete SetGlobalErrorHandler() and MonitoringErrorHandler() - replaced by harbour_error_monitor.prg
 
 // REMOVED: HookUserErrorHandler - part of abandoned approach
 
