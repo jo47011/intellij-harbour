@@ -38,7 +38,6 @@ STATIC FUNCTION MonitorAndPassError(oError, bOriginalHandler)
    IF s_lInRecursion
       // We're already processing an error - bail out with standard behavior
       BREAK(oError)
-      RETURN NIL
    ENDIF
    s_lInRecursion := .T.
    
@@ -87,11 +86,3 @@ STATIC FUNCTION MonitorAndPassError(oError, bOriginalHandler)
    ENDIF
 RETURN NIL
 
-// Cleanup on exit - no test error generation or debug logging
-EXIT PROCEDURE __HbIntelliJErrorMonitorExit()
-   // Just clean exit - no operations needed
-RETURN
-
-// Note: This approach captures runtime errors at the earliest possible point
-// with complete stack information while remaining 100% compatible with all
-// user error handling patterns through the chained ErrorBlock approach.

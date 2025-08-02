@@ -1,8 +1,8 @@
 # Harbour Language IntelliJ Plugin
 
-# Harbour Language Plugin for IntelliJ
+# Harbour Language Plugin for Pycharm (IntelliJ)
 
-A plugin for IntelliJ IDEA that provides support for the Harbour/Clipper programming language.
+A plugin for Pycharm (x) that provides support for the Harbour/Clipper programming language.
 
 ## Features
 
