@@ -10,7 +10,7 @@ A comprehensive plugin for <a href="https://www.jetbrains.com/pycharm/" target="
 - **[Rename Refactoring](#rename-refactoring)** - Safe renaming of functions and variables across projects
 - **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
 - **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
-- **[Debugging Support](#debugging)** - Full breakpoint debugging for console and GUI applications
+- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
 
 ## Installation
 
@@ -22,43 +22,57 @@ A comprehensive plugin for <a href="https://www.jetbrains.com/pycharm/" target="
 
 Full color coding support for Harbour/Clipper syntax with customizable color schemes. Keywords, functions, comments, strings, and operators are distinctly highlighted for better code readability.
 
-![Syntax Highlighting](img/syntax-highlighting.png)
-*Enhanced syntax highlighting with customizable color schemes*
+<div align="center">
+  <img src="img/syntax-highlighting.png" alt="Syntax Highlighting" />
+  <br><em>Enhanced syntax highlighting with customizable color schemes</em>
+</div>
 
 ### Code Completion
 
 Intelligent auto-completion suggests functions, methods, variables, and Harbour commands as you type. Supports both built-in Harbour functions and user-defined functions from your project.
 
-![Code Completion](img/code-completion.png)
-*Smart auto-completion for Harbour functions and variables*
+<div align="center">
+  <img src="img/code-completion.png" alt="Code Completion" />
+  <br><em>Smart auto-completion for Harbour functions and variables</em>
+</div>
 
 ### Function Navigation
 
-Quickly navigate to function definitions with **Ctrl+Click** or **Ctrl+B**. The plugin resolves references across files and provides external documentation links for built-in functions.
+Quickly navigate to function definitions with **Ctrl+Click** or **Ctrl+B**. 
+The plugin resolves references across files for custom defined and built-in functions, variables, etc.
+For external harbour functions an external documentation link (configurable in the settings) will be opend.
 
-![Function Navigation](img/function-navigation.png)
-*Function navigation with external documentation links for built-in functions*
+<div align="center">
+  <img src="img/function-navigation.png" alt="Function Navigation" />
+  <br><em>Function navigation with external documentation links for built-in functions</em>
+</div>
 
 ### Rename Refactoring
 
 Safely rename functions, procedures, and variables across your entire project with **Shift+F6**. All references are automatically updated while preserving code functionality.
 
-![Rename Refactoring](img/function-rename.png)
-*Safe project-wide rename refactoring for functions and variables*
+<div align="center">
+  <img src="img/function-rename.png" alt="Rename Refactoring" />
+  <br><em>Safe project-wide rename refactoring for functions and variables</em>
+</div>
 
 ### Structure View
 
 The structure view panel (**Alt+7**) shows a tree overview of functions, procedures, classes, and variables in the current file for easy navigation.
 
-![Structure View](img/structure-view.png)
-*Structure view showing project organization*
+<div align="center">
+  <img src="img/structure-view.png" alt="Structure View" />
+  <br><em>Structure view showing project organization</em>
+</div>
 
 ### Code Formatting
 
 Automatic code indentation and formatting follows Harbour conventions. Customize indentation, line breaks, and statement positioning in settings.
 
-![Code Style Settings](img/settings-codestyle.png)
-*Customizable code formatting options*
+<div align="center">
+  <img src="img/settings-codestyle.png" alt="Code Style Settings" />
+  <br><em>Customizable code formatting options</em>
+</div>
 
 ## Development
 
@@ -78,19 +92,25 @@ The plugin provides **full debugging support** for both console and GUI applicat
 ### Setup
 
 1. **Create Debug Configuration** - Use `Harbour Application` type in PyCharm run configurations
-   ![Debug Configuration](img/run-debug-config.png)
-   *Harbour Application debug configuration settings*
+   <div align="center">
+     <img src="img/run-debug-config.png" alt="Debug Configuration" />
+     <br><em>Harbour Application debug configuration settings</em>
+   </div>
 
    *Note: Debug flags (`-b -D__HARBOUR_DEBUG__`) are automatically added when using PyCharm debug configurations.*
 
 2.**Set Breakpoints** - Click in the gutter next to line numbers
-![Console Debugging](img/debugging-console.png)
-*Console debugging with breakpoints and variable inspection*
+<div align="center">
+  <img src="img/debugging-console.png" alt="Console Debugging" />
+  <br><em>Console debugging with breakpoints and variable inspection</em>
+</div>
 
 3. **Start Debugging** - Use Debug button or **Shift+F9**
 
-![GUI Debugging](img/debugging-gui.png)
-*GUI debugging with pycharm debugger and variable inspection.*
+<div align="center">
+  <img src="img/debugging-gui.png" alt="GUI Debugging" />
+  <br><em>GUI debugging with PyCharm debugger and variable inspection</em>
+</div>
 
 
 ### Limitations
@@ -106,8 +126,10 @@ The plugin provides **full debugging support** for both console and GUI applicat
 
 The plugin automatically provides clickable stack traces for runtime errors in the PyCharm console.
 
-![Clickable Stack Traces](img/clickable-stacktraces.png)
-*Clickable stack traces for quick navigation to error locations*
+<div align="center">
+  <img src="img/clickable-stacktraces.png" alt="Clickable Stack Traces" />
+  <br><em>Clickable stack traces for quick navigation to error locations</em>
+</div>
 
 ### Custom ErrorBlock Integration
 
@@ -188,8 +210,10 @@ This project is licensed under the [MIT License](./LICENSE).
 
 Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 
-![Tools Settings](img/settings-tools.png)
-*Configure Harbour tools, paths, and debugging options*
+<div align="center">
+  <img src="img/settings-tools.png" alt="Tools Settings" />
+  <br><em>Configure Harbour tools, paths, and debugging options</em>
+</div>
 
 ### Configuration Options
 
@@ -205,21 +229,26 @@ Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 
 Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
 
-![Code Style Settings](img/settings-codestyle.png)
-*Configure indentation, spacing, and formatting rules*
+<div align="center">
+  <img src="img/settings-codestyle.png" alt="Code Style Settings" />
+  <br><em>Configure indentation, spacing, and formatting rules</em>
+</div>
 
 ### Color Scheme Settings
 
 Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
 
-![Color Scheme](img/settings-colorscheme.png)
-*Customize syntax highlighting colors and themes*
+<div align="center">
+  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings" />
+  <br><em>Customize syntax highlighting colors and themes</em>
+</div>
 
 ## VS Code Users
 
 For Visual Studio Code users, there's an excellent <a href="https://github.com/APerricone/harbourCodeExtension" target="_blank">Harbour Code Extension</a> available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing valuable insights into Harbour language support implementation.
 
-## Roadmap
+## Roadmap / TODOs
 
 - **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
 - **Code Analysis** - Advanced linting and static analysis features
+- **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated as well.
