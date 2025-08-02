@@ -1,6 +1,6 @@
 # Harbour Language Plugin for PyCharm
 
-A comprehensive plugin for [PyCharm](https://www.jetbrains.com/pycharm/) that provides advanced support for the [Harbour/Clipper](https://harbour.github.io/) programming language.
+A comprehensive plugin for <a href="https://www.jetbrains.com/pycharm/" target="_blank">PyCharm</a> that provides advanced support for the <a href="https://harbour.github.io/" target="_blank">Harbour/Clipper</a> programming language.
 
 ## Features
 
@@ -14,7 +14,7 @@ A comprehensive plugin for [PyCharm](https://www.jetbrains.com/pycharm/) that pr
 
 ## Installation
 
-1. Download the latest plugin from the [releases page](https://github.com/jo47011/intellij-harbour/releases/)
+1. Download the latest plugin from the <a href="https://github.com/jo47011/intellij-harbour/releases/" target="_blank">releases page</a>
 2. In PyCharm: **Settings** → **Plugins** → ⚙️ → **Install Plugin from Disk...**
 3. Select the downloaded plugin file and restart PyCharm
 
@@ -36,9 +36,15 @@ Intelligent auto-completion suggests functions, methods, variables, and Harbour 
 
 Quickly navigate to function definitions with **Ctrl+Click** or **Ctrl+B**. The plugin resolves references across files and provides external documentation links for built-in functions.
 
+![Function Navigation](img/function-navigation.png)
+*Function navigation with external documentation links for built-in functions*
+
 ### Rename Refactoring
 
 Safely rename functions, procedures, and variables across your entire project with **Shift+F6**. All references are automatically updated while preserving code functionality.
+
+![Rename Refactoring](img/rename-refactoring.png)
+*Safe project-wide rename refactoring for functions and variables*
 
 ### Structure View
 
@@ -56,17 +62,11 @@ Automatic code indentation and formatting follows Harbour conventions. Customize
 
 ## Development
 
-This plugin was implemented by [OpenAI O1](https://openai.com/o1/) and [Claude](https://claude.ai/). For detailed development insights and experiences, see the [making-of documentation](./MAKING_OF.md).
+This plugin was implemented by <a href="https://openai.com/o1/" target="_blank">OpenAI O1</a> and <a href="https://claude.ai/" target="_blank">Claude</a>. For detailed development insights and experiences, see the [making-of documentation](./MAKING_OF.md).
 
 ## Debugging
 
-The plugin provides **dual debugging support**, automatically choosing the appropriate method:
-
-- **Console Applications**: Full PyCharm debugger integration with conditional breakpoints,
-  variable inspection, step debugging, and watches
-- **GUI Applications**: Uses Harbour's internal debugger with breakpoints written to `init.cld`
-- **Automatic Detection**: Detects GUI flags (`-gui`, `-gtwvt`) in .hbp files to choose debugging
-  method
+The plugin provides **full debugging support** for both console and GUI applications with PyCharm debugger integration featuring conditional breakpoints, variable inspection, step debugging, and watches.
 
 ### Variable Types Supported
 
@@ -106,6 +106,9 @@ The plugin provides **dual debugging support**, automatically choosing the appro
 
 The plugin automatically provides clickable stack traces for runtime errors in the PyCharm console.
 
+![Clickable Stack Traces](img/clickable-stacktraces.png)
+*Clickable stack traces for quick navigation to error locations*
+
 ### Custom ErrorBlock Integration
 
 If your project uses a custom ErrorBlock handler, you can still get clickable stack traces by
@@ -138,8 +141,8 @@ RETURN NIL
 
 ### Prerequisites
 
-1. **Java Development Kit 11+** - [Download from Oracle](https://www.oracle.com/java/technologies/downloads/) or [OpenJDK](https://openjdk.org/)
-2. **IntelliJ Platform Plugin SDK** - Automatically downloaded by [Gradle](https://gradle.org/)
+1. **Java Development Kit 11+** - <a href="https://www.oracle.com/java/technologies/downloads/" target="_blank">Download from Oracle</a> or <a href="https://openjdk.org/" target="_blank">OpenJDK</a>
+2. **IntelliJ Platform Plugin SDK** - Automatically downloaded by <a href="https://gradle.org/" target="_blank">Gradle</a>
 
 ### Build Steps
 
@@ -214,7 +217,7 @@ Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** 
 
 ## VS Code Users
 
-For Visual Studio Code users, there's an excellent [Harbour Code Extension](https://github.com/APerricone/harbourCodeExtension) available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing valuable insights into Harbour language support implementation.
+For Visual Studio Code users, there's an excellent <a href="https://github.com/APerricone/harbourCodeExtension" target="_blank">Harbour Code Extension</a> available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing valuable insights into Harbour language support implementation.
 
 ## Roadmap
 
