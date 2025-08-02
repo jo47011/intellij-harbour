@@ -28,7 +28,7 @@ strings, and operators are distinctly highlighted for better code readability.
 
 <div>
   <img src="img/syntax-highlighting.png" alt="Syntax Highlighting" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Enhanced syntax highlighting with customizable color schemes</em></p>
+  <p style="text-align: center;"><em>Enhanced syntax highlighting with customizable color schemes</em></p>
 </div>
 
 ### Code Completion
@@ -38,7 +38,7 @@ built-in Harbour functions and user-defined functions from your project.
 
 <div>
   <img src="img/code-completion.png" alt="Code Completion" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Smart auto-completion for Harbour functions and variables</em></p>
+  <p style="text-align: center;"><em>Smart auto-completion for Harbour functions and variables</em></p>
 </div>
 
 ### Function Navigation
@@ -49,7 +49,7 @@ For external harbour functions an external documentation link (configurable in t
 
 <div>
   <img src="img/function-navigation.png" alt="Function Navigation" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Function navigation with external documentation links for built-in functions</em></p>
+  <p style="text-align: center;"><em>Function navigation with external documentation links for built-in functions</em></p>
 </div>
 
 ### Rename Refactoring
@@ -59,7 +59,7 @@ automatically updated while preserving code functionality.
 
 <div>
   <img src="img/function-rename.png" alt="Rename Refactoring" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Safe project-wide rename refactoring for functions and variables</em></p>
+  <p style="text-align: center;"><em>Safe project-wide rename refactoring for functions and variables</em></p>
 </div>
 
 ### Structure View
@@ -69,7 +69,7 @@ current file for easy navigation.
 
 <div>
   <img src="img/structure-view.png" alt="Structure View" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Structure view showing project organization</em></p>
+  <p style="text-align: center;"><em>Structure view showing project organization</em></p>
 </div>
 
 ### Code Formatting
@@ -79,7 +79,7 @@ positioning in settings.
 
 <div>
   <img src="img/settings-codestyle.png" alt="Code Style Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Customizable code formatting options</em></p>
+  <p style="text-align: center;"><em>Customizable code formatting options</em></p>
 </div>
 
 ## Development
@@ -105,7 +105,7 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
 1. **Create Debug Configuration** - Use `Harbour Application` type in PyCharm run configurations
    <div>
      <img src="img/run-debug-config.png" alt="Debug Configuration" style="display: block; margin: 0 auto;" />
-     <p style="text-align: left;"><em>Harbour Application debug configuration settings</em></p>
+     <p style="text-align: center;"><em>Harbour Application debug configuration settings</em></p>
    </div>
 
    *Note: Debug flags (`-b -D__HARBOUR_DEBUG__`) are automatically added when using PyCharm debug configurations.*
@@ -113,14 +113,14 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
 2.**Set Breakpoints** - Click in the gutter next to line numbers
 <div>
   <img src="img/debugging-console.png" alt="Console Debugging" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Console debugging with breakpoints and variable inspection</em></p>
+  <p style="text-align: center;"><em>Console debugging with breakpoints and variable inspection</em></p>
 </div>
 
 3. **Start Debugging** - Use Debug button or **Shift+F9**
 
 <div>
   <img src="img/debugging-gui.png" alt="GUI Debugging" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>GUI debugging with PyCharm debugger and variable inspection</em></p>
+  <p style="text-align: center;"><em>GUI debugging with PyCharm debugger and variable inspection</em></p>
 </div>
 
 ### Limitations
@@ -138,7 +138,7 @@ The plugin automatically provides clickable stack traces for runtime errors in t
 
 <div>
   <img src="img/clickable-stacktraces.png" alt="Clickable Stack Traces" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Clickable stack traces for quick navigation to error locations</em></p>
+  <p style="text-align: center;"><em>Clickable stack traces for quick navigation to error locations</em></p>
 </div>
 
 ### Custom ErrorBlock Integration
@@ -225,7 +225,7 @@ Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 
 <div>
   <img src="img/settings-tools.png" alt="Tools Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Configure Harbour tools, paths, and debugging options</em></p>
+  <p style="text-align: center;"><em>Configure Harbour tools, paths, and debugging options</em></p>
 </div>
 
 ### Configuration Options
@@ -244,7 +244,7 @@ Customize code formatting: **Settings** → **Editor** → **Code Style** → **
 
 <div>
   <img src="img/settings-codestyle.png" alt="Code Style Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Configure indentation, spacing, and formatting rules</em></p>
+  <p style="text-align: center;"><em>Configure indentation, spacing, and formatting rules</em></p>
 </div>
 
 ### Color Scheme Settings
@@ -253,7 +253,7 @@ Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** 
 
 <div>
   <img src="img/settings-colorscheme.png" alt="Color Scheme Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: left;"><em>Customize syntax highlighting colors and themes</em></p>
+  <p style="text-align: center;"><em>Customize syntax highlighting colors and themes</em></p>
 </div>
 
 ## VS Code Users
