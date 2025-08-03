@@ -1,12 +1,12 @@
 # Vibe-coding of: Harbour Plugin for IntelliJ/PyCharm
 
+Ever since I started this project it was intentionally a hands-**off** project. Actually, it turned out to be my 1st
+big [vibe-coding](https://en.wikipedia.org/wiki/Vibe_coding) project.
+
 <div align="center">
   <img src="img/claude-code.png" alt=""/>
   <br/>
 </div>
-
-Ever since I started this project it was intentionally a hands-**off** project. Actually, it turned out to be my 1st
-big [vibe-coding](https://en.wikipedia.org/wiki/Vibe_coding) project.
 
 For me, it was a great journey to learn how to instruct and how to monitor my AI agents to do what I want.
 I have not coded a single line of code in this project. This was often challenging as AI
