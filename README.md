@@ -103,7 +103,7 @@ Configure linting settings in **Settings** → **Tools** → **Harbour** → **L
 
 This plugin was implemented by <a href="https://openai.com/o1/" target="_blank">OpenAI O1</a>
 and <a href="https://claude.ai/" target="_blank">Claude</a>. For detailed development insights and experiences, see
-the [making-of documentation](./MAKING_OF.md).
+the [MAKING-OF](./MAKING_OF.md).
 
 ## Debugging
 
