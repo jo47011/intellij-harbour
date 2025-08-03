@@ -2,10 +2,11 @@ plugins {
     id 'java'
     id 'org.jetbrains.intellij.platform' version '2.1.0'
     id 'org.jetbrains.grammarkit' version '2022.3.2.1'
+    id 'com.github.breadmoirai.github-release' version '2.5.2'
 }
 
 group = 'org.intellij.sdk'
-version = '1.0.576'
+version = '1.0.577'
 
 repositories {
     mavenCentral()
@@ -103,4 +104,33 @@ tasks.withType(org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask) 
         
         println "Configured trusted paths: ${parentDir}, ${projectPath}"
     }
+}
+
+// GitHub Release configuration
+githubRelease {
+    token = project.findProperty('github.token') ?: System.getenv('GITHUB_TOKEN') ?: ''
+    owner = 'jo47011'
+    repo = 'intellij-harbour'
+    tagName = "v${project.version}"
+    releaseName = "Harbour Language Plugin v${project.version}"
+    generateReleaseNotes = true
+    draft = true  // Create as draft first for safety
+    prerelease = false
+    
+    // Upload the plugin zip file
+    releaseAssets = fileTree(dir: 'build/distributions', include: "harbour-language-plugin-${project.version}.zip")
+    
+    // Optional: Add custom release body
+    body = """
+Harbour Language Plugin for IntelliJ IDEA ${project.version}
+
+This release includes:
+- Support for IntelliJ IDEA 2024.3.4
+- Harbour language syntax highlighting
+- Code completion
+- Debugging support
+- And more...
+
+See the [README](https://github.com/jo47011/intellij-harbour/blob/main/README.md) for installation and usage instructions.
+"""
 }

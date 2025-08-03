@@ -50,6 +50,20 @@ run: build
 plugin:
 	./gradlew buildPlugin
 
+# Clean old plugin files before building new one
+clean-plugins:
+	rm -f ./build/distributions/harbour-language-plugin-*.zip
+	rm -f ./build/distributions/harbour-language-plugin-*.js
+
+# Create GitHub release with the built plugin
+release: plugin
+	@echo "Creating GitHub release for version $$(grep "^version" build.gradle | cut -d"'" -f2)..."
+	./gradlew githubRelease
+	@echo "Release created! Check https://github.com/jo47011/intellij-harbour/releases"
+
+# Dry run - preview what would be released
+release-dry-run: plugin
+	./gradlew githubRelease --dry-run
 
 up:
 	git pull
