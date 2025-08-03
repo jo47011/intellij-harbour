@@ -42,10 +42,11 @@ strings, and operators are distinctly highlighted for better code readability.
 Intelligent auto-completion suggests functions, methods, variables, and Harbour commands as you type. Supports both
 built-in Harbour functions and user-defined functions from your project.
 
-<div>
-  <img src="img/code-completion.png" alt="Code Completion" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Smart auto-completion for Harbour functions and variables</em></p>
-</div>
+<p align="center">
+  <img src="img/code-completion.png" alt="Code Completion"/>
+  <br>
+  <em>Smart auto-completion for Harbour functions and variables</em>
+</p>
 
 ### Function Navigation
 
@@ -53,56 +54,62 @@ Quickly navigate to function definitions with **Ctrl+Click** or **Ctrl+B**.
 The plugin resolves references across files for custom defined and built-in functions, variables, etc.
 For external harbour functions an external documentation link (configurable in the settings) will be opend.
 
-<div>
-  <img src="img/function-navigation.png" alt="Function Navigation" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Function navigation with external documentation links for built-in functions</em></p>
-</div>
+<p align="center">
+  <img src="img/function-navigation.png" alt="Function Navigation"/>
+  <br>
+  <em>Function navigation with external documentation links for built-in functions</em>
+</p>
 
 ### Rename Refactoring
 
 Safely rename functions, procedures, and variables across your entire project with **Shift+F6**. All references are
 automatically updated while preserving code functionality.
 
-<div>
-  <img src="img/function-rename.png" alt="Rename Refactoring" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Safe project-wide rename refactoring for functions and variables</em></p>
-</div>
+<p align="center">
+  <img src="img/function-rename.png" alt="Rename Refactoring"/>
+  <br>
+  <em>Safe project-wide rename refactoring for functions and variables</em>
+</p>
 
 ### Structure View
 
 The structure view panel (**Alt+7**) shows a tree overview of functions, procedures, classes, and variables in the
 current file for easy navigation.
 
-<div>
-  <img src="img/structure-view.png" alt="Structure View" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Structure view showing project organization</em></p>
-</div>
+<p align="center">
+  <img src="img/structure-view.png" alt="Structure View"/>
+  <br>
+  <em>Structure view showing project organization</em>
+</p>
 
 ### Code Formatting
 
 Automatic code indentation and formatting follows Harbour conventions. Customize indentation, line breaks, and statement
 positioning in settings.
 
-<div>
-  <img src="img/settings-codestyle.png" alt="Code Style Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Customizable code formatting options</em></p>
-</div>
+<p align="center">
+  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
+  <br>
+  <em>Customizable code formatting options</em>
+</p>
 
 ### Linting
 
 Real-time code analysis provides instant feedback on syntax errors, undefined variables, and potential issues as you type. The linting engine integrates seamlessly with PyCharm's inspection framework.
 
-<div>
-  <img src="img/linting.png" alt="Linting" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Real-time linting highlights syntax errors and undefined variables</em></p>
-</div>
+<p align="center">
+  <img src="img/linting.png" alt="Linting"/>
+  <br>
+  <em>Real-time linting highlights syntax errors and undefined variables</em>
+</p>
 
 Configure linting settings in **Settings** → **Tools** → **Harbour** → **Linting**:
 
-<div>
-  <img src="img/settings-linting.png" alt="Linting Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Customizable linting rules and severity levels</em></p>
-</div>
+<p align="center">
+  <img src="img/settings-linting.png" alt="Linting Settings"/>
+  <br>
+  <em>Customizable linting rules and severity levels</em>
+</p>
 
 ## Debugging
 
@@ -119,25 +126,28 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
 ### Setup
 
 1. **Create Debug Configuration** - Use `Harbour Application` type in PyCharm run configurations
-   <div>
-     <img src="img/run-debug-config.png" alt="Debug Configuration" style="display: block; margin: 0 auto;" />
-     <p style="text-align: center;"><em>Harbour Application debug configuration settings</em></p>
-   </div>
+   <p align="center">
+     <img src="img/run-debug-config.png" alt="Debug Configuration"/>
+     <br>
+     <em>Harbour Application debug configuration settings</em>
+   </p>
 
    *Note: Debug flags (`-b -D__HARBOUR_DEBUG__`) are automatically added when using PyCharm debug configurations.*
 
 2.**Set Breakpoints** - Click in the gutter next to line numbers
-<div>
-  <img src="img/debugging-console.png" alt="Console Debugging" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Console debugging with breakpoints and variable inspection</em></p>
-</div>
+<p align="center">
+  <img src="img/debugging-console.png" alt="Console Debugging"/>
+  <br>
+  <em>Console debugging with breakpoints and variable inspection</em>
+</p>
 
 3. **Start Debugging** - Use Debug button or **Shift+F9**
 
-<div>
-  <img src="img/debugging-gui.png" alt="GUI Debugging" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>GUI debugging with PyCharm debugger and variable inspection</em></p>
-</div>
+<p align="center">
+  <img src="img/debugging-gui.png" alt="GUI Debugging"/>
+  <br>
+  <em>GUI debugging with PyCharm debugger and variable inspection</em>
+</p>
 
 ### Limitations
 
@@ -152,10 +162,11 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
 
 The plugin automatically provides clickable stack traces for runtime errors in the PyCharm console.
 
-<div>
-  <img src="img/clickable-stacktraces.png" alt="Clickable Stack Traces" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Clickable stack traces for quick navigation to error locations</em></p>
-</div>
+<p align="center">
+  <img src="img/clickable-stacktraces.png" alt="Clickable Stack Traces"/>
+  <br>
+  <em>Clickable stack traces for quick navigation to error locations</em>
+</p>
 
 ### Custom ErrorBlock Integration
 
@@ -239,10 +250,11 @@ This project is licensed under the [MIT License](./LICENSE).
 
 Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 
-<div>
-  <img src="img/settings-tools.png" alt="Tools Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Configure Harbour tools, paths, and debugging options</em></p>
-</div>
+<p align="center">
+  <img src="img/settings-tools.png" alt="Tools Settings"/>
+  <br>
+  <em>Configure Harbour tools, paths, and debugging options</em>
+</p>
 
 ### Configuration Options
 
@@ -258,19 +270,21 @@ Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 
 Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
 
-<div>
-  <img src="img/settings-codestyle.png" alt="Code Style Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Configure indentation, spacing, and formatting rules</em></p>
-</div>
+<p align="center">
+  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
+  <br>
+  <em>Configure indentation, spacing, and formatting rules</em>
+</p>
 
 ### Color Scheme Settings
 
 Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
 
-<div>
-  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Customize syntax highlighting colors and themes</em></p>
-</div>
+<p align="center">
+  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings"/>
+  <br>
+  <em>Customize syntax highlighting colors and themes</em>
+</p>
 
 ## VS Code Users
 
