@@ -1,14 +1,12 @@
 # TODOs
 
-## Debugging Improvements
+- optional show file size in project explorer
 
-- **Process Coupling**: 
-  When debugging process in PyCharm is stopped the  running harbour GUI should be terminated as well.
+- cleanup code, get claude to find duplicate, unused etc code snippets
 
-- Linting, see https://github.com/APerricone/harbourCodeExtension/wiki/Diagnostics-Lint
+- open external browser -> pop to front
+  in popup: open browser settings should jump to browser settings directly
 
-- making-of schreiben:
-    - Erfahrung O1 Pro vs claude, evtl. als Tabelle
-    - mein prompt Vorgaben etc.
-
+- internal/external function: do we index only once?
+   what the best if we write a new function?
 
