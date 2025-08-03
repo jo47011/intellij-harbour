@@ -70,6 +70,9 @@
         <!-- Annotators -->
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFunctionCallAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourIncludeAnnotator"/>
+        
+        <!-- External Annotator for Linting -->
+        <externalAnnotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourExternalAnnotator"/>
 
         <!-- Structure View -->
         <lang.psiStructureViewFactory language="Harbour"
