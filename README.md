@@ -12,6 +12,7 @@ advanced support for the <a href="https://harbour.github.io/" target="_blank">Ha
 - **[Rename Refactoring](#rename-refactoring)** - Safe renaming of functions and variables across projects
 - **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
 - **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
+- **[Linting](#linting)** - Real-time code analysis and error detection
 - **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
 
 ## Installation
@@ -80,6 +81,22 @@ positioning in settings.
 <div>
   <img src="img/settings-codestyle.png" alt="Code Style Settings" style="display: block; margin: 0 auto;" />
   <p style="text-align: center;"><em>Customizable code formatting options</em></p>
+</div>
+
+### Linting
+
+Real-time code analysis provides instant feedback on syntax errors, undefined variables, and potential issues as you type. The linting engine integrates seamlessly with PyCharm's inspection framework.
+
+<div>
+  <img src="img/linting.png" alt="Linting" style="display: block; margin: 0 auto;" />
+  <p style="text-align: center;"><em>Real-time linting highlights syntax errors and undefined variables</em></p>
+</div>
+
+Configure linting settings in **Settings** → **Tools** → **Harbour** → **Linting**:
+
+<div>
+  <img src="img/settings-linting.png" alt="Linting Settings" style="display: block; margin: 0 auto;" />
+  <p style="text-align: center;"><em>Customizable linting rules and severity levels</em></p>
 </div>
 
 ## Development
@@ -266,6 +283,5 @@ valuable insights into Harbour language support implementation.
 ## Roadmap / TODOs
 
 - **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
-- **Code Analysis** - Advanced linting and static analysis features
 - **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
   as well.
