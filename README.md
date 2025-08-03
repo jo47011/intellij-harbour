@@ -31,10 +31,11 @@ the [MAKING-OF](./MAKING_OF.md).
 Full color coding support for Harbour/Clipper syntax with customizable color schemes. Keywords, functions, comments,
 strings, and operators are distinctly highlighted for better code readability.
 
-<div>
-  <img src="img/syntax-highlighting.png" alt="Syntax Highlighting" style="display: block; margin: 0 auto;" />
-  <p style="text-align: center;"><em>Enhanced syntax highlighting with customizable color schemes</em></p>
-</div>
+<p align="center">
+  <img src="img/syntax-highlighting.png" alt="Syntax Highlighting"/>
+  <br>
+  <em>Enhanced syntax highlighting with customizable color schemes</em>
+</p>
 
 ### Code Completion
 
