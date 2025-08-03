@@ -3,7 +3,7 @@
 A comprehensive plugin for <a href="https://www.jetbrains.com/pycharm/" target="_blank">PyCharm</a> that provides
 advanced support for the <a href="https://harbour.github.io/" target="_blank">Harbour/Clipper</a> programming language.
 
-This plugin was implemented as vibe-coding project using <a href="https://openai.com/o1/" target="_blank">OpenAI O1</a>
+This plugin was implemented as `vibe-coding` project using <a href="https://openai.com/o1/" target="_blank">OpenAI O1</a>
 and <a href="https://claude.ai/" target="_blank">Claude</a>. For detailed development insights and experiences, see
 the [MAKING-OF](./MAKING_OF.md).
 
