@@ -134,6 +134,10 @@
         
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
+        
+        <!-- File Save Listener for Linting -->
+        <listener class="org.intellij.sdk.language.HarbourLintOnSaveListener"
+                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </extensions>
 
     <actions>

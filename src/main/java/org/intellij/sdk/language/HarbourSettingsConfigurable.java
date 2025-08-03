@@ -49,6 +49,7 @@ public class HarbourSettingsConfigurable implements Configurable {
     
     // Linting settings components
     private JCheckBox myLintingEnabledCheckBox;
+    private JCheckBox myLintOnSaveCheckBox;
     private JTextField myHarbourCompilerPathField;
     private JSpinner myLintWarningLevelSpinner;
     private JTextField myLintExtraOptionsField;
@@ -343,23 +344,31 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridwidth = 2;
         myLintingEnabledCheckBox = new JCheckBox("Enable linting (runs Harbour compiler for syntax checking)");
         settingsPanel.add(myLintingEnabledCheckBox, constraints);
+        
+        // Lint on save checkbox
+        constraints.gridx = 0;
+        constraints.gridy = 1;
+        constraints.gridwidth = 2;
+        myLintOnSaveCheckBox = new JCheckBox("Lint on save only (uncheck for real-time linting)");
+        myLintOnSaveCheckBox.setToolTipText("When checked, linting runs only when file is saved. When unchecked, linting runs as you type (slower).");
+        settingsPanel.add(myLintOnSaveCheckBox, constraints);
 
         // Harbour compiler path
         constraints.gridx = 0;
-        constraints.gridy = 1;
+        constraints.gridy = 2;
         constraints.gridwidth = 2;
         JLabel compilerPathLabel = new JLabel("Harbour compiler path:");
         settingsPanel.add(compilerPathLabel, constraints);
         
         // Explanation below the label
-        constraints.gridy = 2;
+        constraints.gridy = 3;
         JLabel compilerPathExplanation = new JLabel("<html><i>Use harbour.exe (the compiler), not hbmk2.exe (the build tool)</i></html>");
         compilerPathExplanation.setFont(compilerPathExplanation.getFont().deriveFont(Font.ITALIC));
         settingsPanel.add(compilerPathExplanation, constraints);
 
         // Compiler path text field
         constraints.gridx = 0;
-        constraints.gridy = 3;
+        constraints.gridy = 4;
         constraints.gridwidth = 2;
         myHarbourCompilerPathField = new JTextField();
         myHarbourCompilerPathField.setToolTipText("Path to harbour.exe (the compiler), NOT hbmk2.exe (the build tool). Example: C:\\harbour\\bin\\harbour.exe");
@@ -387,7 +396,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Warning level
         constraints.gridx = 0;
-        constraints.gridy = 4;
+        constraints.gridy = 5;
         constraints.gridwidth = 1;
         JLabel warningLevelLabel = new JLabel("Warning level:");
         settingsPanel.add(warningLevelLabel, constraints);
@@ -402,7 +411,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Extra options
         constraints.gridx = 0;
-        constraints.gridy = 5;
+        constraints.gridy = 6;
         JLabel extraOptionsLabel = new JLabel("Extra compiler options:");
         settingsPanel.add(extraOptionsLabel, constraints);
 
@@ -413,7 +422,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Note about include paths
         constraints.gridx = 0;
-        constraints.gridy = 6;
+        constraints.gridy = 7;
         constraints.gridwidth = 2;
         constraints.weighty = 0.1;
         JLabel includePathsNote = new JLabel("<html><i>Note: Linting uses the include paths configured in Tools → Harbour → Include Paths</i></html>");
@@ -627,6 +636,7 @@ public class HarbourSettingsConfigurable implements Configurable {
                 !settings.getBuildOutputDirectory().equals(myBuildOutputDirField.getText()) ||
                 settings.isAutoCompletionEnabled() != myAutoCompletionEnabledCheckBox.isSelected() ||
                 settings.isLintingEnabled() != myLintingEnabledCheckBox.isSelected() ||
+                settings.isLintOnSave() != myLintOnSaveCheckBox.isSelected() ||
                 !settings.getHarbourCompilerPath().equals(myHarbourCompilerPathField.getText()) ||
                 settings.getLintWarningLevel() != (Integer) myLintWarningLevelSpinner.getValue() ||
                 !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText());
@@ -653,6 +663,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Save linting settings
         settings.setLintingEnabled(myLintingEnabledCheckBox.isSelected());
+        settings.setLintOnSave(myLintOnSaveCheckBox.isSelected());
         settings.setHarbourCompilerPath(myHarbourCompilerPathField.getText());
         settings.setLintWarningLevel((Integer) myLintWarningLevelSpinner.getValue());
         settings.setLintExtraOptions(myLintExtraOptionsField.getText());
@@ -712,6 +723,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Load linting settings
         myLintingEnabledCheckBox.setSelected(settings.isLintingEnabled());
+        myLintOnSaveCheckBox.setSelected(settings.isLintOnSave());
         myHarbourCompilerPathField.setText(settings.getHarbourCompilerPath());
         myLintWarningLevelSpinner.setValue(settings.getLintWarningLevel());
         myLintExtraOptionsField.setText(settings.getLintExtraOptions());

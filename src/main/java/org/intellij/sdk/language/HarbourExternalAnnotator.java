@@ -31,6 +31,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import com.intellij.psi.PsiRecursiveElementVisitor;
 import org.intellij.sdk.language.psi.HarbourTypes;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import com.intellij.openapi.vfs.LocalFileSystem;
 
 /**
  * External annotator for Harbour files that runs the Harbour compiler for linting.
@@ -42,15 +45,29 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     private static final Pattern ERROR_PATTERN = Pattern.compile(
         "^(.+?)\\((\\d+)\\)\\s+(Error|Warning)\\s+(E\\d+|W\\d+)?\\s*(.+)$"
     );
+    
+    // Cache for lint results
+    private static class LintCache {
+        String filePath;
+        long modificationStamp;
+        List<HarbourLintResult> results;
+        
+        LintCache(String filePath, long modificationStamp, List<HarbourLintResult> results) {
+            this.filePath = filePath;
+            this.modificationStamp = modificationStamp;
+            this.results = results;
+        }
+    }
+    
+    private static final Map<String, LintCache> cache = new ConcurrentHashMap<>();
+    private static final Map<String, Long> lastLintTime = new ConcurrentHashMap<>();
+    private static final long DEBOUNCE_DELAY_MS = 1000; // 1 second debounce
 
     @Nullable
     @Override
     public HarbourLintInfo collectInformation(@NotNull PsiFile file, @NotNull Editor editor, boolean hasErrors) {
-        HarbourLogger.log("HarbourLinter", "collectInformation called for: " + file.getName());
-        
         // Skip if file has errors or is not a physical file
         if (hasErrors) {
-            HarbourLogger.log("HarbourLinter", "Skipping due to existing errors");
             return null;
         }
 
@@ -64,6 +81,21 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         
         // Check if linting is enabled
         if (!settings.isLintingEnabled()) {
+            return null;
+        }
+        
+        // If lintOnSave is enabled, skip real-time linting
+        if (settings.isLintOnSave()) {
+            // Don't lint on every change, wait for save
+            return null;
+        }
+        
+        // Debounce - skip if we've linted too recently
+        String filePath = virtualFile.getPath();
+        Long lastTime = lastLintTime.get(filePath);
+        long currentTime = System.currentTimeMillis();
+        if (lastTime != null && (currentTime - lastTime) < DEBOUNCE_DELAY_MS) {
+            HarbourLogger.log("HarbourLinter", "Skipping due to debounce for: " + file.getName());
             return null;
         }
 
@@ -87,11 +119,28 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
 
-        // The file is already saved by IntelliJ before calling the annotator
-        // No need to save it manually here
+        // Check cache
+        long modificationStamp = virtualFile.getModificationStamp();
+        LintCache cached = cache.get(filePath);
+        if (cached != null && cached.modificationStamp == modificationStamp) {
+            HarbourLogger.log("HarbourLinter", "Using cached results for: " + file.getName());
+            // Return a special marker to indicate cached results
+            return new HarbourLintInfo(
+                filePath,
+                "CACHED", // Special marker
+                project,
+                compilerPath,
+                settings.getIncludePaths(),
+                settings.getLintExtraOptions(),
+                settings.getLintWarningLevel()
+            );
+        }
+        
+        HarbourLogger.log("HarbourLinter", "collectInformation called for: " + file.getName());
+        lastLintTime.put(filePath, currentTime);
 
         return new HarbourLintInfo(
-            virtualFile.getPath(),
+            filePath,
             file.getText(),
             project,
             compilerPath,
@@ -106,6 +155,12 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     public List<HarbourLintResult> doAnnotate(HarbourLintInfo info) {
         if (info == null) {
             return null;
+        }
+        
+        // Check if we should use cached results
+        if ("CACHED".equals(info.getFileContent())) {
+            LintCache cached = cache.get(info.getFilePath());
+            return cached != null ? cached.results : null;
         }
 
         List<HarbourLintResult> results = new ArrayList<>();
@@ -185,6 +240,16 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             
             HarbourLogger.log("HarbourLinter", "Linting completed with exit code: " + exitCode + 
                 ", found " + results.size() + " issues");
+            
+            // Cache the results
+            VirtualFile file = LocalFileSystem.getInstance().findFileByPath(info.getFilePath());
+            if (file != null) {
+                cache.put(info.getFilePath(), new LintCache(
+                    info.getFilePath(),
+                    file.getModificationStamp(),
+                    results
+                ));
+            }
             
         } catch (Exception e) {
             LOG.error("Error running Harbour linter", e);

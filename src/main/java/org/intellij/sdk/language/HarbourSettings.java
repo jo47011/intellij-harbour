@@ -70,6 +70,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     // Linting settings
     private boolean lintingEnabled = true; // Default to enabled
+    private boolean lintOnSave = true; // Default to lint on save only
     private String harbourCompilerPath = ""; // Path to harbour compiler
     private int lintWarningLevel = 1; // Default warning level
     private String lintExtraOptions = ""; // Extra compiler options for linting
@@ -335,6 +336,14 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public void setLintingEnabled(boolean lintingEnabled) {
         this.lintingEnabled = lintingEnabled;
+    }
+    
+    public boolean isLintOnSave() {
+        return lintOnSave;
+    }
+    
+    public void setLintOnSave(boolean lintOnSave) {
+        this.lintOnSave = lintOnSave;
     }
 
     public String getHarbourCompilerPath() {
