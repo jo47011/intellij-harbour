@@ -21,7 +21,7 @@ trial and error, pasting stack traces, and similar inefficiencies.
 With persistence, I managed to get the plugin running — albeit without a debugger. Setting up the
 debugger in this environment proved too complex and error-prone.
 
-## Enter Code w/ Claude (Early 2025)
+## Introducing Claude Code (Early 2025)
 
 In early 2025 — around March or April — **[Claude Code](https://claude.ai/code)** was introduced. This was a
 game-changer. It’s an AI agent that can be installed locally. I opted to run it in a **Docker environment**, ensuring it
@@ -33,7 +33,10 @@ progress.
 ## Docker environment
 
 Why a Docker environment? I want to ensure that my AI agents, which often work overnight autonomously, cannot harm my
-system. So I set up a `secured/restricted` environment and mount only the project directories that Claude should work
+system.  Agents? Yes you can run multiple agents in parallel and Claude even provides for 
+[sub-agents](https://docs.anthropic.com/en/docs/claude-code/sub-agents) which he will pick for their expertise.
+
+So I set up a `secured/restricted` environment and mount only the project directories that Claude should work
 on. Claude has no root access in that container. So I install the commands for him that I allow him to use. Otherwise,
 he would freely install whatever package he might need, which is not what I want. Sometimes AI becomes overmotivated and
 changes parts you didn't request. This setup ensures Claude cannot modify any
