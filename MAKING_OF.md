@@ -30,7 +30,7 @@ debugger in this environment proved too complex and error-prone.
 ## Introducing Claude Code (Early 2025)
 
 In early 2025 — around March or April — **[Claude Code](https://claude.ai/code)** was introduced. This was a
-game-changer. It’s an AI agent that can be installed locally. I opted to run it in a **Docker environment**, ensuring it
+game-changer. It’s an AI agent that can be installed locally. I opted to run it in a Docker environment, ensuring it
 operates in isolation without impacting my main system or data.
 
 This setup finally gave me the flexibility, safety, and integration I was missing before — paving the way for real
@@ -43,7 +43,7 @@ system.  Agents? Yes you can run multiple agents in parallel, and Claude even pr
 [sub-agents](https://docs.anthropic.com/en/docs/claude-code/sub-agents) which he will pick for their expertise when needed.
 
 So I set up a `secured/restricted` environment and mount only the project directories that Claude should work
-on. Claude has intentionally no root access in that container. I install the commands that I allow him to use. Otherwise,
+on. Claude has intentionally no root access in that container. I only install the commands that I want him to use. Otherwise,
 he would freely install whatever package he might need, which is not what I want. Sometimes AI becomes overmotivated and
 changes parts you didn't request. This setup ensures Claude cannot modify any
 other project on my system.
