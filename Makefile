@@ -55,14 +55,22 @@ clean-plugins:
 	rm -f ./build/distributions/harbour-language-plugin-*.zip
 	rm -f ./build/distributions/harbour-language-plugin-*.js
 
+# Check if on main branch
+check-main:
+	@if [ "$$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then \
+		echo "Error: This operation can only be performed from main branch."; \
+		echo "Current branch: $$(git rev-parse --abbrev-ref HEAD)"; \
+		exit 1; \
+	fi
+
 # Create GitHub release with the built plugin
-release: plugin
+release: check-main plugin
 	@echo "Creating GitHub release for version $$(grep "^version" build.gradle | cut -d"'" -f2)..."
 	./gradlew githubRelease
 	@echo "Release created! Check https://github.com/jo47011/intellij-harbour/releases"
 
 # Dry run - preview what would be released
-release-dry-run: plugin
+release-dry-run: check-main plugin
 	./gradlew githubRelease --dry-run
 
 up:
