@@ -1,9 +1,8 @@
 # Vibe-coding of: Harbour Plugin for IntelliJ/PyCharm
 
 <div align="center">
-  <img src="img/claude-logo.png" alt=""/>
+  <img src="img/claude-code.png" alt=""/>
   <br/>
-  <em>Built with Claude Code</em>
 </div>
 
 Ever since I started this project it was intentionally a hands-**off** project. Actually, it turned out to be my 1st
