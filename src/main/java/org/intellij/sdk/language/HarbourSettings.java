@@ -68,6 +68,13 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Auto-completion setting
     private boolean autoCompletionEnabled = false; // Default to false (only show on Ctrl+Space)
 
+    // Linting settings
+    private boolean lintingEnabled = true; // Default to enabled
+    private boolean lintOnSave = true; // Default to lint on save only
+    private String harbourCompilerPath = ""; // Path to harbour compiler
+    private int lintWarningLevel = 1; // Default warning level
+    private String lintExtraOptions = ""; // Extra compiler options for linting
+
 
     public HarbourSettings() {
         // Empty constructor
@@ -321,6 +328,48 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     public void setLocalStatementsAtLevel0(boolean localStatementsAtLevel0) {
         this.localStatementsAtLevel0 = localStatementsAtLevel0;
     }
+
+    // Linting settings methods
+    public boolean isLintingEnabled() {
+        return lintingEnabled;
+    }
+
+    public void setLintingEnabled(boolean lintingEnabled) {
+        this.lintingEnabled = lintingEnabled;
+    }
+    
+    public boolean isLintOnSave() {
+        return lintOnSave;
+    }
+    
+    public void setLintOnSave(boolean lintOnSave) {
+        this.lintOnSave = lintOnSave;
+    }
+
+    public String getHarbourCompilerPath() {
+        return harbourCompilerPath;
+    }
+
+    public void setHarbourCompilerPath(String harbourCompilerPath) {
+        this.harbourCompilerPath = harbourCompilerPath;
+    }
+
+    public int getLintWarningLevel() {
+        return lintWarningLevel;
+    }
+
+    public void setLintWarningLevel(int lintWarningLevel) {
+        this.lintWarningLevel = lintWarningLevel;
+    }
+
+    public String getLintExtraOptions() {
+        return lintExtraOptions;
+    }
+
+    public void setLintExtraOptions(String lintExtraOptions) {
+        this.lintExtraOptions = lintExtraOptions;
+    }
+
 
 
     /**

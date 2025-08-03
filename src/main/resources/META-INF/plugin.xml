@@ -70,6 +70,9 @@
         <!-- Annotators -->
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFunctionCallAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourIncludeAnnotator"/>
+        
+        <!-- External Annotator for Linting -->
+        <externalAnnotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourExternalAnnotator"/>
 
         <!-- Structure View -->
         <lang.psiStructureViewFactory language="Harbour"
@@ -131,6 +134,10 @@
         
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
+        
+        <!-- File Save Listener for Linting -->
+        <listener class="org.intellij.sdk.language.HarbourLintOnSaveListener"
+                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </extensions>
 
     <actions>
