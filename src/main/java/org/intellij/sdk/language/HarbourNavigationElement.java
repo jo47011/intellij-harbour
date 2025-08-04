@@ -93,6 +93,45 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
     }
 
     /**
+     * Create a "Load All" navigation element
+     *
+     * @param project The project
+     * @param message The message to display
+     * @return A special navigation element for loading all results
+     */
+    public static HarbourNavigationElement createLoadAllElement(Project project, String message) {
+        // Create a dummy element that will show as a "Load All" button in the list
+        // First find any valid file in the project to use as a base
+        VirtualFile[] files = FileEditorManager.getInstance(project).getSelectedFiles();
+        PsiFile psiFile;
+
+        if (files.length > 0) {
+            psiFile = PsiManager.getInstance(project).findFile(files[0]);
+        } else {
+            // Fallback if no file is open - get any file from the project
+            psiFile = PsiManager.getInstance(project).findFile(
+                    project.getProjectFile() != null ? project.getProjectFile() : project.getWorkspaceFile()
+            );
+        }
+
+        if (psiFile == null) {
+            // Last resort fallback - create a dummy element from the first file we can find
+            PsiDirectory baseDir = PsiManager.getInstance(project).findDirectory(project.getBaseDir());
+            if (baseDir != null && baseDir.getFiles().length > 0) {
+                psiFile = baseDir.getFiles()[0];
+            } else {
+                // If we still can't find a file, just return null
+                return null;
+            }
+        }
+
+        return new HarbourNavigationElement(
+                psiFile,
+                message,
+                "", 0, "", false, true);
+    }
+    
+    /**
      * Create a separator navigation element
      *
      * @param project The project

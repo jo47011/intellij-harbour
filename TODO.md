@@ -10,3 +10,4 @@
 - internal/external function: do we index only once?
    what the best if we write a new function?
 
+- still ctrl-hoover sometimes opens external func link

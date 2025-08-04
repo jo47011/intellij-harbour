@@ -53,6 +53,9 @@ public class HarbourSettingsConfigurable implements Configurable {
     private JTextField myHarbourCompilerPathField;
     private JSpinner myLintWarningLevelSpinner;
     private JTextField myLintExtraOptionsField;
+    
+    // Navigation settings components
+    private JSpinner myMaxNavigationResultsSpinner;
 
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
@@ -136,10 +139,30 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridwidth = 2;
         myAutoCompletionEnabledCheckBox = new JCheckBox("Enable auto-completion while typing (otherwise only on Ctrl+Space)");
         generalPanel.add(myAutoCompletionEnabledCheckBox, constraints);
+        
+        // Navigation results limit
+        constraints.gridx = 0;
+        constraints.gridy = 4;
+        constraints.gridwidth = 2;
+        JLabel maxNavResultsLabel = new JLabel("Max navigation results:");
+        generalPanel.add(maxNavResultsLabel, constraints);
+        
+        // Explanation below the label
+        constraints.gridy = 5;
+        JLabel navResultsExplanation = new JLabel("<html><i>Number of results to show before 'Load All' button appears</i></html>");
+        navResultsExplanation.setFont(navResultsExplanation.getFont().deriveFont(Font.ITALIC));
+        generalPanel.add(navResultsExplanation, constraints);
+        
+        // Spinner on next line
+        constraints.gridy = 6;
+        constraints.gridwidth = 1;
+        SpinnerModel navResultsModel = new SpinnerNumberModel(20, 10, 500, 10);
+        myMaxNavigationResultsSpinner = new JSpinner(navResultsModel);
+        generalPanel.add(myMaxNavigationResultsSpinner, constraints);
 
         // Add spacer to general panel
         constraints.gridx = 0;
-        constraints.gridy = 4;
+        constraints.gridy = 7;
         constraints.weighty = 1.0;
         constraints.gridwidth = 2;
         constraints.fill = GridBagConstraints.BOTH;
@@ -639,7 +662,8 @@ public class HarbourSettingsConfigurable implements Configurable {
                 settings.isLintOnSave() != myLintOnSaveCheckBox.isSelected() ||
                 !settings.getHarbourCompilerPath().equals(myHarbourCompilerPathField.getText()) ||
                 settings.getLintWarningLevel() != (Integer) myLintWarningLevelSpinner.getValue() ||
-                !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText());
+                !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText()) ||
+                settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue();
     }
 
     @Override
@@ -667,6 +691,9 @@ public class HarbourSettingsConfigurable implements Configurable {
         settings.setHarbourCompilerPath(myHarbourCompilerPathField.getText());
         settings.setLintWarningLevel((Integer) myLintWarningLevelSpinner.getValue());
         settings.setLintExtraOptions(myLintExtraOptionsField.getText());
+        
+        // Save navigation settings
+        settings.setMaxNavigationResults((Integer) myMaxNavigationResultsSpinner.getValue());
 
         // Notify HarbourReferenceService to update exclusions
         HarbourReferenceService service = HarbourReferenceService.getInstance(myProject);
@@ -727,6 +754,9 @@ public class HarbourSettingsConfigurable implements Configurable {
         myHarbourCompilerPathField.setText(settings.getHarbourCompilerPath());
         myLintWarningLevelSpinner.setValue(settings.getLintWarningLevel());
         myLintExtraOptionsField.setText(settings.getLintExtraOptions());
+        
+        // Load navigation settings
+        myMaxNavigationResultsSpinner.setValue(settings.getMaxNavigationResults());
 
         // Default scan path to the project base path
         String defaultScanPath = myProject.getBasePath();

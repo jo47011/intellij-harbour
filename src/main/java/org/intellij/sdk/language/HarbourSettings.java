@@ -74,6 +74,9 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     private String harbourCompilerPath = ""; // Path to harbour compiler
     private int lintWarningLevel = 1; // Default warning level
     private String lintExtraOptions = ""; // Extra compiler options for linting
+    
+    // Navigation settings
+    private int maxNavigationResults = 20; // Maximum results to show initially in navigation popup
 
 
     public HarbourSettings() {
@@ -368,6 +371,15 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public void setLintExtraOptions(String lintExtraOptions) {
         this.lintExtraOptions = lintExtraOptions;
+    }
+
+    // Navigation settings methods
+    public int getMaxNavigationResults() {
+        return maxNavigationResults;
+    }
+    
+    public void setMaxNavigationResults(int maxNavigationResults) {
+        this.maxNavigationResults = maxNavigationResults;
     }
 
 

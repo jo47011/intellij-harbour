@@ -32,12 +32,20 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
         if (element instanceof HarbourNavigationElement) {
             HarbourNavigationElement navElement = (HarbourNavigationElement) element;
 
-            // Handle separators 
+            // Handle separators and special elements
             if (navElement.isSeparator()) {
-                // Calculate width: filename(dynamic) + linenum(5) + space(1) + code(80)
-                int separatorWidth = maxFileNameWidth + 5 + 1 + 80;
-                String separatorLine = "─".repeat(separatorWidth);
-                append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                String elementName = navElement.getElementName();
+                // Check if this is a "Load All" element
+                if (elementName != null && elementName.contains("more results")) {
+                    // Render as clickable text centered in the list
+                    append("    ", SimpleTextAttributes.REGULAR_ATTRIBUTES); // Indent
+                    append(elementName, SimpleTextAttributes.LINK_ATTRIBUTES);
+                } else {
+                    // Regular separator line
+                    int separatorWidth = maxFileNameWidth + 5 + 1 + 80;
+                    String separatorLine = "─".repeat(separatorWidth);
+                    append(separatorLine, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                }
                 return;
             }
 
@@ -161,9 +169,7 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
                             style
                         );
                         
-                        HarbourLogger.log(COMPONENT, 
-                            "Applied color " + textAttrs.getForegroundColor() + 
-                            " to token '" + tokenText + "'");
+                        // Removed excessive logging for performance
                     }
                 }
 
