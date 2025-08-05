@@ -124,9 +124,9 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
                     return null;
                 }
 
-                // For tooltips, provide a dummy target
-                PsiElement dummyTarget = new HarbourDummyPsiElement(element, false, "Include File");
-                return new PsiElement[] { dummyTarget };
+                // CRITICAL FIX: Return empty array to prevent tooltips on hover
+                HarbourLogger.log("DocHandler", "Include file hover - returning empty array to prevent popup");
+                return PsiElement.EMPTY_ARRAY;
             }
         }
 
@@ -183,20 +183,22 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         boolean shouldOpenBrowser = IS_CLICK_MODE;
         
         if (shouldOpenBrowser) {
-            HarbourLogger.log("DocHandler", "Opening documentation for external function: " + functionName);
+            HarbourLogger.log("DocHandler", "CLICK MODE - Opening documentation for external function: " + functionName);
             openExternalDocumentation(project, functionName);
             
             // Always reset click mode immediately after opening browser
             setClickMode(false);
+            
+            // Return empty array to prevent normal navigation after opening browser
+            HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Click handled, returning empty array for: " + functionName);
+            return PsiElement.EMPTY_ARRAY;
         } else {
-            HarbourLogger.log("DocHandler", "Not opening browser - no recent click detected for: " + functionName);
+            HarbourLogger.log("DocHandler", "HOVER MODE - Not opening browser for external function: " + functionName);
+            
+            // CRITICAL FIX: Return empty array to prevent popups on hover
+            HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Returning empty array to prevent hover popup for: " + functionName);
+            return PsiElement.EMPTY_ARRAY;
         }
-        
-        // Return a dummy element to prevent the "Cannot find declaration" popup
-        // Returning empty array doesn't prevent the popup, but returning a dummy element does
-        PsiElement dummyTarget = new HarbourDummyPsiElement(element, false, "External Function: " + functionName);
-        HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Returning dummy element to prevent popup for: " + functionName);
-        return new PsiElement[] { dummyTarget };
     }
 
     /**

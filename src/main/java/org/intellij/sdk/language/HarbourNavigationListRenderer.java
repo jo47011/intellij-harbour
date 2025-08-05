@@ -37,8 +37,9 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
                 String elementName = navElement.getElementName();
                 // Check if this is a "Load All" element
                 if (elementName != null && elementName.contains("more results")) {
-                    // Render as clickable text centered in the list
+                    // Render as clickable text with arrow down icon
                     append("    ", SimpleTextAttributes.REGULAR_ATTRIBUTES); // Indent
+                    append("▼ ", SimpleTextAttributes.LINK_ATTRIBUTES); // Arrow down icon
                     append(elementName, SimpleTextAttributes.LINK_ATTRIBUTES);
                 } else {
                     // Regular separator line

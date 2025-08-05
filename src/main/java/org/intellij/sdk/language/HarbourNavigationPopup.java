@@ -24,6 +24,7 @@ public class HarbourNavigationPopup {
      * @param editor The current editor
      */
     public static void showNavigationPopup(List<PsiElement> targets, Editor editor) {
+        System.out.println(">>> CUSTOM NAVIGATION POPUP DISPLAYED - " + targets.size() + " targets <<<");
         HarbourLogger.log(COMPONENT, "Showing custom navigation popup with " + targets.size() + " targets");
         
         // Get the max results setting
@@ -42,7 +43,7 @@ public class HarbourNavigationPopup {
         // Add a special element to indicate there are more results
         if (hasMore) {
             int remainingCount = targets.size() - maxResults;
-            String message = String.format("... and %d more results. Click to load all.", remainingCount);
+            String message = String.format("↓ ... and %d more results. Click to load all.", remainingCount);
             HarbourNavigationElement moreElement = HarbourNavigationElement.createLoadAllElement(
                 editor.getProject(), 
                 message

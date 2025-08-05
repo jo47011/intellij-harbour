@@ -5,10 +5,12 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.util.ProcessingContext;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.intellij.sdk.language.psi.HarbourTypes;
 import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
+import org.intellij.sdk.language.reference.HarbourFunctionReference;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -30,39 +32,162 @@ public class DirectHarbourReferenceContributor extends PsiReferenceContributor {
                     @Override
                     public PsiReference @NotNull [] getReferencesByElement(@NotNull PsiElement element,
                                                                            @NotNull ProcessingContext context) {
+                        // COMPREHENSIVE DEBUG: Log every element we process
+                        String elementText = element.getText();
+                        String elementClass = element.getClass().getSimpleName();
+                        String elementType = "unknown";
+                        
+                        if (element instanceof LeafPsiElement) {
+                            LeafPsiElement leaf = (LeafPsiElement) element;
+                            IElementType type = leaf.getElementType();
+                            elementType = type != null ? type.toString() : "null";
+                        }
+                        
+                        HarbourLogger.log(COMPONENT, "=== PROCESSING ELEMENT ===");
+                        HarbourLogger.log(COMPONENT, "Text: '" + elementText + "'");
+                        HarbourLogger.log(COMPONENT, "Class: " + elementClass);
+                        HarbourLogger.log(COMPONENT, "Type: " + elementType);
+                        
+                        // Check if element is in a comment
+                        if (isInComment(element)) {
+                            HarbourLogger.log(COMPONENT, "Element is in comment - SKIPPING");
+                            return PsiReference.EMPTY_ARRAY;
+                        }
+                        
                         // Only process LeafPsiElements which are IDENT
                         if (!(element instanceof LeafPsiElement)) {
+                            HarbourLogger.log(COMPONENT, "Not a LeafPsiElement - SKIPPING");
                             return PsiReference.EMPTY_ARRAY;
                         }
 
                         LeafPsiElement leafElement = (LeafPsiElement) element;
                         if (leafElement.getElementType() != HarbourTypes.IDENT) {
+                            HarbourLogger.log(COMPONENT, "Not an IDENT token - SKIPPING");
                             return PsiReference.EMPTY_ARRAY;
                         }
+                        
+                        // BREAKPOINT LOCATION: Set breakpoint here for FEEDBACK.txt line 18-19
+                        // This is where we determine if an element should get a reference (and thus underline)
+                        String text = element.getText();
+                        HarbourLogger.log(COMPONENT, "Checking if '" + text + "' is a keyword...");
+                        
+                        if (isKeyword(text)) {
+                            // Keywords should NOT get references (no underline on ctrl-hover)
+                            HarbourLogger.log(COMPONENT, "KEYWORD DETECTED - SKIPPING: " + text);
+                            return PsiReference.EMPTY_ARRAY;
+                        }
+                        HarbourLogger.log(COMPONENT, "Not a keyword, continuing with: " + text);
 
                         // Check if this is a method call (after a colon or dot)
+                        HarbourLogger.log(COMPONENT, "Checking if '" + text + "' is a method call...");
                         if (isMethodCall(element)) {
                             String methodName = element.getText();
-                            HarbourLogger.log(COMPONENT, "Creating method reference for: " + methodName);
+                            HarbourLogger.log(COMPONENT, "METHOD CALL DETECTED - Creating reference for: " + methodName);
                             return new PsiReference[] { new HarbourMethodReference(element, methodName) };
                         }
 
-                        // Check if this is part of a function call
+                        // Check if this is a function call (followed by parenthesis)
+                        HarbourLogger.log(COMPONENT, "Checking if '" + text + "' is followed by parenthesis...");
+                        if (isFollowedByParenthesis(element)) {
+                            String functionName = element.getText();
+                            HarbourLogger.log(COMPONENT, "FUNCTION CALL DETECTED - Creating reference for: " + functionName);
+                            return new PsiReference[] { new HarbourFunctionReference(element, functionName) };
+                        }
+                        
+                        // Also check if this is part of a function call PSI element
+                        HarbourLogger.log(COMPONENT, "Checking parent element type for '" + text + "'...");
                         PsiElement parent = element.getParent();
                         if (parent instanceof FunctionCallImpl) {
                             String functionName = element.getText();
                             if (functionName != null && !functionName.isEmpty()) {
-                                // Create a function reference
+                                HarbourLogger.log(COMPONENT, "FUNCTION CALL VIA PARENT DETECTED - Creating reference for: " + functionName);
                                 return new PsiReference[] { new HarbourFunctionReference(element, functionName) };
                             }
                         }
+                        
+                        // For all other identifiers (could be variables or functions without parentheses)
+                        // Create a generic reference that will be resolved by the reference service
+                        String identifierName = element.getText();
+                        if (identifierName != null && !identifierName.isEmpty()) {
+                            HarbourLogger.log(COMPONENT, "GENERIC IDENTIFIER DETECTED - Creating reference for: " + identifierName);
+                            return new PsiReference[] { new HarbourFunctionReference(element, identifierName) };
+                        }
 
+                        HarbourLogger.log(COMPONENT, "NO REFERENCE CREATED for: " + text);
                         return PsiReference.EMPTY_ARRAY;
                     }
                 }
         );
 
         HarbourLogger.log(COMPONENT, "DirectHarbourReferenceContributor registration complete");
+    }
+    
+    /**
+     * Checks if the text is a Harbour keyword that should not be underlined.
+     * BREAKPOINT LOCATION: This is the case consideration for keywords vs functions/variables
+     */
+    private static boolean isKeyword(String text) {
+        if (text == null || text.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "isKeyword: null/empty text - returning false");
+            return false;
+        }
+        
+        String upperText = text.toUpperCase();
+        HarbourLogger.log(COMPONENT, "isKeyword: checking '" + text + "' (uppercase: '" + upperText + "')");
+        
+        // Language structure keywords
+        if (upperText.equals("IF") || upperText.equals("ELSE") || upperText.equals("ELSEIF") || 
+            upperText.equals("ENDIF") || upperText.equals("DO") || upperText.equals("WHILE") || 
+            upperText.equals("ENDDO") || upperText.equals("FOR") || upperText.equals("NEXT") || 
+            upperText.equals("CASE") || upperText.equals("OTHERWISE") || upperText.equals("SWITCH") || 
+            upperText.equals("ENDSWITCH") || upperText.equals("BEGIN") || upperText.equals("SEQUENCE") ||
+            upperText.equals("RECOVER") || upperText.equals("USING") || upperText.equals("END")) {
+            HarbourLogger.log(COMPONENT, "isKeyword: LANGUAGE STRUCTURE keyword detected: " + upperText);
+            return true;
+        }
+        
+        // Commands and declarations
+        if (upperText.equals("SET") || upperText.equals("RETURN") || upperText.equals("EXIT") || 
+            upperText.equals("LOOP") || upperText.equals("LOCAL") || upperText.equals("STATIC") || 
+            upperText.equals("PRIVATE") || upperText.equals("PUBLIC") || upperText.equals("FIELD") ||
+            upperText.equals("MEMVAR") || upperText.equals("PARAMETER") || upperText.equals("PARAMETERS")) {
+            HarbourLogger.log(COMPONENT, "isKeyword: COMMAND/DECLARATION keyword detected: " + upperText);
+            return true;
+        }
+        
+        // Class-related keywords
+        if (upperText.equals("CLASS") || upperText.equals("ENDCLASS") || upperText.equals("METHOD") || 
+            upperText.equals("ENDMETHOD") || upperText.equals("DATA") || upperText.equals("CLASSDATA") ||
+            upperText.equals("EXPORTED") || upperText.equals("PROTECTED") || upperText.equals("HIDDEN")) {
+            return true;
+        }
+        
+        // Function/Procedure keywords
+        if (upperText.equals("FUNCTION") || upperText.equals("PROCEDURE") || upperText.equals("ENDFUNCTION") ||
+            upperText.equals("ENDPROC") || upperText.equals("ENDFUNC")) {
+            return true;
+        }
+        
+        // Operators
+        if (upperText.equals("AND") || upperText.equals("OR") || upperText.equals("NOT") || 
+            upperText.equals(".AND.") || upperText.equals(".OR.") || upperText.equals(".NOT.")) {
+            return true;
+        }
+        
+        // Other keywords
+        if (upperText.equals("TO") || upperText.equals("STEP") || upperText.equals("ADDITIVE") ||
+            upperText.equals("NIL") || upperText.equals("TRUE") || upperText.equals("FALSE") ||
+            upperText.equals("IN") || upperText.equals("WITH") || upperText.equals("REPLACE") ||
+            upperText.equals("ALL") || upperText.equals("REST") || upperText.equals("FROM") ||
+            upperText.equals("SEEK") || upperText.equals("SKIP") || upperText.equals("USE") ||
+            upperText.equals("INDEX") || upperText.equals("ALIAS") || upperText.equals("EXCLUSIVE") ||
+            upperText.equals("SHARED") || upperText.equals("NEW") || upperText.equals("READONLY")) {
+            HarbourLogger.log(COMPONENT, "isKeyword: OTHER keyword detected: " + upperText);
+            return true;
+        }
+        
+        HarbourLogger.log(COMPONENT, "isKeyword: NOT A KEYWORD - returning false for: " + upperText);
+        return false;
     }
 
     /**
@@ -95,76 +220,63 @@ public class DirectHarbourReferenceContributor extends PsiReferenceContributor {
 
         return false;
     }
-
+    
     /**
-     * Custom reference for Harbour functions that resolves to the function declaration.
+     * Check if an element is followed by parenthesis, indicating a function call.
      */
-    private static class HarbourFunctionReference extends PsiReferenceBase<PsiElement> {
-        private final String functionName;
-        private static final String COMPONENT = "FunctionRef";
+    private static boolean isFollowedByParenthesis(PsiElement element) {
+        PsiElement next = element.getNextSibling();
+        int maxDistance = 5;
+        int distance = 0;
 
-        public HarbourFunctionReference(@NotNull PsiElement element, String functionName) {
-            super(element);
-            this.functionName = functionName;
+        while (next != null && distance < maxDistance) {
+            if (next instanceof LeafPsiElement) {
+                LeafPsiElement leaf = (LeafPsiElement) next;
+                IElementType type = leaf.getElementType();
+
+                if (type == HarbourTypes.LPAREN) {
+                    return true;
+                } else if (type != com.intellij.psi.TokenType.WHITE_SPACE) {
+                    break;
+                }
+            }
+            next = next.getNextSibling();
+            distance++;
         }
-
-        @Override
-        public TextRange getRangeInElement() {
-            return new TextRange(0, getElement().getTextLength());
+        return false;
+    }
+    
+    /**
+     * Check if an element is inside a comment.
+     * This should prevent comments from getting references and underlines.
+     */
+    private static boolean isInComment(PsiElement element) {
+        // Direct check: is the element itself a comment?
+        if (element instanceof PsiComment) {
+            HarbourLogger.log(COMPONENT, "Element is a PsiComment");
+            return true;
         }
-
-        @Override
-        public PsiElement resolve() {
-            try {
-                // Get the service and look for declarations
-                HarbourReferenceService service =
-                        HarbourReferenceService.getInstance(getElement().getProject());
-
-                // Find all declarations of this function
-                java.util.List<PsiElement> declarations = service.findFunctions(functionName);
-
-                // Check if we found any
-                if (declarations.isEmpty()) {
-                    return null;
+        
+        // Check if the element class name contains "Comment" 
+        if (element.getClass().getName().contains("Comment")) {
+            HarbourLogger.log(COMPONENT, "Element class is a comment type: " + element.getClass().getName());
+            return true;
+        }
+        
+        // For LeafPsiElement, check if it has a comment token type
+        if (element instanceof LeafPsiElement) {
+            LeafPsiElement leaf = (LeafPsiElement) element;
+            IElementType type = leaf.getElementType();
+            if (type != null) {
+                String typeName = type.toString();
+                if (typeName.contains("COMMENT") || typeName.contains("comment")) {
+                    HarbourLogger.log(COMPONENT, "Element has comment token type: " + typeName);
+                    return true;
                 }
-
-                // Try to find a function declaration
-                for (PsiElement decl : declarations) {
-                    if (decl instanceof HarbourFunctionDeclaration) {
-                        return decl;
-                    }
-                }
-
-                // If no function declaration was found, return the first element
-                PsiElement resolvedElement = declarations.get(0);
-
-                // Get the file and line number for this element
-                PsiFile file = resolvedElement.getContainingFile();
-                if (file != null && file.getVirtualFile() != null) {
-                    String filePath = file.getVirtualFile().getPath();
-                    int lineNumber = HarbourLogger.calculateLineNumber(resolvedElement);
-
-                    // Create and return a navigation element
-                    return new HarbourNavigationElement(
-                            resolvedElement,
-                            functionName,
-                            filePath,
-                            lineNumber,
-                            "Function declaration"
-                    );
-                }
-
-                return resolvedElement;
-            } catch (Exception e) {
-                HarbourLogger.log(COMPONENT, "Error resolving function reference: " + e.getMessage());
-                return null;
             }
         }
-
-        @Override
-        public Object @NotNull [] getVariants() {
-            return EMPTY_ARRAY;
-        }
+        
+        return false;
     }
 
     /**

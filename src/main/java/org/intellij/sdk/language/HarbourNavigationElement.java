@@ -607,6 +607,50 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
     }
 
     /**
+     * Creates a dummy navigation element for external functions to enable underlines
+     * @param project The current project
+     * @param functionName Name of the external function
+     * @param description Description for the element
+     * @return A dummy navigation element or null if creation fails
+     */
+    public static HarbourNavigationElement createExternalElement(Project project, String functionName, String description) {
+        try {
+            // Create a dummy element for external functions to enable underlines
+            // First find any valid file in the project to use as a base
+            VirtualFile[] files = FileEditorManager.getInstance(project).getSelectedFiles();
+            PsiFile psiFile;
+            if (files.length > 0) {
+                psiFile = PsiManager.getInstance(project).findFile(files[0]);
+            } else {
+                // Fallback if no file is open - get any file from the project
+                psiFile = PsiManager.getInstance(project).findFile(
+                        project.getProjectFile() != null ? project.getProjectFile() : project.getWorkspaceFile()
+                );
+            }
+            if (psiFile == null) {
+                // Last resort fallback - create a dummy element from the first file we can find
+                PsiDirectory baseDir = PsiManager.getInstance(project).findDirectory(project.getBaseDir());
+                if (baseDir != null && baseDir.getFiles().length > 0) {
+                    psiFile = baseDir.getFiles()[0];
+                } else {
+                    // If we still can't find a file, just return null
+                    return null;
+                }
+            }
+            
+            HarbourNavigationElement element = new HarbourNavigationElement(
+                    psiFile,
+                    "External: " + functionName,
+                    "external", 0, description, false, false);
+            HarbourLogger.log(COMPONENT, "Created external navigation element for: " + functionName);
+            return element;
+        } catch (Exception e) {
+            HarbourLogger.log(COMPONENT, "Failed to create external navigation element: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Escape HTML special characters
      * @param text The text to escape
      * @return Escaped text safe for HTML

@@ -18,6 +18,12 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
     @Override
     public PsiReference @NotNull [] getReferencesByElement(@NotNull PsiElement element, @NotNull ProcessingContext context) {
         HarbourLogger.log(COMPONENT, "Getting references for: " + element.getText() + ", class: " + element.getClass().getName());
+        
+        // CRITICAL FIX: Skip comment elements completely
+        if (element instanceof PsiComment || element.getClass().getName().contains("Comment")) {
+            HarbourLogger.log(COMPONENT, "SKIPPING COMMENT ELEMENT: " + element.getText());
+            return PsiReference.EMPTY_ARRAY;
+        }
 
         // Handle different types of elements
         if (element instanceof FunctionCallImpl) {
@@ -38,6 +44,14 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
             String elementType = leafElement.getElementType().toString();
 
             if (elementType.contains("IDENT")) {
+                String text = element.getText();
+                
+                // Skip keywords - they should never have references
+                if (isKeyword(text)) {
+                    HarbourLogger.log(COMPONENT, "KEYWORD DETECTED - SKIPPING: " + text);
+                    return PsiReference.EMPTY_ARRAY;
+                }
+                
                 // Only create method references for actual method calls, not variables
                 if (isActualMethodCall(leafElement)) {
                     HarbourLogger.log(COMPONENT, "Found method call identifier: " + element.getText());
@@ -141,6 +155,71 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
         }
 
         // If none of the method call patterns match, it's likely a variable
+        return false;
+    }
+    
+    /**
+     * Checks if the text is a Harbour keyword that should not have references.
+     */
+    private boolean isKeyword(String text) {
+        if (text == null || text.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "isKeyword: null/empty text - returning false");
+            return false;
+        }
+        
+        String upperText = text.toUpperCase();
+        HarbourLogger.log(COMPONENT, "isKeyword: checking '" + text + "' (uppercase: '" + upperText + "')");
+        
+        // Language structure keywords
+        if (upperText.equals("IF") || upperText.equals("ELSE") || upperText.equals("ELSEIF") || 
+            upperText.equals("ENDIF") || upperText.equals("DO") || upperText.equals("WHILE") || 
+            upperText.equals("ENDDO") || upperText.equals("FOR") || upperText.equals("NEXT") || 
+            upperText.equals("CASE") || upperText.equals("OTHERWISE") || upperText.equals("SWITCH") || 
+            upperText.equals("ENDSWITCH") || upperText.equals("BEGIN") || upperText.equals("SEQUENCE") ||
+            upperText.equals("RECOVER") || upperText.equals("USING") || upperText.equals("END")) {
+            HarbourLogger.log(COMPONENT, "isKeyword: LANGUAGE STRUCTURE keyword detected: " + upperText);
+            return true;
+        }
+        
+        // Commands and declarations
+        if (upperText.equals("SET") || upperText.equals("RETURN") || upperText.equals("EXIT") || 
+            upperText.equals("LOOP") || upperText.equals("LOCAL") || upperText.equals("STATIC") || 
+            upperText.equals("PRIVATE") || upperText.equals("PUBLIC") || upperText.equals("FIELD") ||
+            upperText.equals("MEMVAR") || upperText.equals("PARAMETER") || upperText.equals("PARAMETERS")) {
+            return true;
+        }
+        
+        // Class-related keywords
+        if (upperText.equals("CLASS") || upperText.equals("ENDCLASS") || upperText.equals("METHOD") || 
+            upperText.equals("ENDMETHOD") || upperText.equals("DATA") || upperText.equals("CLASSDATA") ||
+            upperText.equals("EXPORTED") || upperText.equals("PROTECTED") || upperText.equals("HIDDEN")) {
+            return true;
+        }
+        
+        // Function/Procedure keywords
+        if (upperText.equals("FUNCTION") || upperText.equals("PROCEDURE") || upperText.equals("ENDFUNCTION") ||
+            upperText.equals("ENDPROC") || upperText.equals("ENDFUNC")) {
+            return true;
+        }
+        
+        // Operators
+        if (upperText.equals("AND") || upperText.equals("OR") || upperText.equals("NOT") || 
+            upperText.equals(".AND.") || upperText.equals(".OR.") || upperText.equals(".NOT.")) {
+            return true;
+        }
+        
+        // Other keywords
+        if (upperText.equals("TO") || upperText.equals("STEP") || upperText.equals("ADDITIVE") ||
+            upperText.equals("NIL") || upperText.equals("TRUE") || upperText.equals("FALSE") ||
+            upperText.equals("IN") || upperText.equals("WITH") || upperText.equals("REPLACE") ||
+            upperText.equals("ALL") || upperText.equals("REST") || upperText.equals("FROM") ||
+            upperText.equals("SEEK") || upperText.equals("SKIP") || upperText.equals("USE") ||
+            upperText.equals("INDEX") || upperText.equals("ALIAS") || upperText.equals("EXCLUSIVE") ||
+            upperText.equals("SHARED") || upperText.equals("NEW") || upperText.equals("READONLY")) {
+            return true;
+        }
+        
+        HarbourLogger.log(COMPONENT, "isKeyword: NOT A KEYWORD - returning false for: " + upperText);
         return false;
     }
 }
