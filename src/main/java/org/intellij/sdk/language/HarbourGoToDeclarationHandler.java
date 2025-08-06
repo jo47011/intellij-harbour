@@ -140,10 +140,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
-        int identPos = lineText.indexOf(identifierName);
+        // Case-insensitive search for the identifier
+        String lineUpper = lineText.toUpperCase();
+        String identifierUpper = identifierName.toUpperCase();
+        int identPos = lineUpper.indexOf(identifierUpper);
         if (identPos >= 0) {
             // Look for opening parenthesis after the identifier
-            for (int i = identPos + identifierName.length(); i < lineText.length(); i++) {
+            for (int i = identPos + identifierUpper.length(); i < lineText.length(); i++) {
                 if (Character.isWhitespace(lineText.charAt(i))) {
                     continue; // Skip whitespace
                 }
@@ -315,7 +318,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourLogger.log(COMPONENT, "DEBUG: Clicked identifier: '" + identifierName + "'");
                 
                 // Check if we're clicking on the property part (after colon)
-                if (afterColon.trim().equals(identifierName)) {
+                if (afterColon.trim().equalsIgnoreCase(identifierName)) {
                     // Clicking on the property part (e.g., date)
                     HarbourLogger.log(COMPONENT, "DEBUG: Clicking on property part of PropertyAccess: " + identifierName);
                     
@@ -323,7 +326,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     String objectPart = beforeColon.trim();
                     HarbourLogger.log(COMPONENT, "DEBUG: Resolving property '" + identifierName + "' of object: '" + objectPart + "'");
                     return resolvePropertyAccess(leafElement, objectPart, identifierName, currentLocationKey);
-                } else if (beforeColon.contains(identifierName)) {
+                } else if (beforeColon.toUpperCase().contains(identifierName.toUpperCase())) {
                     // Clicking on the function/object part (e.g., getUser())
                     HarbourLogger.log(COMPONENT, "DEBUG: Clicking on object/function part of PropertyAccess: " + identifierName);
                     HarbourLogger.log(COMPONENT, "DEBUG: Will continue with normal function resolution for: " + identifierName);
@@ -425,8 +428,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Next check if this is a method reference
         boolean isMethod = false;
         if (lineText != null) {
-            // Check if there's a colon immediately before the identifier (method call pattern)
-            int identPos = lineText.indexOf(identifierName);
+            // Check if there's a colon immediately before the identifier (method call pattern, case-insensitive)
+            int identPos = lineText.toUpperCase().indexOf(identifierName.toUpperCase());
             boolean hasColonBefore = false;
             
             if (identPos > 0) {
@@ -1054,14 +1057,16 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // Check if this line contains a pattern like "ClassName():new()"
         // This is the Harbour pattern for class instantiation
-        // First, find where our element appears in the line
-        int elementPos = lineText.indexOf(text);
+        // First, find where our element appears in the line (case-insensitive)
+        String lineUpper = lineText.toUpperCase();
+        String textUpper = text.toUpperCase();
+        int elementPos = lineUpper.indexOf(textUpper);
         if (elementPos < 0) {
             return false;
         }
 
         // Now check if it's followed by "():new()" pattern
-        String afterText = lineText.substring(elementPos + text.length());
+        String afterText = lineText.substring(elementPos + textUpper.length());
         Pattern classPattern = Pattern.compile("\\s*\\(\\s*\\)\\s*:\\s*new\\s*\\(");
 
         boolean isClass = classPattern.matcher(afterText).find();
@@ -1105,8 +1110,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
-        // Find where our element appears in the line
-        int pos = lineText.indexOf(text);
+        // Find where our element appears in the line (case-insensitive)
+        int pos = lineText.toUpperCase().indexOf(text.toUpperCase());
         if (pos <= 0) {
             return false;
         }
@@ -1939,18 +1944,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             
             // Check if this line is within our scope
             if (lineNum >= scopeStart && lineNum <= scopeEnd) {
-                // Simple regex to find the variable name as a whole word
-                if (line.matches(".*\\b" + variableName + "\\b.*")) {
-                    // Find all occurrences of the variable in this line
+                // Case-insensitive regex to find the variable name as a whole word
+                if (line.toUpperCase().matches(".*\\b" + variableName.toUpperCase() + "\\b.*")) {
+                    // Find all occurrences of the variable in this line (case-insensitive)
+                    String lineUpper = line.toUpperCase();
+                    String variableUpper = variableName.toUpperCase();
                     int pos = 0;
-                    while ((pos = line.indexOf(variableName, pos)) >= 0) {
+                    while ((pos = lineUpper.indexOf(variableUpper, pos)) >= 0) {
                         // Check if it's a whole word (not part of another identifier)
                         boolean isWholeWord = true;
                         if (pos > 0 && Character.isLetterOrDigit(line.charAt(pos - 1))) {
                             isWholeWord = false;
                         }
-                        if (pos + variableName.length() < line.length() && 
-                            Character.isLetterOrDigit(line.charAt(pos + variableName.length()))) {
+                        if (pos + variableUpper.length() < line.length() && 
+                            Character.isLetterOrDigit(line.charAt(pos + variableUpper.length()))) {
                             isWholeWord = false;
                         }
                         
@@ -1967,14 +1974,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             if (!(trimmedLine.startsWith("//") || trimmedLine.startsWith("/*"))) {
                                 // Find the PsiElement at this offset
                                 PsiElement foundElement = file.findElementAt(elementOffset);
-                                if (foundElement != null && variableName.equals(foundElement.getText())) {
+                                if (foundElement != null && variableName.equalsIgnoreCase(foundElement.getText())) {
                                     results.add(foundElement);
                                 }
                             } else {
                                 HarbourLogger.log(COMPONENT, "VARIABLE SEARCH: Skipping comment line " + (lineNum + 1) + " in " + file.getName() + " -> Content: '" + trimmedLine + "'");
                             }
                         }
-                        pos += variableName.length();
+                        pos += variableUpper.length();
                     }
                 }
             }
@@ -2517,12 +2524,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (lineText != null) {
             HarbourLogger.log(COMPONENT, "DEBUG-FC: Line text for '" + identifierName + "': " + lineText.trim());
             
-            int pos = lineText.indexOf(identifierName);
+            String lineUpper = lineText.toUpperCase();
+            String identifierUpper = identifierName.toUpperCase();
+            int pos = lineUpper.indexOf(identifierUpper);
             if (pos >= 0) {
                 HarbourLogger.log(COMPONENT, "DEBUG-FC: Found '" + identifierName + "' at position " + pos + " in line");
                 
                 // Look for opening parenthesis after the identifier
-                int afterIdentifier = pos + identifierName.length();
+                int afterIdentifier = pos + identifierUpper.length();
                 StringBuilder nextChars = new StringBuilder();
                 
                 for (int i = afterIdentifier; i < lineText.length() && i < afterIdentifier + 10; i++) {
@@ -2573,11 +2582,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
         
-        // Find the identifier in the line and check what follows it
-        int pos = lineText.indexOf(identifierName);
+        // Find the identifier in the line and check what follows it (case-insensitive)
+        String lineUpper = lineText.toUpperCase();
+        String identifierUpper = identifierName.toUpperCase();
+        int pos = lineUpper.indexOf(identifierUpper);
         if (pos >= 0) {
             // Look for opening parenthesis after the identifier
-            int afterIdentifier = pos + identifierName.length();
+            int afterIdentifier = pos + identifierUpper.length();
             
             for (int i = afterIdentifier; i < lineText.length(); i++) {
                 char c = lineText.charAt(i);
