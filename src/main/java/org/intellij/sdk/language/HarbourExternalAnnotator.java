@@ -24,6 +24,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -442,6 +444,7 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             command.add("-s");  // Syntax check only
             command.add("-m");  // Compile module only
             command.add("-n0"); // No implicit starting procedure
+            command.add("-q");   // Quiet mode (suppress progress output)
             
             // Add warning level if specified
             if (info.getWarningLevel() > 0) {
@@ -534,6 +537,19 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 HarbourLogger.log("HarbourLinter", "Total issues found: " + results.size());
                 HarbourLogger.log("HarbourLinter", "Lines parsed successfully: " + parsedCount);
                 
+                // Check if we only found include file errors
+                boolean onlyIncludeErrors = results.stream()
+                    .allMatch(r -> r.getMessage().contains("Can't open #include file"));
+                    
+                if (onlyIncludeErrors && results.size() > 0) {
+                    HarbourLogger.log("HarbourLinter", "Only include file errors found, adding quick syntax check");
+                    // Add quick syntax check results
+                    List<HarbourLintResult> quickResults = quickSyntaxCheck(info.getFilePath(), 
+                        new String(Files.readAllBytes(Paths.get(info.getFilePath())), StandardCharsets.UTF_8));
+                    results.addAll(quickResults);
+                    HarbourLogger.log("HarbourLinter", "Added " + quickResults.size() + " quick syntax check results");
+                }
+                
             } catch (java.io.IOException e) {
                 HarbourLogger.log("HarbourLinter", "ERROR: Failed to start process: " + e.getMessage());
                 HarbourLogger.log("HarbourLinter", "  Compiler path: " + command.get(0));
@@ -573,8 +589,11 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     @Override
     public void apply(@NotNull PsiFile file, List<HarbourLintResult> annotationResult, @NotNull AnnotationHolder holder) {
         if (annotationResult == null || annotationResult.isEmpty()) {
+            HarbourLogger.log("HarbourLinter", "apply() called with no results for: " + file.getName());
             return;
         }
+        
+        HarbourLogger.log("HarbourLinter", "apply() called with " + annotationResult.size() + " results for: " + file.getName());
 
         Document document = PsiDocumentManager.getInstance(file.getProject()).getDocument(file);
         if (document == null) {

@@ -88,7 +88,7 @@ Automatic code indentation and formatting follows Harbour conventions. Customize
 positioning in settings.
 
 <p align="center">
-  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
+  <img src="img/settings-formatting.png" alt="Code Style Settings Format"/>
   <br>
   <em>Customizable code formatting options</em>
 </p>
