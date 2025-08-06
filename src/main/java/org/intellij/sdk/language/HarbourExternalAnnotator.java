@@ -61,18 +61,21 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     private static class LintCache {
         String filePath;
         long modificationStamp;
+        long timestamp; // When this cache entry was created
         List<HarbourLintResult> results;
         
         LintCache(String filePath, long modificationStamp, List<HarbourLintResult> results) {
             this.filePath = filePath;
             this.modificationStamp = modificationStamp;
+            this.timestamp = System.currentTimeMillis();
             this.results = results;
         }
     }
     
     private static final Map<String, LintCache> cache = new ConcurrentHashMap<>();
     private static final Map<String, Long> lastLintTime = new ConcurrentHashMap<>();
-    private static final long DEBOUNCE_DELAY_MS = 1000; // 1 second debounce
+    private static final long DEBOUNCE_DELAY_MS = 3000; // 3 second debounce for better performance
+    private static final int MAX_FILE_SIZE_FOR_REALTIME = 100000; // 100KB limit for real-time linting
     
     /**
      * Called by the save listener to indicate that linting should be triggered for this file
@@ -102,6 +105,91 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         }
         
         return hasError;
+    }
+    
+    /**
+     * Perform quick syntax checks for common errors without running the full compiler
+     * This provides immediate feedback while typing
+     */
+    private static List<HarbourLintResult> quickSyntaxCheck(String content, String filePath) {
+        List<HarbourLintResult> results = new ArrayList<>();
+        if (content == null) return results;
+        
+        String[] lines = content.split("\n");
+        
+        // Patterns for common syntax errors
+        Pattern unmatchedQuoteInLine = Pattern.compile("\\b\\w+\\s*\\(\\s*\"[^\"\\n)]*$");
+        Pattern unmatchedParenPattern = Pattern.compile("\\b\\w+\\s*\\([^)]*$");
+        Pattern localWithSlash = Pattern.compile("\\bLOCAL\\s+\\w+\\s*/");
+        Pattern incompleteFunction = Pattern.compile("\\b\\w+\\s*\\([^)]*(?:\\w+)\\s*$");
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmedLine = line.trim();
+            
+            // Skip comments and empty lines
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith("//") || 
+                trimmedLine.startsWith("*") || trimmedLine.startsWith("/*")) continue;
+            
+            // Check for LOCAL with trailing slash (like "LOCAL gaga /")
+            if (localWithSlash.matcher(line).find()) {
+                results.add(new HarbourLintResult(
+                    i + 1,
+                    0,
+                    "Syntax error: Invalid character '/' after LOCAL declaration",
+                    HighlightSeverity.ERROR,
+                    "E0030"
+                ));
+            }
+            
+            // Check for unmatched quotes (like qout("bla or qout(asdfasd)
+            if (unmatchedQuoteInLine.matcher(line).find() || 
+                (line.contains("(") && line.matches(".*\\([^\"'\\)]*[a-zA-Z]+[^\"'\\)]*(?:\\s*$|\\s*//)"))) {
+                results.add(new HarbourLintResult(
+                    i + 1,
+                    0,
+                    "Syntax error: Unmatched quote or missing quotes in function call",
+                    HighlightSeverity.ERROR,
+                    "E0020"
+                ));
+            }
+            
+            // Check for unmatched parentheses
+            if (unmatchedParenPattern.matcher(line).find() && !line.contains(")")) {
+                results.add(new HarbourLintResult(
+                    i + 1,
+                    0,
+                    "Syntax error: Unmatched parenthesis",
+                    HighlightSeverity.ERROR,
+                    "E0020"
+                ));
+            }
+            
+            // Check for if without parentheses (like "If oo")
+            if (line.matches(".*\\b[Ii][Ff]\\s+\\w+\\s*$")) {
+                results.add(new HarbourLintResult(
+                    i + 1,
+                    0,
+                    "Syntax error: 'if' statement missing parentheses",
+                    HighlightSeverity.ERROR,
+                    "E0030"
+                ));
+            }
+            
+            // Check for qout with unquoted string
+            if (line.matches(".*\\bqout\\s*\\(\\s*[a-zA-Z]+.*") && 
+                !line.matches(".*\\bqout\\s*\\(\\s*[\"'].*")) {
+                results.add(new HarbourLintResult(
+                    i + 1,
+                    0,
+                    "Syntax error: qout() requires quoted string",
+                    HighlightSeverity.ERROR,
+                    "E0030"
+                ));
+            }
+        }
+        
+        return results;
     }
 
     @Nullable
@@ -136,43 +224,61 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
         
-        // TEMPORARY FIX: Disable save-only restriction until save listener issue is resolved
-        // The save listener is not being triggered properly in some IntelliJ versions
-        boolean DISABLE_SAVE_ONLY_RESTRICTION = true; // Temporary flag
+        // Determine if we should lint this file
+        long currentTime = System.currentTimeMillis();
+        boolean isSaveTriggered = lastLintTime.containsKey(filePath + "_save_triggered");
+        String fileContent = file.getText();
+        boolean hasObviousSyntaxError = containsObviousSyntaxError(fileContent);
         
-        if (settings.isLintOnSave() && !DISABLE_SAVE_ONLY_RESTRICTION) {
-            // Original save-only logic (currently bypassed)
-            long currentTime = System.currentTimeMillis();
-            Long lastSaveTime = lastLintTime.get(filePath + "_save_triggered");
-            
-            // WORKAROUND: Also check if file has obvious syntax errors that should be shown immediately
-            String fileContent = file.getText();
-            boolean hasObviousSyntaxError = containsObviousSyntaxError(fileContent);
-            
-            if (hasObviousSyntaxError) {
-                HarbourLogger.log("HarbourLinter", "WORKAROUND: File has obvious syntax errors, proceeding with linting despite save-only mode");
-                HarbourLogger.log("HarbourLinter", "Detected syntax error pattern in file content");
-            } else if (lastSaveTime == null || (currentTime - lastSaveTime) > 5000) {
-                // No recent save trigger and no obvious errors, skip real-time linting
-                HarbourLogger.log("HarbourLinter", "Skipping - lintOnSave enabled but no recent save trigger and no obvious errors");
-                return null;
-            } else {
-                HarbourLogger.log("HarbourLinter", "Proceeding - lintOnSave enabled and recently triggered by save");
-                // Clear the save trigger flag
-                lastLintTime.remove(filePath + "_save_triggered");
-            }
-        } else if (settings.isLintOnSave() && DISABLE_SAVE_ONLY_RESTRICTION) {
-            HarbourLogger.log("HarbourLinter", "TEMPORARY: Save-only restriction disabled, proceeding with real-time linting");
+        // Log the detection results
+        if (hasObviousSyntaxError) {
+            HarbourLogger.log("HarbourLinter", "Detected obvious syntax errors in file");
         }
         
-        // Debounce - skip if we've linted too recently (only for real-time linting)
-        if (!settings.isLintOnSave()) {
-            Long lastTime = lastLintTime.get(filePath);
-            long currentTime = System.currentTimeMillis();
-            if (lastTime != null && (currentTime - lastTime) < DEBOUNCE_DELAY_MS) {
-                HarbourLogger.log("HarbourLinter", "Skipping due to debounce for: " + file.getName());
+        // Check if save-only mode is enabled
+        if (settings.isLintOnSave()) {
+            // In save-only mode, we lint if:
+            // 1. Save was triggered
+            // 2. File has obvious syntax errors (override save-only for critical errors)
+            if (!isSaveTriggered && !hasObviousSyntaxError) {
+                HarbourLogger.log("HarbourLinter", "Skipping - save-only mode, no save trigger, no obvious errors");
                 return null;
             }
+            
+            if (hasObviousSyntaxError) {
+                HarbourLogger.log("HarbourLinter", "Proceeding - obvious syntax errors detected, overriding save-only mode");
+            } else {
+                HarbourLogger.log("HarbourLinter", "Proceeding - save triggered");
+            }
+        }
+        
+        // Debounce - but be smarter about it
+        Long lastTime = lastLintTime.get(filePath);
+        if (lastTime != null && (currentTime - lastTime) < DEBOUNCE_DELAY_MS) {
+            // During debounce, check if we should still proceed:
+            // 1. Save was triggered - always proceed
+            // 2. File has obvious errors - always proceed  
+            // 3. File modification stamp changed - proceed
+            long modificationStamp = virtualFile.getModificationStamp();
+            LintCache cached = cache.get(filePath);
+            boolean fileChanged = cached == null || cached.modificationStamp != modificationStamp;
+            
+            if (!isSaveTriggered && !hasObviousSyntaxError && !fileChanged) {
+                HarbourLogger.log("HarbourLinter", "Skipping due to debounce - no changes detected");
+                if (cached != null) {
+                    HarbourLogger.log("HarbourLinter", "Returning cached results during debounce");
+                    return new HarbourLintInfo(filePath, "CACHED", 
+                        project,
+                        settings.getHarbourCompilerPath(),
+                        settings.getIncludePaths(),
+                        settings.getLintExtraOptions(),
+                        settings.getLintWarningLevel()
+                    );
+                }
+                return null;
+            }
+            
+            HarbourLogger.log("HarbourLinter", "Overriding debounce - important changes detected");
         }
 
         // Get compiler path
@@ -196,11 +302,60 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
 
-        // Check cache
+        // Check file size for performance
+        long fileSize = virtualFile.getLength();
+        if (fileSize > MAX_FILE_SIZE_FOR_REALTIME) {
+            HarbourLogger.log("HarbourLinter", "File too large for real-time linting: " + fileSize + " bytes (limit: " + MAX_FILE_SIZE_FOR_REALTIME + " bytes)");
+            
+            // For large files, do full linting if:
+            // 1. Save was triggered
+            // 2. File has obvious syntax errors
+            // Otherwise, only do quick syntax check
+            if (!isSaveTriggered && !hasObviousSyntaxError) {
+                HarbourLogger.log("HarbourLinter", "Large file: using quick syntax check only");
+                return new HarbourLintInfo(
+                    filePath,
+                    "QUICK_CHECK:" + fileContent,
+                    project,
+                    compilerPath,
+                    settings.getIncludePaths(),
+                    settings.getLintExtraOptions(),
+                    settings.getLintWarningLevel()
+                );
+            } else {
+                HarbourLogger.log("HarbourLinter", "Large file but important lint needed: doing full lint");
+            }
+        }
+
+        // Check cache - but be more careful about when to use it
         long modificationStamp = virtualFile.getModificationStamp();
         LintCache cached = cache.get(filePath);
+        
+        // Only use cache if:
+        // 1. Cache exists and modification stamp matches
+        // 2. We're not in an explicit save/lint request
+        // 3. The cached results are recent (within 30 seconds)
+        boolean canUseCache = false;
         if (cached != null && cached.modificationStamp == modificationStamp) {
-            HarbourLogger.log("HarbourLinter", "Using cached results for: " + file.getName());
+            long cacheAge = System.currentTimeMillis() - cached.timestamp;
+            boolean isExplicitRequest = lastLintTime.containsKey(filePath + "_save_triggered");
+            
+            if (!isExplicitRequest && cacheAge < 1000) { // 1 second cache expiry (reduced from 5s) - minimal caching
+                canUseCache = true;
+                HarbourLogger.log("HarbourLinter", "Using cached results for: " + file.getName() + 
+                    " (cache age: " + (cacheAge/1000) + "s, modStamp match: true)");
+            } else {
+                HarbourLogger.log("HarbourLinter", "Cache invalid: explicit=" + isExplicitRequest + 
+                    ", age=" + (cacheAge/1000) + "s, clearing cache");
+                cache.remove(filePath); // Clear stale cache
+            }
+        } else if (cached != null) {
+            HarbourLogger.log("HarbourLinter", "Cache invalid: modStamp mismatch (cached=" + 
+                cached.modificationStamp + ", current=" + modificationStamp + ")");
+            cache.remove(filePath); // Clear invalid cache
+        }
+        
+        if (canUseCache) {
             // Return a special marker to indicate cached results
             return new HarbourLintInfo(
                 filePath,
@@ -214,11 +369,25 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         }
         
         HarbourLogger.log("HarbourLinter", "collectInformation called for: " + file.getName());
+        
+        // For better performance, alternate between quick checks and full compilation
+        // Do quick check more frequently, full compilation less frequently
+        boolean doQuickCheckOnly = false;
+        Long lastFullCheck = lastLintTime.get(filePath + "_full");
+        if (lastFullCheck != null && (System.currentTimeMillis() - lastFullCheck) < 10000) {
+            // If we did a full check within 10 seconds, just do a quick check
+            doQuickCheckOnly = true;
+            HarbourLogger.log("HarbourLinter", "Doing quick syntax check only for performance");
+        }
+        
         lastLintTime.put(filePath, System.currentTimeMillis());
+        if (!doQuickCheckOnly) {
+            lastLintTime.put(filePath + "_full", System.currentTimeMillis());
+        }
 
         return new HarbourLintInfo(
             filePath,
-            file.getText(),
+            doQuickCheckOnly ? "QUICK_CHECK:" + file.getText() : file.getText(),
             project,
             compilerPath,
             settings.getIncludePaths(),  // Use main include paths
@@ -238,6 +407,27 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         if ("CACHED".equals(info.getFileContent())) {
             LintCache cached = cache.get(info.getFilePath());
             return cached != null ? cached.results : null;
+        }
+        
+        // Check if this is a quick syntax check
+        if (info.getFileContent() != null && info.getFileContent().startsWith("QUICK_CHECK:")) {
+            String content = info.getFileContent().substring("QUICK_CHECK:".length());
+            List<HarbourLintResult> quickResults = quickSyntaxCheck(content, info.getFilePath());
+            HarbourLogger.log("HarbourLinter", "Quick syntax check found " + quickResults.size() + " issues");
+            
+            // Cache quick results temporarily
+            if (!quickResults.isEmpty()) {
+                VirtualFile file = LocalFileSystem.getInstance().findFileByPath(info.getFilePath());
+                if (file != null) {
+                    cache.put(info.getFilePath(), new LintCache(
+                        info.getFilePath(),
+                        file.getModificationStamp(),
+                        quickResults
+                    ));
+                }
+            }
+            
+            return quickResults;
         }
 
         List<HarbourLintResult> results = new ArrayList<>();
@@ -333,6 +523,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                         HarbourLogger.log("HarbourLinter", "  -> Severity: " + result.getSeverity() + ", Code: " + result.getErrorCode() + ", Message: " + result.getMessage());
                     } else if (line.toLowerCase().contains("warning") || line.toLowerCase().contains("error")) {
                         HarbourLogger.log("HarbourLinter", "UNPARSED line with Warning/Error: " + line);
+                    } else if (line.contains(".prg(") || line.contains(".ch(")) {
+                        // Log lines that look like they might be errors but didn't parse
+                        HarbourLogger.log("HarbourLinter", "POTENTIAL ERROR LINE not parsed: " + line);
                     }
                 }
                 
@@ -361,6 +554,12 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 // Update last lint time for debouncing
                 lastLintTime.put(info.getFilePath(), System.currentTimeMillis());
                 HarbourLogger.log("HarbourLinter", "Updated last lint time for: " + info.getFilePath());
+                
+                // Clear save trigger flag if it was a save-triggered lint
+                if (lastLintTime.containsKey(info.getFilePath() + "_save_triggered")) {
+                    lastLintTime.remove(info.getFilePath() + "_save_triggered");
+                    HarbourLogger.log("HarbourLinter", "Cleared save trigger flag for: " + info.getFilePath());
+                }
             }
             
         } catch (Exception e) {
@@ -515,14 +714,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         String normalizedFilePath = filePath.replace('\\', '/');
         String normalizedExpectedPath = expectedFilePath.replace('\\', '/');
         
-        // Only process errors for the file we're linting
-        if (!normalizedFilePath.equals(normalizedExpectedPath)) {
-            // Also try case-insensitive comparison for Windows
-            if (!normalizedFilePath.equalsIgnoreCase(normalizedExpectedPath)) {
-                HarbourLogger.log("HarbourLinter", "Path mismatch, skipping line");
-                return null;
-            }
-        }
+        // Note: We show ALL errors, including those from include files
+        // This is important because include file errors prevent compilation
+        HarbourLogger.log("HarbourLinter", "Processing error from: " + filePath);
 
         HighlightSeverity severity;
         if ("Error".equalsIgnoreCase(severityStr)) {

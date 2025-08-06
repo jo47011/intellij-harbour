@@ -443,9 +443,19 @@ public class HarbourSettingsConfigurable implements Configurable {
         myLintExtraOptionsField.setToolTipText("Additional options to pass to the Harbour compiler (e.g., -DMYDEFINE)");
         settingsPanel.add(myLintExtraOptionsField, constraints);
 
-        // Note about include paths
+        // File size limit information
         constraints.gridx = 0;
         constraints.gridy = 7;
+        constraints.gridwidth = 2;
+        JLabel fileSizeLimitInfo = new JLabel("<html><b>Note:</b> Files larger than 100KB will only receive quick syntax checking<br>" +
+                                            "during real-time editing. Full linting is always performed on save.</html>");
+        fileSizeLimitInfo.setFont(fileSizeLimitInfo.getFont().deriveFont(Font.PLAIN));
+        fileSizeLimitInfo.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+        settingsPanel.add(fileSizeLimitInfo, constraints);
+        
+        // Note about include paths
+        constraints.gridx = 0;
+        constraints.gridy = 8;
         constraints.gridwidth = 2;
         constraints.weighty = 0.1;
         JLabel includePathsNote = new JLabel("<html><i>Note: Linting uses the include paths configured in Tools → Harbour → Include Paths</i></html>");

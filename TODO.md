@@ -35,19 +35,9 @@ again: no improvements at all:
   for variables still the same "multiple implementations"
   see screenshots
 
--  external functions:
-  - style change on hoover works again, new popup see Screenshot
-  - clicking not  => nothing happens => needs fixing!!!
-
-----
-
-what are you doing? do you make any changes at all.
-Really getting frustrated now.  About to give up.
-Pls make me happy again and finally come up w/ a working version.
-
-I could live w/ the popup for now,
-but clicking external functions must work again. Come on.
-
-----
 
 find harbour.exe pendant in linux for linting
+
+----
+
+Actually expected is unix style, make sure you use OS specific file separator everywhere.
