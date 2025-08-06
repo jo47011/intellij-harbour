@@ -34,6 +34,9 @@ import java.util.stream.Collectors;
 import com.intellij.psi.PsiRecursiveElementVisitor;
 import org.intellij.sdk.language.psi.HarbourTypes;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import com.intellij.openapi.vfs.LocalFileSystem;
 
@@ -191,7 +194,154 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             }
         }
         
+        // Basic unused variable detection
+        // First, collect all LOCAL variable declarations
+        Map<String, Integer> localVars = new HashMap<>();
+        Pattern localPattern = Pattern.compile("\\bLOCAL\\s+([\\w,\\s]+)");
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.startsWith("//") || line.startsWith("*")) continue;
+            
+            Matcher localMatcher = localPattern.matcher(line);
+            if (localMatcher.find()) {
+                String varList = localMatcher.group(1);
+                // Split by comma and trim each variable name
+                String[] vars = varList.split(",");
+                for (String var : vars) {
+                    String varName = var.trim();
+                    if (!varName.isEmpty()) {
+                        localVars.put(varName, i + 1); // Store line number
+                    }
+                }
+            }
+        }
+        
+        // Now check if variables are used
+        for (Map.Entry<String, Integer> entry : localVars.entrySet()) {
+            String varName = entry.getKey();
+            int declarationLine = entry.getValue();
+            boolean isUsed = false;
+            
+            // Check all lines after declaration for usage
+            for (int i = 0; i < lines.length; i++) {
+                if (i + 1 == declarationLine) continue; // Skip declaration line
+                String line = lines[i];
+                
+                // Skip comments
+                if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
+                
+                // Check if variable is used (simple word boundary check)
+                if (line.matches(".*\\b" + Pattern.quote(varName) + "\\b.*")) {
+                    isUsed = true;
+                    break;
+                }
+            }
+            
+            if (!isUsed) {
+                results.add(new HarbourLintResult(
+                    declarationLine,
+                    0,
+                    "Warning: Unused local variable '" + varName + "'",
+                    HighlightSeverity.WARNING,
+                    "W0001"
+                ));
+            }
+        }
+        
         return results;
+    }
+    
+    private List<HarbourLintResult> runWithCommentedIncludes(
+            HarbourLintInfo info, Set<String> missingFiles, List<String> originalCommand) 
+            throws IOException, InterruptedException {
+        
+        // Read original file
+        String originalContent = new String(Files.readAllBytes(Paths.get(info.getFilePath())), 
+            StandardCharsets.UTF_8);
+        
+        // Create modified content with problematic includes commented
+        String modifiedContent = commentOutIncludes(originalContent, missingFiles);
+        
+        // Create temporary file
+        File tempFile = File.createTempFile("harbour_lint_", ".prg");
+        tempFile.deleteOnExit();
+        
+        try {
+            // Write modified content
+            Files.write(tempFile.toPath(), modifiedContent.getBytes(StandardCharsets.UTF_8));
+            
+            // Build new command with temp file
+            List<String> command = new ArrayList<>(originalCommand);
+            command.set(1, tempFile.getAbsolutePath()); // Replace file path
+            
+            HarbourLogger.log("HarbourLinter", "Running with temp file: " + tempFile.getAbsolutePath());
+            
+            // Run compiler
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            
+            List<String> outputLines = new ArrayList<>();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    outputLines.add(line);
+                }
+            }
+            
+            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return new ArrayList<>();
+            }
+            
+            // Parse results and adjust line numbers back to original file
+            List<HarbourLintResult> results = new ArrayList<>();
+            for (String line : outputLines) {
+                HarbourLintResult result = parseErrorLine(line, info.getFilePath());
+                if (result != null && !result.getMessage().contains("Can't open #include file")) {
+                    results.add(result);
+                }
+            }
+            
+            return results;
+            
+        } finally {
+            // Clean up temp file
+            if (tempFile.exists()) {
+                tempFile.delete();
+            }
+        }
+    }
+    
+    private String commentOutIncludes(String content, Set<String> missingFiles) {
+        String[] lines = content.split("\n");
+        StringBuilder modified = new StringBuilder();
+        
+        for (String line : lines) {
+            String trimmed = line.trim();
+            boolean shouldComment = false;
+            
+            // Check if this line includes any of the missing files
+            if (trimmed.startsWith("#include")) {
+                for (String missingFile : missingFiles) {
+                    if (line.contains(missingFile)) {
+                        shouldComment = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (shouldComment) {
+                modified.append("// LINTING: Commented out missing include - ").append(line).append("\n");
+            } else {
+                modified.append(line).append("\n");
+            }
+        }
+        
+        return modified.toString();
     }
 
     @Nullable
@@ -537,17 +687,96 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 HarbourLogger.log("HarbourLinter", "Total issues found: " + results.size());
                 HarbourLogger.log("HarbourLinter", "Lines parsed successfully: " + parsedCount);
                 
-                // Check if we only found include file errors
-                boolean onlyIncludeErrors = results.stream()
-                    .allMatch(r -> r.getMessage().contains("Can't open #include file"));
+                // Check if we found any include file errors
+                boolean hasIncludeErrors = results.stream()
+                    .anyMatch(r -> r.getMessage().contains("Can't open #include file"));
                     
-                if (onlyIncludeErrors && results.size() > 0) {
-                    HarbourLogger.log("HarbourLinter", "Only include file errors found, adding quick syntax check");
-                    // Add quick syntax check results
+                if (hasIncludeErrors) {
+                    HarbourLogger.log("HarbourLinter", "Include file errors found, adding quick syntax check");
+                    
+                    // Log include errors to console for visibility
+                    Set<String> missingFiles = new HashSet<>();
+                    List<HarbourLintResult> enhancedResults = new ArrayList<>();
+                    
+                    for (HarbourLintResult result : results) {
+                        if (result.getMessage().contains("Can't open #include file")) {
+                            // Extract missing file name
+                            String msg = result.getMessage();
+                            int start = msg.indexOf("'");
+                            int end = msg.lastIndexOf("'");
+                            if (start >= 0 && end > start) {
+                                String missingFile = msg.substring(start + 1, end);
+                                missingFiles.add(missingFile);
+                            }
+                            
+                            // Create new result with enhanced message
+                            String enhancedMsg = result.getMessage() + " (This may be included indirectly - check your #include statements)";
+                            HarbourLintResult enhanced = new HarbourLintResult(
+                                result.getLine(),
+                                result.getColumn(),
+                                enhancedMsg,
+                                result.getSeverity(),
+                                result.getErrorCode()
+                            );
+                            enhanced.setTextRange(result.getTextRange());
+                            enhancedResults.add(enhanced);
+                        } else {
+                            enhancedResults.add(result);
+                        }
+                    }
+                    results = enhancedResults;
+                    
+                    // Log to console for visibility
+                    if (!missingFiles.isEmpty()) {
+                        HarbourLogger.warning("HarbourLinter", 
+                            "=== MISSING INCLUDE FILES ===");
+                        for (String file : missingFiles) {
+                            HarbourLogger.warning("HarbourLinter", 
+                                "Missing: " + file + " (may be included indirectly)");
+                        }
+                        HarbourLogger.warning("HarbourLinter", 
+                            "Running quick syntax check to provide additional feedback...");
+                    }
+                    
+                    // Always add quick syntax check results when there are include errors
                     List<HarbourLintResult> quickResults = quickSyntaxCheck(info.getFilePath(), 
                         new String(Files.readAllBytes(Paths.get(info.getFilePath())), StandardCharsets.UTF_8));
                     results.addAll(quickResults);
                     HarbourLogger.log("HarbourLinter", "Added " + quickResults.size() + " quick syntax check results");
+                    
+                    // Log summary to console
+                    if (!quickResults.isEmpty()) {
+                        HarbourLogger.warning("HarbourLinter", 
+                            "Found " + quickResults.size() + " additional issues via quick syntax check");
+                    }
+                    
+                    // Try full linting with problematic includes commented out
+                    if (!missingFiles.isEmpty()) {
+                        HarbourLogger.warning("HarbourLinter", 
+                            "Attempting full linting with missing includes commented out...");
+                        
+                        try {
+                            List<HarbourLintResult> fullResults = runWithCommentedIncludes(
+                                info, missingFiles, command);
+                            
+                            if (!fullResults.isEmpty()) {
+                                HarbourLogger.warning("HarbourLinter", 
+                                    "Full linting found " + fullResults.size() + " additional issues");
+                                // Add non-duplicate results
+                                for (HarbourLintResult fullResult : fullResults) {
+                                    boolean isDuplicate = results.stream()
+                                        .anyMatch(r -> r.getLine() == fullResult.getLine() && 
+                                                      r.getMessage().equals(fullResult.getMessage()));
+                                    if (!isDuplicate) {
+                                        results.add(fullResult);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            HarbourLogger.warning("HarbourLinter", 
+                                "Could not run full linting with commented includes: " + e.getMessage());
+                        }
+                    }
                 }
                 
             } catch (java.io.IOException e) {
