@@ -18,14 +18,20 @@ public class HarbourLintOnSaveListener implements FileDocumentManagerListener {
     
     @Override
     public void beforeDocumentSaving(@NotNull Document document) {
+        HarbourLogger.log("HarbourLinter", ">>> beforeDocumentSaving called <<<");
+        
         // Get the file from the document
         VirtualFile file = FileDocumentManager.getInstance().getFile(document);
         if (file == null || !file.isValid()) {
+            HarbourLogger.log("HarbourLinter", "File is null or invalid");
             return;
         }
         
+        HarbourLogger.log("HarbourLinter", "File being saved: " + file.getPath() + ", Extension: " + file.getExtension());
+        
         // Check if it's a Harbour file
         if (!"prg".equalsIgnoreCase(file.getExtension())) {
+            HarbourLogger.log("HarbourLinter", "Not a Harbour file, skipping");
             return;
         }
         
@@ -51,7 +57,12 @@ public class HarbourLintOnSaveListener implements FileDocumentManagerListener {
         // Trigger a code analysis update for this file
         PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
         if (psiFile != null) {
-            HarbourLogger.log("HarbourLinter", "Triggering lint on save for: " + file.getName());
+            HarbourLogger.log("HarbourLinter", "=== SAVE TRIGGERED - Triggering lint on save for: " + file.getName() + " ===");
+            
+            // Set save trigger flag for the external annotator
+            String filePath = file.getPath();
+            HarbourExternalAnnotator.setSaveTrigger(filePath);
+            
             // Force external annotator to run
             DaemonCodeAnalyzer.getInstance(project).restart(psiFile);
         }

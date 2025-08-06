@@ -41,9 +41,20 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo, List<HarbourLintResult>> implements DumbAware {
     private static final Logger LOG = Logger.getInstance(HarbourExternalAnnotator.class);
     
-    // Pattern to match Harbour compiler error output: /path/file.prg(line) Error E0017 Error message
+    // Patterns to match various Harbour compiler error output formats
     private static final Pattern ERROR_PATTERN = Pattern.compile(
         "^(.+?)\\((\\d+)\\)\\s+(Error|Warning)\\s+(E\\d+|W\\d+)?\\s*(.+)$"
+    );
+    
+    // Alternative pattern for different error formats
+    private static final Pattern ERROR_PATTERN_ALT = Pattern.compile(
+        "^(.+?):\\s*(\\d+):\\s*(Error|Warning):\\s*(.+)$"
+    );
+    
+    // Another pattern for syntax errors without error codes  
+    private static final Pattern ERROR_PATTERN_SIMPLE = Pattern.compile(
+        "^(.+?)\\((\\d+)\\)\\s*:?\\s*(Error|Warning|error|warning)\\s*:?\\s*(.+)$", 
+        Pattern.CASE_INSENSITIVE
     );
     
     // Cache for lint results
@@ -62,47 +73,113 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     private static final Map<String, LintCache> cache = new ConcurrentHashMap<>();
     private static final Map<String, Long> lastLintTime = new ConcurrentHashMap<>();
     private static final long DEBOUNCE_DELAY_MS = 1000; // 1 second debounce
+    
+    /**
+     * Called by the save listener to indicate that linting should be triggered for this file
+     */
+    public static void setSaveTrigger(String filePath) {
+        lastLintTime.put(filePath + "_save_triggered", System.currentTimeMillis());
+        HarbourLogger.log("HarbourLinter", "Save trigger flag set for: " + filePath);
+    }
+    
+    /**
+     * Check if file content contains obvious syntax errors that should be shown immediately
+     */
+    private static boolean containsObviousSyntaxError(String content) {
+        if (content == null) return false;
+        
+        // Pattern to detect unmatched quotes like qout("bla"xxx
+        // Look for function calls with unmatched quotes
+        Pattern unmatchedQuotePattern = Pattern.compile(
+            "\\b\\w+\\s*\\(\\s*\"[^\"]*\"[^)\"]*(?![\"\\s]*\\))",
+            Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
+        );
+        
+        boolean hasError = unmatchedQuotePattern.matcher(content).find();
+        
+        if (hasError) {
+            HarbourLogger.log("HarbourLinter", "Detected unmatched quote pattern in file content");
+        }
+        
+        return hasError;
+    }
 
     @Nullable
     @Override
     public HarbourLintInfo collectInformation(@NotNull PsiFile file, @NotNull Editor editor, boolean hasErrors) {
-        // Skip if file has errors or is not a physical file
-        if (hasErrors) {
-            return null;
-        }
-
         VirtualFile virtualFile = file.getVirtualFile();
         if (virtualFile == null || !virtualFile.isValid()) {
+            HarbourLogger.log("HarbourLinter", "Skipping - invalid virtual file for: " + file.getName());
+            return null;
+        }
+        
+        String filePath = virtualFile.getPath();
+        HarbourLogger.log("HarbourLinter", "=== collectInformation called for: " + file.getName() + " (" + filePath + ") ====");
+        HarbourLogger.log("HarbourLinter", "  hasErrors: " + hasErrors);
+        
+        // Skip if file has parser errors
+        if (hasErrors) {
+            HarbourLogger.log("HarbourLinter", "Skipping - file has parser errors: " + file.getName());
             return null;
         }
 
         Project project = file.getProject();
         HarbourSettings settings = HarbourSettings.getInstance(project);
         
+        HarbourLogger.log("HarbourLinter", "  lintingEnabled: " + settings.isLintingEnabled());
+        HarbourLogger.log("HarbourLinter", "  lintOnSave: " + settings.isLintOnSave());
+        HarbourLogger.log("HarbourLinter", "  compilerPath: " + settings.getHarbourCompilerPath());
+        
         // Check if linting is enabled
         if (!settings.isLintingEnabled()) {
+            HarbourLogger.log("HarbourLinter", "Skipping - linting disabled in settings");
             return null;
         }
         
-        // If lintOnSave is enabled, skip real-time linting
-        if (settings.isLintOnSave()) {
-            // Don't lint on every change, wait for save
-            return null;
+        // TEMPORARY FIX: Disable save-only restriction until save listener issue is resolved
+        // The save listener is not being triggered properly in some IntelliJ versions
+        boolean DISABLE_SAVE_ONLY_RESTRICTION = true; // Temporary flag
+        
+        if (settings.isLintOnSave() && !DISABLE_SAVE_ONLY_RESTRICTION) {
+            // Original save-only logic (currently bypassed)
+            long currentTime = System.currentTimeMillis();
+            Long lastSaveTime = lastLintTime.get(filePath + "_save_triggered");
+            
+            // WORKAROUND: Also check if file has obvious syntax errors that should be shown immediately
+            String fileContent = file.getText();
+            boolean hasObviousSyntaxError = containsObviousSyntaxError(fileContent);
+            
+            if (hasObviousSyntaxError) {
+                HarbourLogger.log("HarbourLinter", "WORKAROUND: File has obvious syntax errors, proceeding with linting despite save-only mode");
+                HarbourLogger.log("HarbourLinter", "Detected syntax error pattern in file content");
+            } else if (lastSaveTime == null || (currentTime - lastSaveTime) > 5000) {
+                // No recent save trigger and no obvious errors, skip real-time linting
+                HarbourLogger.log("HarbourLinter", "Skipping - lintOnSave enabled but no recent save trigger and no obvious errors");
+                return null;
+            } else {
+                HarbourLogger.log("HarbourLinter", "Proceeding - lintOnSave enabled and recently triggered by save");
+                // Clear the save trigger flag
+                lastLintTime.remove(filePath + "_save_triggered");
+            }
+        } else if (settings.isLintOnSave() && DISABLE_SAVE_ONLY_RESTRICTION) {
+            HarbourLogger.log("HarbourLinter", "TEMPORARY: Save-only restriction disabled, proceeding with real-time linting");
         }
         
-        // Debounce - skip if we've linted too recently
-        String filePath = virtualFile.getPath();
-        Long lastTime = lastLintTime.get(filePath);
-        long currentTime = System.currentTimeMillis();
-        if (lastTime != null && (currentTime - lastTime) < DEBOUNCE_DELAY_MS) {
-            HarbourLogger.log("HarbourLinter", "Skipping due to debounce for: " + file.getName());
-            return null;
+        // Debounce - skip if we've linted too recently (only for real-time linting)
+        if (!settings.isLintOnSave()) {
+            Long lastTime = lastLintTime.get(filePath);
+            long currentTime = System.currentTimeMillis();
+            if (lastTime != null && (currentTime - lastTime) < DEBOUNCE_DELAY_MS) {
+                HarbourLogger.log("HarbourLinter", "Skipping due to debounce for: " + file.getName());
+                return null;
+            }
         }
 
         // Get compiler path
         String compilerPath = settings.getHarbourCompilerPath();
+        HarbourLogger.log("HarbourLinter", "  compilerPath from settings: '" + compilerPath + "'");
         if (compilerPath == null || compilerPath.trim().isEmpty()) {
-            HarbourLogger.log("HarbourLinter", "Harbour compiler path not configured in settings");
+            HarbourLogger.log("HarbourLinter", "ERROR: Harbour compiler path not configured in settings");
             return null;
         }
         
@@ -137,7 +214,7 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         }
         
         HarbourLogger.log("HarbourLinter", "collectInformation called for: " + file.getName());
-        lastLintTime.put(filePath, currentTime);
+        lastLintTime.put(filePath, System.currentTimeMillis());
 
         return new HarbourLintInfo(
             filePath,
@@ -203,45 +280,76 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             HarbourLogger.log("HarbourLinter", "Include paths: " + info.getExtraIncludePaths());
             
             // Execute the compiler
+            HarbourLogger.log("HarbourLinter", "=== EXECUTING HARBOUR COMPILER ===");
+            HarbourLogger.log("HarbourLinter", "Working directory: " + System.getProperty("user.dir"));
+            HarbourLogger.log("HarbourLinter", "Command: " + String.join(" ", command));
+            
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
-            Process process = pb.start();
             
-            // Read output
-            List<String> outputLines = new ArrayList<>();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    outputLines.add(line);
+            try {
+                Process process = pb.start();
+                HarbourLogger.log("HarbourLinter", "Process started successfully");
+                
+                // Read output with timeout
+                List<String> outputLines = new ArrayList<>();
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        outputLines.add(line);
+                        HarbourLogger.log("HarbourLinter", "LIVE OUTPUT: " + line);
+                    }
                 }
-            }
-            
-            // Wait for process to complete
-            int exitCode = process.waitFor();
-            
-            // Log all output for debugging
-            HarbourLogger.log("HarbourLinter", "=== Compiler output start ===");
-            for (String line : outputLines) {
-                HarbourLogger.log("HarbourLinter", "OUTPUT: " + line);
-            }
-            HarbourLogger.log("HarbourLinter", "=== Compiler output end ===");
-            
-            // Parse output for errors/warnings
-            for (String line : outputLines) {
-                HarbourLintResult result = parseErrorLine(line, info.getFilePath());
-                if (result != null) {
-                    results.add(result);
-                    HarbourLogger.log("HarbourLinter", "Found issue: " + line);
-                } else if (line.contains("Warning") || line.contains("Error")) {
-                    HarbourLogger.log("HarbourLinter", "Unparsed line with Warning/Error: " + line);
+                
+                // Wait for process to complete with timeout
+                boolean finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+                if (!finished) {
+                    HarbourLogger.log("HarbourLinter", "WARNING: Process timed out after 10 seconds, terminating");
+                    process.destroyForcibly();
+                    return results.isEmpty() ? null : results;
                 }
+                
+                int exitCode = process.exitValue();
+                HarbourLogger.log("HarbourLinter", "Process completed with exit code: " + exitCode);
+                
+                // Log all output for debugging
+                HarbourLogger.log("HarbourLinter", "=== COMPILER OUTPUT SUMMARY ===");
+                HarbourLogger.log("HarbourLinter", "Total output lines: " + outputLines.size());
+                for (int i = 0; i < outputLines.size(); i++) {
+                    String line = outputLines.get(i);
+                    HarbourLogger.log("HarbourLinter", "LINE " + (i+1) + ": " + line);
+                }
+                HarbourLogger.log("HarbourLinter", "=== END COMPILER OUTPUT ===");
+                
+                // Parse output for errors/warnings
+                int parsedCount = 0;
+                for (String line : outputLines) {
+                    HarbourLintResult result = parseErrorLine(line, info.getFilePath());
+                    if (result != null) {
+                        results.add(result);
+                        parsedCount++;
+                        HarbourLogger.log("HarbourLinter", "PARSED ERROR/WARNING #" + parsedCount + ": " + line);
+                        HarbourLogger.log("HarbourLinter", "  -> Severity: " + result.getSeverity() + ", Code: " + result.getErrorCode() + ", Message: " + result.getMessage());
+                    } else if (line.toLowerCase().contains("warning") || line.toLowerCase().contains("error")) {
+                        HarbourLogger.log("HarbourLinter", "UNPARSED line with Warning/Error: " + line);
+                    }
+                }
+                
+                HarbourLogger.log("HarbourLinter", "=== LINTING SUMMARY ===");
+                HarbourLogger.log("HarbourLinter", "Exit code: " + exitCode);
+                HarbourLogger.log("HarbourLinter", "Total issues found: " + results.size());
+                HarbourLogger.log("HarbourLinter", "Lines parsed successfully: " + parsedCount);
+                
+            } catch (java.io.IOException e) {
+                HarbourLogger.log("HarbourLinter", "ERROR: Failed to start process: " + e.getMessage());
+                HarbourLogger.log("HarbourLinter", "  Compiler path: " + command.get(0));
+                HarbourLogger.log("HarbourLinter", "  File exists: " + new java.io.File(command.get(0)).exists());
+                HarbourLogger.log("HarbourLinter", "  File executable: " + new java.io.File(command.get(0)).canExecute());
+                throw e;
             }
             
-            HarbourLogger.log("HarbourLinter", "Linting completed with exit code: " + exitCode + 
-                ", found " + results.size() + " issues");
-            
-            // Cache the results
+            // Cache the results and update last lint time
             VirtualFile file = LocalFileSystem.getInstance().findFileByPath(info.getFilePath());
             if (file != null) {
                 cache.put(info.getFilePath(), new LintCache(
@@ -249,6 +357,10 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                     file.getModificationStamp(),
                     results
                 ));
+                
+                // Update last lint time for debouncing
+                lastLintTime.put(info.getFilePath(), System.currentTimeMillis());
+                HarbourLogger.log("HarbourLinter", "Updated last lint time for: " + info.getFilePath());
             }
             
         } catch (Exception e) {
@@ -350,14 +462,53 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
 
+        HarbourLogger.log("HarbourLinter", "Attempting to parse line: '" + line + "'");
+        
+        // Try primary pattern first
         Matcher matcher = ERROR_PATTERN.matcher(line);
-        if (!matcher.matches()) {
-            return null;
+        String filePath = null;
+        int lineNumber = 0;
+        String severityStr = null;
+        String errorCode = null;
+        String message = null;
+        
+        if (matcher.matches()) {
+            HarbourLogger.log("HarbourLinter", "Matched primary pattern");
+            filePath = matcher.group(1);
+            lineNumber = Integer.parseInt(matcher.group(2));
+            severityStr = matcher.group(3);
+            errorCode = matcher.group(4);
+            message = matcher.group(5);
+        } else {
+            // Try alternative pattern
+            matcher = ERROR_PATTERN_ALT.matcher(line);
+            if (matcher.matches()) {
+                HarbourLogger.log("HarbourLinter", "Matched alternative pattern");
+                filePath = matcher.group(1);
+                lineNumber = Integer.parseInt(matcher.group(2));
+                severityStr = matcher.group(3);
+                errorCode = null; // No error code in this format
+                message = matcher.group(4);
+            } else {
+                // Try simple pattern
+                matcher = ERROR_PATTERN_SIMPLE.matcher(line);
+                if (matcher.matches()) {
+                    HarbourLogger.log("HarbourLinter", "Matched simple pattern");
+                    filePath = matcher.group(1);
+                    lineNumber = Integer.parseInt(matcher.group(2));
+                    severityStr = matcher.group(3);
+                    errorCode = null; // No error code in this format
+                    message = matcher.group(4);
+                } else {
+                    HarbourLogger.log("HarbourLinter", "No pattern matched for line: " + line);
+                    return null;
+                }
+            }
         }
-
-        String filePath = matcher.group(1);
         
         // Log for debugging
+        HarbourLogger.log("HarbourLinter", "Parsed components - file: '" + filePath + "', line: " + lineNumber + 
+            ", severity: '" + severityStr + "', code: '" + errorCode + "', message: '" + message + "'");
         HarbourLogger.log("HarbourLinter", "Comparing paths: parsed='" + filePath + "' expected='" + expectedFilePath + "'");
         
         // Normalize paths for comparison (handle Windows vs Unix paths)
@@ -372,11 +523,6 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 return null;
             }
         }
-
-        int lineNumber = Integer.parseInt(matcher.group(2));
-        String severityStr = matcher.group(3);
-        String errorCode = matcher.group(4);
-        String message = matcher.group(5);
 
         HighlightSeverity severity;
         if ("Error".equalsIgnoreCase(severityStr)) {

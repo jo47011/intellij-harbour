@@ -48,8 +48,6 @@ Pls make me happy again and finally come up w/ a working version.
 I could live w/ the popup for now,
 but clicking external functions must work again. Come on.
 
----
+----
 
-internal variable navigation seems case senstive -> fix
-also check internal functions.
-
+find harbour.exe pendant in linux for linting

@@ -71,7 +71,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Linting settings
     private boolean lintingEnabled = true; // Default to enabled
     private boolean lintOnSave = true; // Default to lint on save only
-    private String harbourCompilerPath = ""; // Path to harbour compiler
+    private String harbourCompilerPath = "harbour.exe"; // Path to harbour compiler
     private int lintWarningLevel = 1; // Default warning level
     private String lintExtraOptions = ""; // Extra compiler options for linting
     
