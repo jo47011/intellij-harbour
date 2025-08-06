@@ -13,14 +13,6 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
 
     private static long lastClickTime = 0;
 
-    /**
-     * Get current click state - used by handlers to determine if in click or hover mode
-     * @return true if currently in a click operation (not hover)
-     */
-    public static boolean isClickOperation() {
-        long timeSinceClick = System.currentTimeMillis() - lastClickTime;
-        return timeSinceClick < CLICK_TIMEOUT;
-    }
 
     @Override
     public void mouseClicked(EditorMouseEvent event) {
@@ -33,12 +25,10 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
         HarbourLogger.log(COMPONENT, "Mouse pressed - Ctrl down: " + ctrlDown);
         
         if (ctrlDown) {
-            System.out.println(">>> MOUSE LISTENER: Ctrl+Press detected - setting click mode to TRUE <<<");
             HarbourLogger.log(COMPONENT, "Ctrl+Press detected - setting click mode to TRUE");
             lastClickTime = System.currentTimeMillis();
             HarbourExternalDocumentationHandler.setClickMode(true);
         } else {
-            System.out.println(">>> MOUSE LISTENER: Mouse pressed without Ctrl - setting click mode to FALSE <<<");
             HarbourLogger.log(COMPONENT, "Mouse pressed without Ctrl - setting click mode to FALSE");
             HarbourExternalDocumentationHandler.setClickMode(false);
         }

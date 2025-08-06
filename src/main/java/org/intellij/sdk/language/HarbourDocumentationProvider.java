@@ -18,26 +18,21 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
 
     @Override
     public @Nullable String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
-        HarbourLogger.log("DocumentationProvider", "QuickNavigateInfo requested for: " + (element != null ? element.getText() : "null"));
         
         // Check if we're in hover mode
         boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
-        HarbourLogger.log("DocumentationProvider", "Click mode: " + isClick);
         
         if (!isClick) {
             // During hover, return null to prevent popup
-            HarbourLogger.log("DocumentationProvider", "HOVER MODE - returning null to prevent popup");
             return null;
         }
         
         // During click, generate documentation
-        HarbourLogger.log("DocumentationProvider", "CLICK MODE - generating documentation");
         return generateDocumentation(element);
     }
 
     @Override
     public @Nullable String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
-        HarbourLogger.log("DocumentationProvider", "Generating doc for element: " + (element != null ? element.getText() : "null"));
         return generateDocumentation(element);
     }
 
@@ -46,7 +41,6 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
         if (element.getParent() instanceof HarbourFunctionDeclaration) {
             HarbourFunctionDeclaration function = (HarbourFunctionDeclaration) element.getParent();
             String doc = "Function: " + function.getName();
-            HarbourLogger.log("DocumentationProvider", "Documentation generated for function: " + doc);
             return doc;
         }
 
@@ -54,11 +48,9 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
         if (element instanceof HarbourFunctionDeclaration) {
             HarbourFunctionDeclaration function = (HarbourFunctionDeclaration) element;
             String doc = "Function: " + function.getName();
-            HarbourLogger.log("DocumentationProvider", "Documentation generated for function: " + doc);
             return doc;
         }
 
-        HarbourLogger.log("DocumentationProvider", "Documentation not generated for element type: " + element.getClass().getSimpleName());
         return null;
     }
 
@@ -93,9 +85,7 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
      */
     public boolean openExternalDocumentation(Project project, String functionName) {
         try {
-            HarbourLogger.log("DocumentationProvider", "Opening external documentation for: " + functionName);
             String url = getDocumentationUrl(project, functionName);
-            HarbourLogger.log("DocumentationProvider", "Documentation URL: " + url);
 
             // Launch browser with the URL
             BrowserUtil.browse(url);
@@ -103,10 +93,8 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
             // Show notification with actions
             showExternalDocumentationNotification(project, functionName, url);
 
-            HarbourLogger.log("DocumentationProvider", "Browser launched successfully for: " + url);
             return true;
         } catch (Exception e) {
-            HarbourLogger.log("DocumentationProvider", "Error opening external documentation: " + e.getMessage());
             return false;
         }
     }
@@ -172,7 +160,6 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
             notification.notify(project);
             
         } catch (Exception e) {
-            HarbourLogger.log("DocumentationProvider", "Error showing notification: " + e.getMessage());
         }
     }
 }

@@ -24,7 +24,6 @@ public class HarbourNavigationPopup {
      * @param editor The current editor
      */
     public static void showNavigationPopup(List<PsiElement> targets, Editor editor) {
-        System.out.println(">>> CUSTOM NAVIGATION POPUP DISPLAYED - " + targets.size() + " targets <<<");
         HarbourLogger.log(COMPONENT, "Showing custom navigation popup with " + targets.size() + " targets");
         
         // Get the max results setting

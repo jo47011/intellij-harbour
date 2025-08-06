@@ -162,13 +162,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
         long timestamp = System.currentTimeMillis();
         
-        // CRITICAL DEBUG: Log entry with click mode
-        boolean clickMode = HarbourExternalDocumentationHandler.isClickMode();
-        System.out.println(">>>>>> NAVIGATION HANDLER CALLED - Element: '" + 
-                (element != null ? element.getText() : "NULL") + "' Click Mode: " + clickMode + " <<<<<<");
-        
         HarbourLogger.log(COMPONENT, ">>>>>>> HANDLER ENTRY POINT [" + timestamp + "] ELEMENT: '" + 
-                (element != null ? element.getText() : "NULL") + "' CLICK MODE: " + clickMode + " <<<<<<<");
+                (element != null ? element.getText() : "NULL") + "' <<<<<<<");
         
         processedElements.clear();
         
@@ -354,25 +349,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     
                     // Check if this is a click event
                     boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
-                    System.out.println(">>> EXTERNAL FUNCTION: " + identifierName + " Click Mode: " + isClick + " <<<");
                     
                     if (isClick) {
                         // On click: Open browser documentation
-                        System.out.println(">>> EXTERNAL FUNCTION CLICK - Opening browser <<<");
                         HarbourLogger.log(COMPONENT, "CLICK EVENT - opening browser for: " + identifierName);
                         HarbourDocumentationProvider docProvider = new HarbourDocumentationProvider();
                         boolean browserOpened = docProvider.openExternalDocumentation(file.getProject(), identifierName);
                         
                         if (browserOpened) {
                             HarbourLogger.log(COMPONENT, "Browser opened successfully");
-                            System.out.println(">>> BROWSER OPENED SUCCESSFULLY <<<");
                         } else {
                             HarbourLogger.log(COMPONENT, "Failed to open browser");
-                            System.out.println(">>> BROWSER OPENING FAILED <<<");
                         }
                     } else {
                         // On hover: Just provide underlines, no browser
-                        System.out.println(">>> EXTERNAL FUNCTION HOVER - Underlines only <<<");
                         HarbourLogger.log(COMPONENT, "HOVER EVENT - providing underlines only for: " + identifierName);
                     }
                     
@@ -385,7 +375,6 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         editor.getDocument().getLineNumber(leafElement.getTextOffset()) + 1,
                         "External function"
                     );
-                    System.out.println(">>> RETURNING NAVIGATION ELEMENT FOR EXTERNAL FUNCTION UNDERLINES <<<");  
                     return new PsiElement[] { navElement };
                 }
             } catch (Exception e) {
@@ -802,11 +791,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             
             // Check if this is a click event
             boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
-            System.out.println(">>> INTERNAL FUNCTION: Multiple targets, Click Mode: " + isClick + " <<<");
             
             if (isClick) {
                 // On click: Show our custom popup with Max Navigation Results limiting
-                System.out.println(">>> INTERNAL FUNCTION CLICK - Showing custom popup <<<");
                 HarbourLogger.log(COMPONENT, "CLICK EVENT - showing custom navigation popup");
                 
                 ApplicationManager.getApplication().invokeLater(() -> {
@@ -836,7 +823,6 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 return null;
             } else {
                 // On hover: Return only the first element to prevent "Multiple implementations" popup
-                System.out.println(">>> INTERNAL FUNCTION HOVER - Underlines only <<<");
                 HarbourLogger.log(COMPONENT, "HOVER EVENT - returning single element to prevent popup");
                 
                 // Return only the primary definition (first element) during hover
