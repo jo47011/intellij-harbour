@@ -54,6 +54,7 @@ public class HarbourSettingsConfigurable implements Configurable {
     private JTextField myHarbourCompilerPathField;
     private JSpinner myLintWarningLevelSpinner;
     private JTextField myLintExtraOptionsField;
+    private JTextField myLinterExclusionCommentField;
     
     // Navigation settings components
     private JSpinner myMaxNavigationResultsSpinner;
@@ -453,17 +454,19 @@ public class HarbourSettingsConfigurable implements Configurable {
         myLintExtraOptionsField = new JTextField();
         myLintExtraOptionsField.setToolTipText("Additional options to pass to the Harbour compiler (e.g., -DMYDEFINE)");
         settingsPanel.add(myLintExtraOptionsField, constraints);
-
-        // File size limit information
+        
+        // Linter exclusion comment
         constraints.gridx = 0;
         constraints.gridy = 7;
-        constraints.gridwidth = 2;
-        JLabel fileSizeLimitInfo = new JLabel("<html><b>Note:</b> Files larger than 100KB will only receive quick syntax checking<br>" +
-                                            "during real-time editing. Full linting is always performed on save.</html>");
-        fileSizeLimitInfo.setFont(fileSizeLimitInfo.getFont().deriveFont(Font.PLAIN));
-        fileSizeLimitInfo.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
-        settingsPanel.add(fileSizeLimitInfo, constraints);
+        constraints.gridwidth = 1;
+        JLabel exclusionCommentLabel = new JLabel("Exclude lines with comment:");
+        settingsPanel.add(exclusionCommentLabel, constraints);
         
+        constraints.gridx = 1;
+        myLinterExclusionCommentField = new JTextField();
+        myLinterExclusionCommentField.setToolTipText("Lines with comments starting with this word will be excluded from linting (e.g., // noqa, /* noqa comment */)");
+        settingsPanel.add(myLinterExclusionCommentField, constraints);
+
         // Note about include paths
         constraints.gridx = 0;
         constraints.gridy = 8;
@@ -711,6 +714,7 @@ public class HarbourSettingsConfigurable implements Configurable {
                 !settings.getHarbourCompilerPath().equals(myHarbourCompilerPathField.getText()) ||
                 settings.getLintWarningLevel() != (Integer) myLintWarningLevelSpinner.getValue() ||
                 !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText()) ||
+                !settings.getLinterExclusionComment().equals(myLinterExclusionCommentField.getText()) ||
                 settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue();
     }
 
@@ -739,6 +743,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         settings.setHarbourCompilerPath(myHarbourCompilerPathField.getText());
         settings.setLintWarningLevel((Integer) myLintWarningLevelSpinner.getValue());
         settings.setLintExtraOptions(myLintExtraOptionsField.getText());
+        settings.setLinterExclusionComment(myLinterExclusionCommentField.getText());
         
         // Save navigation settings
         settings.setMaxNavigationResults((Integer) myMaxNavigationResultsSpinner.getValue());
@@ -802,6 +807,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         myHarbourCompilerPathField.setText(settings.getHarbourCompilerPath());
         myLintWarningLevelSpinner.setValue(settings.getLintWarningLevel());
         myLintExtraOptionsField.setText(settings.getLintExtraOptions());
+        myLinterExclusionCommentField.setText(settings.getLinterExclusionComment());
         
         // Load navigation settings
         myMaxNavigationResultsSpinner.setValue(settings.getMaxNavigationResults());

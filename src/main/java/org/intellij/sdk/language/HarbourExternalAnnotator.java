@@ -607,27 +607,12 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
         
-        // Show progress in status bar
-        String fileName = new File(info.getFilePath()).getName();
-        HarbourLogger.log("HarbourLinter", "PROGRESS: Starting linting for " + fileName);
-        ApplicationManager.getApplication().invokeLater(() -> {
-            HarbourLogger.log("HarbourLinter", "PROGRESS: Setting status bar - Linting " + fileName + "...");
-            com.intellij.openapi.wm.WindowManager.getInstance()
-                .getStatusBar(info.getProject())
-                .setInfo("Linting " + fileName + "...");
-        });
+        // Progress bar removed per user feedback - linting is now quick enough
         
         // Check if we should use cached results
         if ("CACHED".equals(info.getFileContent())) {
             LintCache cached = cache.get(info.getFilePath());
-            // Clear status bar if using cache
-            HarbourLogger.log("HarbourLinter", "PROGRESS: Using cache, clearing status bar");
-            ApplicationManager.getApplication().invokeLater(() -> {
-                HarbourLogger.log("HarbourLinter", "PROGRESS: Clearing status bar (cache)");
-                com.intellij.openapi.wm.WindowManager.getInstance()
-                    .getStatusBar(info.getProject())
-                    .setInfo("");
-            });
+            // Progress bar removed - no need to clear
             return cached != null ? cached.results : null;
         }
         
@@ -686,6 +671,30 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             HarbourLogger.log("HarbourLinter", "=== EXECUTING HARBOUR COMPILER ===");
             HarbourLogger.log("HarbourLinter", "Working directory: " + System.getProperty("user.dir"));
             HarbourLogger.log("HarbourLinter", "Command: " + String.join(" ", command));
+            
+            // Log file details to debug E0030 "syntax error at '}'" issues
+            try {
+                File sourceFile = new File(info.getFilePath());
+                if (sourceFile.exists()) {
+                    List<String> lines = Files.readAllLines(sourceFile.toPath(), StandardCharsets.UTF_8);
+                    HarbourLogger.log("HarbourLinter", "File has " + lines.size() + " lines, size: " + sourceFile.length() + " bytes");
+                    // Log last 3 lines to see if there's something wrong at the end
+                    if (lines.size() > 0) {
+                        int startLine = Math.max(0, lines.size() - 3);
+                        HarbourLogger.log("HarbourLinter", "Last " + (lines.size() - startLine) + " lines:");
+                        for (int i = startLine; i < lines.size(); i++) {
+                            String line = lines.get(i);
+                            HarbourLogger.log("HarbourLinter", "  L" + (i + 1) + ": [" + line + "] (len=" + line.length() + ")");
+                            // Check for code blocks on this line
+                            if (line.contains("{ ||")) {
+                                HarbourLogger.log("HarbourLinter", "    ^ Contains code block");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception logEx) {
+                HarbourLogger.log("HarbourLinter", "Could not log file details: " + logEx.getMessage());
+            }
             
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
@@ -848,14 +857,7 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             LOG.error("Error running Harbour linter", e);
             HarbourLogger.log("HarbourLinter", "Error: " + e.getMessage());
         } finally {
-            // Clear status bar when done
-            HarbourLogger.log("HarbourLinter", "PROGRESS: Linting complete, clearing status bar");
-            ApplicationManager.getApplication().invokeLater(() -> {
-                HarbourLogger.log("HarbourLinter", "PROGRESS: Clearing status bar (complete)");
-                com.intellij.openapi.wm.WindowManager.getInstance()
-                    .getStatusBar(info.getProject())
-                    .setInfo("");
-            });
+            // Progress bar removed - nothing to clear
         }
         
         return results.isEmpty() ? null : results;
@@ -874,8 +876,52 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         if (document == null) {
             return;
         }
+        
+        // Get the exclusion comment from settings
+        HarbourSettings settings = HarbourSettings.getInstance(file.getProject());
+        String exclusionComment = settings.getLinterExclusionComment();
+        if (exclusionComment == null || exclusionComment.isEmpty()) {
+            exclusionComment = "noqa"; // Default
+        }
 
         for (HarbourLintResult result : annotationResult) {
+            // Check if this line should be excluded from linting
+            int errorLine = result.getLine() - 1; // Convert to 0-based
+            if (errorLine >= 0 && errorLine < document.getLineCount()) {
+                String lineText = document.getText(new TextRange(
+                    document.getLineStartOffset(errorLine),
+                    document.getLineEndOffset(errorLine)
+                ));
+                
+                // Check if line has a comment starting with the exclusion word
+                boolean shouldExclude = false;
+                
+                // Check for // style comments
+                int singleLineComment = lineText.indexOf("//");
+                if (singleLineComment != -1) {
+                    String commentText = lineText.substring(singleLineComment + 2).trim();
+                    if (commentText.startsWith(exclusionComment)) {
+                        shouldExclude = true;
+                    }
+                }
+                
+                // Check for /* style comments
+                if (!shouldExclude) {
+                    int multiLineComment = lineText.indexOf("/*");
+                    if (multiLineComment != -1) {
+                        String commentText = lineText.substring(multiLineComment + 2).trim();
+                        if (commentText.startsWith(exclusionComment)) {
+                            shouldExclude = true;
+                        }
+                    }
+                }
+                
+                if (shouldExclude) {
+                    HarbourLogger.log("HarbourLinter", "Skipping line " + (errorLine + 1) + 
+                        " due to exclusion comment: " + exclusionComment);
+                    continue; // Skip this error/warning
+                }
+            }
             TextRange range = null;
             
             // Check if this is an unused variable warning

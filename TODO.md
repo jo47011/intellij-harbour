@@ -25,3 +25,5 @@ Settings include path -> copy path feature
 ----
 
 Actually expected is unix style, make sure you use OS specific file separator everywhere.
+
+----
