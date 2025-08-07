@@ -71,7 +71,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Linting settings
     private boolean lintingEnabled = true; // Default to enabled
     private boolean lintOnSave = true; // Default to lint on save only
-    private String harbourCompilerPath = "harbour.exe"; // Path to harbour compiler
+    private String harbourCompilerPath = getDefaultHarbourCompilerPath(); // Path to harbour compiler
     private int lintWarningLevel = 1; // Default warning level
     private String lintExtraOptions = ""; // Extra compiler options for linting
     
@@ -81,6 +81,19 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public HarbourSettings() {
         // Empty constructor
+    }
+    
+    /**
+     * Get the default harbour compiler path based on the operating system
+     */
+    private static String getDefaultHarbourCompilerPath() {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("win")) {
+            return "harbour.exe";
+        } else {
+            // Unix/Linux/Mac - use just "harbour" without extension
+            return "harbour";
+        }
     }
 
     // Debug log path methods
