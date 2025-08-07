@@ -21,6 +21,8 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -82,6 +84,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     private static final long DEBOUNCE_DELAY_MS = 3000; // 3 second debounce for better performance
     private static final int MAX_FILE_SIZE_FOR_REALTIME = 100000; // 100KB limit for real-time linting
     
+    // Track files that have shown missing include notification
+    private static final Set<String> notifiedMissingIncludes = new HashSet<>();
+    
     /**
      * Called by the save listener to indicate that linting should be triggered for this file
      */
@@ -136,6 +141,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("//") || 
                 trimmedLine.startsWith("*") || trimmedLine.startsWith("/*")) continue;
             
+            // Skip lines that end with semicolon (line continuation in Harbour)
+            if (trimmedLine.endsWith(";")) continue;
+            
             // Check for LOCAL with trailing slash (like "LOCAL gaga /")
             if (localWithSlash.matcher(line).find()) {
                 results.add(new HarbourLintResult(
@@ -147,9 +155,20 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 ));
             }
             
+            // Check if previous line ends with semicolon (line continuation)
+            boolean isPreviousLineContinued = i > 0 && lines[i - 1].trim().endsWith(";");
+            
+            // Check if current line might be continued on next line
+            boolean mightContinue = i + 1 < lines.length && 
+                                    (line.endsWith(",") || line.endsWith("(") || 
+                                     line.endsWith("+") || line.endsWith("-") ||
+                                     (i + 1 < lines.length && lines[i + 1].trim().startsWith("+")));
+            
             // Check for unmatched quotes (like qout("bla or qout(asdfasd)
-            if (unmatchedQuoteInLine.matcher(line).find() || 
-                (line.contains("(") && line.matches(".*\\([^\"'\\)]*[a-zA-Z]+[^\"'\\)]*(?:\\s*$|\\s*//)"))) {
+            // Skip if this is part of a continued statement
+            if (!isPreviousLineContinued && !mightContinue &&
+                (unmatchedQuoteInLine.matcher(line).find() || 
+                (line.contains("(") && line.matches(".*\\([^\"'\\)]*[a-zA-Z]+[^\"'\\)]*(?:\\s*$|\\s*//)")))) {
                 results.add(new HarbourLintResult(
                     i + 1,
                     0,
@@ -160,7 +179,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             }
             
             // Check for unmatched parentheses
-            if (unmatchedParenPattern.matcher(line).find() && !line.contains(")")) {
+            // Skip if this is part of a continued statement
+            if (!isPreviousLineContinued && !mightContinue &&
+                unmatchedParenPattern.matcher(line).find() && !line.contains(")")) {
                 results.add(new HarbourLintResult(
                     i + 1,
                     0,
@@ -171,7 +192,8 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             }
             
             // Check for if without parentheses (like "If oo")
-            if (line.matches(".*\\b[Ii][Ff]\\s+\\w+\\s*$")) {
+            // Skip if this is part of a continued statement
+            if (!isPreviousLineContinued && line.matches(".*\\b[Ii][Ff]\\s+\\w+\\s*$")) {
                 results.add(new HarbourLintResult(
                     i + 1,
                     0,
@@ -182,7 +204,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             }
             
             // Check for qout with unquoted string
-            if (line.matches(".*\\bqout\\s*\\(\\s*[a-zA-Z]+.*") && 
+            // Skip if this is part of a continued statement
+            if (!isPreviousLineContinued && !mightContinue &&
+                line.matches(".*\\bqout\\s*\\(\\s*[a-zA-Z]+.*") && 
                 !line.matches(".*\\bqout\\s*\\(\\s*[\"'].*")) {
                 results.add(new HarbourLintResult(
                     i + 1,
@@ -252,6 +276,34 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         return results;
     }
     
+    /**
+     * Show notification about missing include files
+     */
+    private void showMissingIncludesNotification(Project project, Set<String> missingFiles, String currentFile) {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            StringBuilder message = new StringBuilder();
+            message.append("Missing include files detected in ")
+                   .append(new File(currentFile).getName())
+                   .append(":\n\n");
+            
+            for (String file : missingFiles) {
+                message.append("• ").append(file).append("\n");
+            }
+            
+            message.append("\nLinting will continue with available syntax checks.");
+            
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("Harbour Application")
+                .createNotification(
+                    "Missing Include Files",
+                    message.toString(),
+                    NotificationType.WARNING
+                )
+                .notify(project);
+        });
+    }
+    
+    // Method kept but not used anymore - can be removed later
     private List<HarbourLintResult> runWithCommentedIncludes(
             HarbourLintInfo info, Set<String> missingFiles, List<String> originalCommand) 
             throws IOException, InterruptedException {
@@ -555,32 +607,40 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
         
+        // Show progress in status bar
+        String fileName = new File(info.getFilePath()).getName();
+        HarbourLogger.log("HarbourLinter", "PROGRESS: Starting linting for " + fileName);
+        ApplicationManager.getApplication().invokeLater(() -> {
+            HarbourLogger.log("HarbourLinter", "PROGRESS: Setting status bar - Linting " + fileName + "...");
+            com.intellij.openapi.wm.WindowManager.getInstance()
+                .getStatusBar(info.getProject())
+                .setInfo("Linting " + fileName + "...");
+        });
+        
         // Check if we should use cached results
         if ("CACHED".equals(info.getFileContent())) {
             LintCache cached = cache.get(info.getFilePath());
+            // Clear status bar if using cache
+            HarbourLogger.log("HarbourLinter", "PROGRESS: Using cache, clearing status bar");
+            ApplicationManager.getApplication().invokeLater(() -> {
+                HarbourLogger.log("HarbourLinter", "PROGRESS: Clearing status bar (cache)");
+                com.intellij.openapi.wm.WindowManager.getInstance()
+                    .getStatusBar(info.getProject())
+                    .setInfo("");
+            });
             return cached != null ? cached.results : null;
         }
         
-        // Check if this is a quick syntax check
+        // DISABLED: Quick syntax check removed as it causes false positives
+        // The Harbour compiler is fast enough and more accurate
+        // User feedback: "do we still need the quick syntax checker?"
+        // Answer: No, it causes more problems than benefits
+        /*
         if (info.getFileContent() != null && info.getFileContent().startsWith("QUICK_CHECK:")) {
-            String content = info.getFileContent().substring("QUICK_CHECK:".length());
-            List<HarbourLintResult> quickResults = quickSyntaxCheck(content, info.getFilePath());
-            HarbourLogger.log("HarbourLinter", "Quick syntax check found " + quickResults.size() + " issues");
-            
-            // Cache quick results temporarily
-            if (!quickResults.isEmpty()) {
-                VirtualFile file = LocalFileSystem.getInstance().findFileByPath(info.getFilePath());
-                if (file != null) {
-                    cache.put(info.getFilePath(), new LintCache(
-                        info.getFilePath(),
-                        file.getModificationStamp(),
-                        quickResults
-                    ));
-                }
-            }
-            
-            return quickResults;
+            // Quick syntax check disabled - return empty results
+            return new ArrayList<>();
         }
+        */
 
         List<HarbourLintResult> results = new ArrayList<>();
         
@@ -692,7 +752,7 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                     .anyMatch(r -> r.getMessage().contains("Can't open #include file"));
                     
                 if (hasIncludeErrors) {
-                    HarbourLogger.log("HarbourLinter", "Include file errors found, adding quick syntax check");
+                    HarbourLogger.log("HarbourLinter", "Include file errors found");
                     
                     // Log include errors to console for visibility
                     Set<String> missingFiles = new HashSet<>();
@@ -734,49 +794,18 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                             HarbourLogger.warning("HarbourLinter", 
                                 "Missing: " + file + " (may be included indirectly)");
                         }
-                        HarbourLogger.warning("HarbourLinter", 
-                            "Running quick syntax check to provide additional feedback...");
-                    }
-                    
-                    // Always add quick syntax check results when there are include errors
-                    List<HarbourLintResult> quickResults = quickSyntaxCheck(info.getFilePath(), 
-                        new String(Files.readAllBytes(Paths.get(info.getFilePath())), StandardCharsets.UTF_8));
-                    results.addAll(quickResults);
-                    HarbourLogger.log("HarbourLinter", "Added " + quickResults.size() + " quick syntax check results");
-                    
-                    // Log summary to console
-                    if (!quickResults.isEmpty()) {
-                        HarbourLogger.warning("HarbourLinter", 
-                            "Found " + quickResults.size() + " additional issues via quick syntax check");
-                    }
-                    
-                    // Try full linting with problematic includes commented out
-                    if (!missingFiles.isEmpty()) {
-                        HarbourLogger.warning("HarbourLinter", 
-                            "Attempting full linting with missing includes commented out...");
                         
-                        try {
-                            List<HarbourLintResult> fullResults = runWithCommentedIncludes(
-                                info, missingFiles, command);
-                            
-                            if (!fullResults.isEmpty()) {
-                                HarbourLogger.warning("HarbourLinter", 
-                                    "Full linting found " + fullResults.size() + " additional issues");
-                                // Add non-duplicate results
-                                for (HarbourLintResult fullResult : fullResults) {
-                                    boolean isDuplicate = results.stream()
-                                        .anyMatch(r -> r.getLine() == fullResult.getLine() && 
-                                                      r.getMessage().equals(fullResult.getMessage()));
-                                    if (!isDuplicate) {
-                                        results.add(fullResult);
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                            HarbourLogger.warning("HarbourLinter", 
-                                "Could not run full linting with commented includes: " + e.getMessage());
+                        // Show notification popup once per file opening (not per lint)
+                        String fileKey = info.getFilePath();
+                        if (!notifiedMissingIncludes.contains(fileKey)) {
+                            notifiedMissingIncludes.add(fileKey);
+                            showMissingIncludesNotification(info.getProject(), missingFiles, info.getFilePath());
                         }
                     }
+                    
+                    // REMOVED: quick syntax check to prevent flicker
+                    // The compiler already gave us the include errors
+                    // No need to run additional linting that causes flicker
                 }
                 
             } catch (java.io.IOException e) {
@@ -805,11 +834,28 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                     lastLintTime.remove(info.getFilePath() + "_save_triggered");
                     HarbourLogger.log("HarbourLinter", "Cleared save trigger flag for: " + info.getFilePath());
                 }
+                
+                // Clear notification flag if we had a successful lint with no missing includes
+                boolean hasMissingIncludes = results.stream()
+                    .anyMatch(r -> r.getMessage().contains("Can't open #include file"));
+                if (!hasMissingIncludes && notifiedMissingIncludes.contains(info.getFilePath())) {
+                    notifiedMissingIncludes.remove(info.getFilePath());
+                    HarbourLogger.log("HarbourLinter", "Cleared missing include notification flag for: " + info.getFilePath());
+                }
             }
             
         } catch (Exception e) {
             LOG.error("Error running Harbour linter", e);
             HarbourLogger.log("HarbourLinter", "Error: " + e.getMessage());
+        } finally {
+            // Clear status bar when done
+            HarbourLogger.log("HarbourLinter", "PROGRESS: Linting complete, clearing status bar");
+            ApplicationManager.getApplication().invokeLater(() -> {
+                HarbourLogger.log("HarbourLinter", "PROGRESS: Clearing status bar (complete)");
+                com.intellij.openapi.wm.WindowManager.getInstance()
+                    .getStatusBar(info.getProject())
+                    .setInfo("");
+            });
         }
         
         return results.isEmpty() ? null : results;
@@ -858,9 +904,113 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 if (line < 0 || line >= document.getLineCount()) {
                     continue;
                 }
+                
+                // Check for line continuations (semicolon at end of previous lines)
+                // The compiler may report errors on the wrong line when using semicolons
+                // Look for the actual error location in multi-line statements
+                int actualLine = line;
+                
+                // Try to extract identifier from various error messages
+                String identifier = null;
+                if (message != null) {
+                    // Try different patterns to extract identifier
+                    Pattern[] patterns = {
+                        Pattern.compile("'([^']+)'"),                    // Most common: 'IDENTIFIER'
+                        Pattern.compile("\"([^\"]+)\""),                 // Sometimes: "IDENTIFIER"
+                        Pattern.compile("\\b([A-Z_][A-Z0-9_]*)\\b")     // Fallback: uppercase identifier
+                    };
+                    
+                    for (Pattern pattern : patterns) {
+                        Matcher matcher = pattern.matcher(message);
+                        if (matcher.find()) {
+                            identifier = matcher.group(1);
+                            break;
+                        }
+                    }
+                }
+                
+                // If we found an identifier, search for it in previous lines with continuations
+                if (identifier != null) {
+                    // Check if previous lines end with semicolon (line continuation)
+                    int checkLine = line;
+                    boolean inContinuation = false;
+                    
+                    // First check if current line is part of a continuation
+                    while (checkLine > 0) {
+                        checkLine--;
+                        String prevLineText = document.getText(new TextRange(
+                            document.getLineStartOffset(checkLine),
+                            document.getLineEndOffset(checkLine)
+                        )).trim();
+                        
+                        // Skip empty lines and comments
+                        if (prevLineText.isEmpty() || prevLineText.startsWith("//") || prevLineText.startsWith("*")) {
+                            continue;
+                        }
+                        
+                        // Check if this line contains the identifier
+                        if (prevLineText.toUpperCase().contains(identifier.toUpperCase())) {
+                            actualLine = checkLine;
+                            HarbourLogger.log("HarbourLinter", 
+                                "Found actual error location at line " + (actualLine + 1) + " for: " + identifier);
+                            break;
+                        }
+                        
+                        // If this line doesn't end with semicolon, we're not in a continuation anymore
+                        if (!prevLineText.endsWith(";")) {
+                            break;
+                        }
+                        
+                        inContinuation = true;
+                    }
+                    
+                    // If we didn't find it in previous lines, check following lines if current line ends with ;
+                    if (actualLine == line && line < document.getLineCount() - 1) {
+                        String currentLineText = document.getText(new TextRange(
+                            document.getLineStartOffset(line),
+                            document.getLineEndOffset(line)
+                        )).trim();
+                        
+                        if (currentLineText.endsWith(";")) {
+                            checkLine = line;
+                            while (checkLine < document.getLineCount() - 1) {
+                                checkLine++;
+                                String nextLineText = document.getText(new TextRange(
+                                    document.getLineStartOffset(checkLine),
+                                    document.getLineEndOffset(checkLine)
+                                )).trim();
+                                
+                                // Check if this line contains the identifier
+                                if (nextLineText.toUpperCase().contains(identifier.toUpperCase())) {
+                                    actualLine = checkLine;
+                                    HarbourLogger.log("HarbourLinter", 
+                                        "Found actual error location at line " + (actualLine + 1) + " for: " + identifier);
+                                    break;
+                                }
+                                
+                                // Stop if we reach a line that doesn't look like a continuation
+                                if (!nextLineText.isEmpty() && !nextLineText.startsWith("//") && 
+                                    !nextLineText.startsWith("*") && !nextLineText.startsWith("+") &&
+                                    !nextLineText.startsWith("-") && !nextLineText.startsWith("/") &&
+                                    !nextLineText.startsWith(".")) {
+                                    // Check if previous line ended with semicolon
+                                    if (checkLine > line + 1) {
+                                        String prevLine = document.getText(new TextRange(
+                                            document.getLineStartOffset(checkLine - 1),
+                                            document.getLineEndOffset(checkLine - 1)
+                                        )).trim();
+                                        if (!prevLine.endsWith(";")) {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
-                int lineStartOffset = document.getLineStartOffset(line);
-                int lineEndOffset = document.getLineEndOffset(line);
+                int lineStartOffset = document.getLineStartOffset(actualLine);
+                int lineEndOffset = document.getLineEndOffset(actualLine);
                 
                 // Create text range for the entire line
                 range = new TextRange(lineStartOffset, lineEndOffset);

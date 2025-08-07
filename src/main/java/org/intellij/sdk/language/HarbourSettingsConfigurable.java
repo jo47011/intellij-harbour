@@ -16,6 +16,7 @@ import com.intellij.ui.AnActionButtonRunnable;
 import com.intellij.ui.CollectionListModel;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBList;
+import com.intellij.icons.AllIcons;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -180,7 +181,13 @@ public class HarbourSettingsConfigurable implements Configurable {
                 .setAddAction(createAddPathAction())
                 .setRemoveAction(createRemovePathAction())
                 .setMoveUpAction(anActionButton -> moveIncludePath(-1))
-                .setMoveDownAction(anActionButton -> moveIncludePath(1));
+                .setMoveDownAction(anActionButton -> moveIncludePath(1))
+                .addExtraAction(new AnActionButton("Copy Path", AllIcons.Actions.Copy) {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e) {
+                        copySelectedIncludePath();
+                    }
+                });
 
         JPanel includePathsListPanel = new JPanel(new BorderLayout());
         includePathsListPanel.add(
@@ -385,7 +392,11 @@ public class HarbourSettingsConfigurable implements Configurable {
         
         // Explanation below the label
         constraints.gridy = 3;
-        JLabel compilerPathExplanation = new JLabel("<html><i>Use harbour.exe (the compiler), not hbmk2.exe (the build tool)</i></html>");
+        String os = System.getProperty("os.name").toLowerCase();
+        String compilerName = os.contains("win") ? "harbour.exe" : "harbour";
+        String buildToolName = os.contains("win") ? "hbmk2.exe" : "hbmk2";
+        String examplePath = os.contains("win") ? "C:\\harbour\\bin\\harbour.exe" : "/usr/local/bin/harbour";
+        JLabel compilerPathExplanation = new JLabel("<html><i>Use " + compilerName + " (the compiler), not " + buildToolName + " (the build tool)</i></html>");
         compilerPathExplanation.setFont(compilerPathExplanation.getFont().deriveFont(Font.ITALIC));
         settingsPanel.add(compilerPathExplanation, constraints);
 
@@ -394,7 +405,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridy = 4;
         constraints.gridwidth = 2;
         myHarbourCompilerPathField = new JTextField();
-        myHarbourCompilerPathField.setToolTipText("Path to harbour.exe (the compiler), NOT hbmk2.exe (the build tool). Example: C:\\harbour\\bin\\harbour.exe");
+        myHarbourCompilerPathField.setToolTipText("Path to " + compilerName + " (the compiler), NOT " + buildToolName + " (the build tool). Example: " + examplePath);
         JPanel compilerPathPanel = new JPanel(new BorderLayout());
         compilerPathPanel.add(myHarbourCompilerPathField, BorderLayout.CENTER);
 
@@ -402,7 +413,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         browseCompilerButton.addActionListener(e -> {
             FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor();
             descriptor.setTitle("Select Harbour Compiler");
-            descriptor.setDescription("Select harbour.exe (the compiler), NOT hbmk2.exe. Usually located in harbour/bin directory.");
+            descriptor.setDescription("Select " + compilerName + " (the compiler), NOT " + buildToolName + ". Usually located in harbour/bin directory.");
             
             VirtualFile[] selectedFiles = FileChooserFactory.getInstance()
                     .createFileChooser(descriptor, myProject, null)
@@ -515,6 +526,33 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Update selection
         myIncludePathsList.setSelectedIndex(newIndex);
+    }
+    
+    /**
+     * Copy the selected include path to clipboard
+     */
+    private void copySelectedIncludePath() {
+        int selectedIndex = myIncludePathsList.getSelectedIndex();
+        if (selectedIndex < 0) {
+            Messages.showWarningDialog(
+                myMainPanel,
+                "Please select a path to copy",
+                "No Selection"
+            );
+            return;
+        }
+        
+        String selectedPath = myIncludePathsModel.getElementAt(selectedIndex);
+        
+        // Copy to clipboard
+        java.awt.datatransfer.StringSelection selection = new java.awt.datatransfer.StringSelection(selectedPath);
+        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+        
+        Messages.showInfoMessage(
+            myMainPanel,
+            "Path copied to clipboard:\n" + selectedPath,
+            "Path Copied"
+        );
     }
 
     private AnActionButtonRunnable createAddPathAction() {

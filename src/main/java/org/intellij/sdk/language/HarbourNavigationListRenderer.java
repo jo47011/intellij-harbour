@@ -19,6 +19,15 @@ import java.awt.*;
  */
 public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiElement> {
     private static final String COMPONENT = "NavigationRenderer";
+    private final String searchedFunctionName;
+    
+    public HarbourNavigationListRenderer() {
+        this(null);
+    }
+    
+    public HarbourNavigationListRenderer(String searchedFunctionName) {
+        this.searchedFunctionName = searchedFunctionName;
+    }
 
     @Override
     protected void customizeCellRenderer(@NotNull JList<? extends PsiElement> list,
@@ -37,9 +46,8 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
                 String elementName = navElement.getElementName();
                 // Check if this is a "Load All" element
                 if (elementName != null && elementName.contains("more results")) {
-                    // Render as clickable text with arrow down icon
+                    // Render as clickable text (arrow is already in the message)
                     append("    ", SimpleTextAttributes.REGULAR_ATTRIBUTES); // Indent
-                    append("▼ ", SimpleTextAttributes.LINK_ATTRIBUTES); // Arrow down icon
                     append(elementName, SimpleTextAttributes.LINK_ATTRIBUTES);
                 } else {
                     // Regular separator line
@@ -81,7 +89,7 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             }
             
             // Apply syntax highlighting to padded code portion
-            applySyntaxHighlighting(paddedCode);
+            applySyntaxHighlighting(paddedCode, navElement.getLineNumber());
 
             // Definition indicator removed as requested
         }
@@ -134,7 +142,7 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
     /**
      * Apply Harbour syntax highlighting to code text using SimpleColoredComponent
      */
-    private void applySyntaxHighlighting(String codeText) {
+    private void applySyntaxHighlighting(String codeText, int lineNumber) {
         try {
             // Use the existing Harbour syntax highlighter
             HarbourSyntaxHighlighter highlighter = new HarbourSyntaxHighlighter();
@@ -174,15 +182,45 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
                     }
                 }
 
-                // Append the token with appropriate styling
-                append(tokenText, attributes);
+                // Check if this token matches the searched function name
+                if (searchedFunctionName != null && tokenText.equalsIgnoreCase(searchedFunctionName)) {
+                    // Highlight the searched function using Local Function color from settings
+                    Color highlightColor = null;
+                    try {
+                        TextAttributes localFuncAttrs = scheme.getAttributes(HarbourSyntaxHighlighter.LOCAL_FUNCTION);
+                        if (localFuncAttrs != null && localFuncAttrs.getForegroundColor() != null) {
+                            highlightColor = localFuncAttrs.getForegroundColor();
+                        }
+                    } catch (Exception ex) {
+                        // Ignore and use default
+                    }
+                    if (highlightColor == null) {
+                        highlightColor = new Color(0, 102, 204); // Default blue if not found
+                    }
+                    
+                    SimpleTextAttributes highlightAttributes = new SimpleTextAttributes(
+                        attributes.getBgColor(),
+                        highlightColor,
+                        attributes.getWaveColor(),
+                        attributes.getStyle() | SimpleTextAttributes.STYLE_BOLD
+                    );
+                    append(tokenText, highlightAttributes);
+                } else {
+                    // Append the token with normal styling
+                    append(tokenText, attributes);
+                }
                 lexer.advance();
             }
 
         } catch (Exception e) {
             HarbourLogger.log(COMPONENT, "Failed to apply syntax highlighting: " + e.getMessage());
             // Fallback to plain text
-            append(codeText, SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            // Fallback: if we have a searched function, try simple text matching
+            if (searchedFunctionName != null) {
+                highlightSearchedFunctionInPlainText(codeText);
+            } else {
+                append(codeText, SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            }
         }
     }
 
@@ -214,5 +252,49 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
         
         // Add some reasonable limit to prevent extremely wide columns
         return Math.min(maxWidth, 30);
+    }
+    
+    /**
+     * Highlight searched function in plain text when syntax highlighting fails
+     */
+    private void highlightSearchedFunctionInPlainText(String codeText) {
+        String lowerText = codeText.toLowerCase();
+        String lowerSearch = searchedFunctionName.toLowerCase();
+        int index = lowerText.indexOf(lowerSearch);
+        
+        if (index >= 0) {
+            // Found the function name
+            if (index > 0) {
+                append(codeText.substring(0, index), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            }
+            
+            // Highlight the function name using Local Function color from settings
+            Color highlightColor = null;
+            try {
+                EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+                TextAttributes localFuncAttrs = scheme.getAttributes(HarbourSyntaxHighlighter.LOCAL_FUNCTION);
+                if (localFuncAttrs != null && localFuncAttrs.getForegroundColor() != null) {
+                    highlightColor = localFuncAttrs.getForegroundColor();
+                }
+            } catch (Exception ex) {
+                // Ignore and use default
+            }
+            if (highlightColor == null) {
+                highlightColor = new Color(0, 102, 204); // Default blue if not found
+            }
+            
+            SimpleTextAttributes highlightAttributes = new SimpleTextAttributes(
+                SimpleTextAttributes.STYLE_BOLD,
+                highlightColor
+            );
+            append(codeText.substring(index, index + searchedFunctionName.length()), highlightAttributes);
+            
+            if (index + searchedFunctionName.length() < codeText.length()) {
+                append(codeText.substring(index + searchedFunctionName.length()), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            }
+        } else {
+            // Function name not found, render as plain text
+            append(codeText, SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        }
     }
 }

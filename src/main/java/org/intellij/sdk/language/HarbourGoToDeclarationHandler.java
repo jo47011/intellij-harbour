@@ -799,6 +799,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 // On click: Show our custom popup with Max Navigation Results limiting
                 HarbourLogger.log(COMPONENT, "CLICK EVENT - showing custom navigation popup");
                 
+                // Create a final copy for use in lambda
+                final String searchedFunctionName = identifierName;
+                
                 ApplicationManager.getApplication().invokeLater(() -> {
                     List<PsiElement> targets = navigationElements.stream()
                             .filter(e -> {
@@ -818,7 +821,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             })
                             .map(e -> (PsiElement) e)
                             .collect(Collectors.toList());
-                    HarbourNavigationPopup.showNavigationPopup(targets, editor);
+                    HarbourNavigationPopup.showNavigationPopup(targets, editor, searchedFunctionName);
                 });
                 
                 // Return null on click to prevent IntelliJ's popup from also showing
