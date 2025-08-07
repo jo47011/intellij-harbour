@@ -140,10 +140,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
-        int identPos = lineText.indexOf(identifierName);
+        // Case-insensitive search for the identifier
+        String lineUpper = lineText.toUpperCase();
+        String identifierUpper = identifierName.toUpperCase();
+        int identPos = lineUpper.indexOf(identifierUpper);
         if (identPos >= 0) {
             // Look for opening parenthesis after the identifier
-            for (int i = identPos + identifierName.length(); i < lineText.length(); i++) {
+            for (int i = identPos + identifierUpper.length(); i < lineText.length(); i++) {
                 if (Character.isWhitespace(lineText.charAt(i))) {
                     continue; // Skip whitespace
                 }
@@ -161,6 +164,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     @Override
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
         long timestamp = System.currentTimeMillis();
+        
         HarbourLogger.log(COMPONENT, ">>>>>>> HANDLER ENTRY POINT [" + timestamp + "] ELEMENT: '" + 
                 (element != null ? element.getText() : "NULL") + "' <<<<<<<");
         
@@ -174,17 +178,15 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         } catch (Exception e) {
             HarbourLogger.log(COMPONENT, "Exception in getGotoDeclarationTargets: " + e.getMessage());
             HarbourLogger.log(COMPONENT, "<<<<<<< HANDLER EXIT POINT [" + timestamp + "] EXCEPTION: " + e.getClass().getSimpleName() + " <<<<<<<");
-            // Always return dummy element to prevent "Cannot find declaration" popup
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element != null ? element : new HarbourDummyPsiElement(null, false, "Error"), false, "Navigation error occurred");
-            return new PsiElement[] { dummy };
+            // Return empty array to prevent any popups on errors
+            return PsiElement.EMPTY_ARRAY;
         }
     }
     
     private PsiElement[] doGetGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
         if (element == null) {
             HarbourLogger.log(COMPONENT, "Element is null");
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(null, false, "No element to navigate");
-            return new PsiElement[] { dummy };
+            return PsiElement.EMPTY_ARRAY;
         }
 
         String osName = System.getProperty("os.name");
@@ -195,8 +197,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         PsiFile file = element.getContainingFile();
         if (!(file instanceof HarbourFile)) {
             HarbourLogger.log(COMPONENT, "Not a Harbour file: " + (file != null ? file.getName() : "null"));
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Not a Harbour file");
-            return new PsiElement[] { dummy };
+            return PsiElement.EMPTY_ARRAY;
         }
 
         // Special case: If we're clicking on FUNCTION or PROCEDURE keyword,
@@ -222,11 +223,19 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
+        // Check if this is a keyword that should not have navigation
+        if (element instanceof LeafPsiElement) {
+            String elementText = element.getText();
+            if (isKeyword(elementText)) {
+                HarbourLogger.log(COMPONENT, "Skipping keyword navigation: " + elementText);
+                return PsiElement.EMPTY_ARRAY;
+            }
+        }
+
         // Check if this is an identifier token or string literal (for includes)
         if (!(element instanceof LeafPsiElement)) {
             HarbourLogger.log(COMPONENT, "Not a LeafPsiElement: " + element.getClass().getName());
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Invalid element type");
-            return new PsiElement[] { dummy };
+            return PsiElement.EMPTY_ARRAY;
         }
 
         // Get current location information - for filtering
@@ -257,10 +266,24 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
+        // CRITICAL FIX: Check for comment elements first - they should NOT get any navigation
+        if (element instanceof PsiComment || element.getClass().getName().contains("Comment")) {
+            HarbourLogger.log(COMPONENT, "COMMENT ELEMENT DETECTED - returning empty array: " + element.getClass().getName());
+            return PsiElement.EMPTY_ARRAY;
+        }
+        
         if (leafElement.getElementType() != HarbourTypes.IDENT) {
-            HarbourLogger.log(COMPONENT, "Not an IDENT element: " + leafElement.getElementType());
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Not an identifier");
-            return new PsiElement[] { dummy };
+            // Check if this is a keyword token type (like ENDIF, ENDDO, etc.)
+            String tokenTypeName = leafElement.getElementType().toString();
+            if (isKeywordTokenType(tokenTypeName)) {
+                HarbourLogger.log(COMPONENT, "Element is a keyword token, not navigable: " + tokenTypeName);
+                return PsiElement.EMPTY_ARRAY;
+            }
+            
+            // CRITICAL FIX: For non-IDENT elements that are not comments or keywords, 
+            // return empty array instead of dummy to prevent underlines
+            HarbourLogger.log(COMPONENT, "Non-IDENT element (not comment/keyword): " + leafElement.getElementType() + " - returning empty array");
+            return PsiElement.EMPTY_ARRAY;
         }
 
         String identifierName = leafElement.getText();
@@ -295,7 +318,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourLogger.log(COMPONENT, "DEBUG: Clicked identifier: '" + identifierName + "'");
                 
                 // Check if we're clicking on the property part (after colon)
-                if (afterColon.trim().equals(identifierName)) {
+                if (afterColon.trim().equalsIgnoreCase(identifierName)) {
                     // Clicking on the property part (e.g., date)
                     HarbourLogger.log(COMPONENT, "DEBUG: Clicking on property part of PropertyAccess: " + identifierName);
                     
@@ -303,7 +326,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     String objectPart = beforeColon.trim();
                     HarbourLogger.log(COMPONENT, "DEBUG: Resolving property '" + identifierName + "' of object: '" + objectPart + "'");
                     return resolvePropertyAccess(leafElement, objectPart, identifierName, currentLocationKey);
-                } else if (beforeColon.contains(identifierName)) {
+                } else if (beforeColon.toUpperCase().contains(identifierName.toUpperCase())) {
                     // Clicking on the function/object part (e.g., getUser())
                     HarbourLogger.log(COMPONENT, "DEBUG: Clicking on object/function part of PropertyAccess: " + identifierName);
                     HarbourLogger.log(COMPONENT, "DEBUG: Will continue with normal function resolution for: " + identifierName);
@@ -325,10 +348,37 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourFunctionClassificationService classificationService = 
                     HarbourFunctionClassificationService.getInstance(file.getProject());
                 if (classificationService.isExternalFunction(identifierName)) {
-                    HarbourLogger.log(COMPONENT, "External function detected: " + identifierName + " - delegating to external handler");
-                    // Return null to let external documentation handler take over
-                    // The external handler is responsible for preventing the popup and opening browser
-                    return null;
+                    HarbourLogger.log(COMPONENT, "External function detected: " + identifierName);
+                    
+                    // Check if this is a click event
+                    boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+                    
+                    if (isClick) {
+                        // On click: Open browser documentation
+                        HarbourLogger.log(COMPONENT, "CLICK EVENT - opening browser for: " + identifierName);
+                        HarbourDocumentationProvider docProvider = new HarbourDocumentationProvider();
+                        boolean browserOpened = docProvider.openExternalDocumentation(file.getProject(), identifierName);
+                        
+                        if (browserOpened) {
+                            HarbourLogger.log(COMPONENT, "Browser opened successfully");
+                        } else {
+                            HarbourLogger.log(COMPONENT, "Failed to open browser");
+                        }
+                    } else {
+                        // On hover: Just provide underlines, no browser
+                        HarbourLogger.log(COMPONENT, "HOVER EVENT - providing underlines only for: " + identifierName);
+                    }
+                    
+                    // Create a proper navigation element for underlines (both hover and click)
+                    HarbourLogger.log(COMPONENT, "Creating navigation element for external function underlines");
+                    HarbourNavigationElement navElement = new HarbourNavigationElement(
+                        leafElement,
+                        "External: " + identifierName,
+                        file.getVirtualFile().getPath(),
+                        editor.getDocument().getLineNumber(leafElement.getTextOffset()) + 1,
+                        "External function"
+                    );
+                    return new PsiElement[] { navElement };
                 }
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Error checking function classification: " + e.getMessage());
@@ -378,8 +428,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Next check if this is a method reference
         boolean isMethod = false;
         if (lineText != null) {
-            // Check if there's a colon immediately before the identifier (method call pattern)
-            int identPos = lineText.indexOf(identifierName);
+            // Check if there's a colon immediately before the identifier (method call pattern, case-insensitive)
+            int identPos = lineText.toUpperCase().indexOf(identifierName.toUpperCase());
             boolean hasColonBefore = false;
             
             if (identPos > 0) {
@@ -646,11 +696,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        // If we have no valid elements, return dummy to prevent default handlers
+        // If we have no valid elements, return empty array to prevent ANY popups
         if (definitionElements.isEmpty() && callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning dummy to prevent popup");
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No navigation targets found for: " + identifierName);
-            return new PsiElement[] { dummy };
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning empty array to prevent ALL popups");
+            return PsiElement.EMPTY_ARRAY;
         }
 
         // If we only have calls but no definitions, show the calls (for variables, these are references)
@@ -720,65 +769,89 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         navigationElements.addAll(callElements);
 
-        // If we have exactly one navigation element after filtering, return it directly
-        // This avoids showing a popup when there's only one valid target
+        // If we have exactly one navigation element after filtering, check for hover vs click
         if (navigationElements.size() == 1) {
-            HarbourLogger.log(COMPONENT, "Only one target remains after filtering, navigating directly");
+            // Check if this is an actual click event, not just hover
+            boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+            HarbourLogger.log(COMPONENT, "Single target found - Click mode: " + isClick);
+            
+            // Always return single target to ensure underlines work
+            // Popup prevention is handled elsewhere
+            
+            HarbourLogger.log(COMPONENT, "Single target click event - navigating directly");
             PsiElement[] singleTarget = navigationElements.toArray(new PsiElement[0]);
             // Safety check - ensure we actually have the element
             if (singleTarget.length == 0) {
-                HarbourLogger.log(COMPONENT, "WARNING: navigationElements had size 1 but toArray returned empty - returning dummy");
-                HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "Single target error");
-                return new PsiElement[] { dummy };
+                HarbourLogger.log(COMPONENT, "WARNING: navigationElements had size 1 but toArray returned empty - returning empty array");
+                return PsiElement.EMPTY_ARRAY;
             }
             return singleTarget;
         }
 
-        // If we have multiple targets, show custom popup with syntax highlighting
+        // If we have multiple targets, check hover vs click behavior
         if (navigationElements.size() > 1) {
-            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + "), showing custom popup");
+            HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + ")");
             
-            // GoToDeclarationHandler is only called for actual navigation requests (Ctrl+Click)
-            // so we don't need to check for hover vs click - if we're here, it's a click
-            HarbourLogger.log(COMPONENT, "Navigation handler called - showing custom popup");
-            ApplicationManager.getApplication().invokeLater(() -> {
-                List<PsiElement> targets = navigationElements.stream()
-                        .filter(e -> {
-                            // Filter out navigation elements that point to empty lines or comments
-                            if (e instanceof HarbourNavigationElement) {
-                                HarbourNavigationElement navElement = (HarbourNavigationElement) e;
-                                
-                                // Always keep separator elements
-                                if (navElement.isSeparator()) {
-                                    HarbourLogger.log(COMPONENT, "Keeping separator element");
-                                    return true;
-                                }
-                                
-                                String lineContent = navElement.readLineFromFile(navElement.getFilePath(), navElement.getLineNumber());
-                                if (lineContent == null) {
-                                    HarbourLogger.log(COMPONENT, "Filtered out navigation element at " + 
-                                            navElement.getFilePath() + ":" + navElement.getLineNumber() + " (empty/comment line)");
-                                    return false; // Filter out this element
-                                }
-                            }
-                            return true; // Keep this element
-                        })
-                        .map(e -> (PsiElement) e)
-                        .collect(Collectors.toList());
-                HarbourNavigationPopup.showNavigationPopup(targets, editor);
-            });
+            // Check if this is a click event
+            boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
             
-            return new PsiElement[0]; // Return empty array to prevent default popup
+            if (isClick) {
+                // On click: Show our custom popup with Max Navigation Results limiting
+                HarbourLogger.log(COMPONENT, "CLICK EVENT - showing custom navigation popup");
+                
+                // Create a final copy for use in lambda
+                final String searchedFunctionName = identifierName;
+                
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    List<PsiElement> targets = navigationElements.stream()
+                            .filter(e -> {
+                                // Filter out navigation elements that point to empty lines or comments
+                                if (e instanceof HarbourNavigationElement) {
+                                    HarbourNavigationElement navElement = (HarbourNavigationElement) e;
+                                    
+                                    // Always keep separator elements
+                                    if (navElement.isSeparator()) {
+                                        return true;
+                                    }
+                                    
+                                    String lineContent = navElement.readLineFromFile(navElement.getFilePath(), navElement.getLineNumber());
+                                    return lineContent != null;
+                                }
+                                return true;
+                            })
+                            .map(e -> (PsiElement) e)
+                            .collect(Collectors.toList());
+                    HarbourNavigationPopup.showNavigationPopup(targets, editor, searchedFunctionName);
+                });
+                
+                // Return null on click to prevent IntelliJ's popup from also showing
+                HarbourLogger.log(COMPONENT, "Returning null on click to prevent IntelliJ popup");
+                return null;
+            } else {
+                // On hover: Return only the first element to prevent "Multiple implementations" popup
+                HarbourLogger.log(COMPONENT, "HOVER EVENT - returning single element to prevent popup");
+                
+                // Return only the primary definition (first element) during hover
+                if (!navigationElements.isEmpty()) {
+                    PsiElement primaryElement = navigationElements.get(0);
+                    HarbourLogger.log(COMPONENT, "HOVER RESULT: Returning single element: " + primaryElement.getText());
+                    HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (HOVER SUCCESS) ===");
+                    return new PsiElement[]{primaryElement};
+                } else {
+                    HarbourLogger.log(COMPONENT, "HOVER RESULT: No elements found - returning empty array");
+                    HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (HOVER FAILED) ===");
+                    return PsiElement.EMPTY_ARRAY;
+                }
+            }
         }
 
         HarbourLogger.log(COMPONENT, "FINAL RESULT: Returning " + navigationElements.size() + " sorted navigation targets");
         
         // If we have no elements at all, return a dummy to prevent "Cannot find declaration" popup
         if (navigationElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "ERROR: No navigation elements found - returning dummy to prevent popup");
+            HarbourLogger.log(COMPONENT, "ERROR: No navigation elements found - returning empty array to prevent ALL popups");
             HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (FAILED) ===");
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No navigation targets found");
-            return new PsiElement[] { dummy };
+            return PsiElement.EMPTY_ARRAY;
         }
         
         HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (SUCCESS) ===");
@@ -987,14 +1060,16 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // Check if this line contains a pattern like "ClassName():new()"
         // This is the Harbour pattern for class instantiation
-        // First, find where our element appears in the line
-        int elementPos = lineText.indexOf(text);
+        // First, find where our element appears in the line (case-insensitive)
+        String lineUpper = lineText.toUpperCase();
+        String textUpper = text.toUpperCase();
+        int elementPos = lineUpper.indexOf(textUpper);
         if (elementPos < 0) {
             return false;
         }
 
         // Now check if it's followed by "():new()" pattern
-        String afterText = lineText.substring(elementPos + text.length());
+        String afterText = lineText.substring(elementPos + textUpper.length());
         Pattern classPattern = Pattern.compile("\\s*\\(\\s*\\)\\s*:\\s*new\\s*\\(");
 
         boolean isClass = classPattern.matcher(afterText).find();
@@ -1038,8 +1113,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
 
-        // Find where our element appears in the line
-        int pos = lineText.indexOf(text);
+        // Find where our element appears in the line (case-insensitive)
+        int pos = lineText.toUpperCase().indexOf(text.toUpperCase());
         if (pos <= 0) {
             return false;
         }
@@ -1872,18 +1947,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             
             // Check if this line is within our scope
             if (lineNum >= scopeStart && lineNum <= scopeEnd) {
-                // Simple regex to find the variable name as a whole word
-                if (line.matches(".*\\b" + variableName + "\\b.*")) {
-                    // Find all occurrences of the variable in this line
+                // Case-insensitive regex to find the variable name as a whole word
+                if (line.toUpperCase().matches(".*\\b" + variableName.toUpperCase() + "\\b.*")) {
+                    // Find all occurrences of the variable in this line (case-insensitive)
+                    String lineUpper = line.toUpperCase();
+                    String variableUpper = variableName.toUpperCase();
                     int pos = 0;
-                    while ((pos = line.indexOf(variableName, pos)) >= 0) {
+                    while ((pos = lineUpper.indexOf(variableUpper, pos)) >= 0) {
                         // Check if it's a whole word (not part of another identifier)
                         boolean isWholeWord = true;
                         if (pos > 0 && Character.isLetterOrDigit(line.charAt(pos - 1))) {
                             isWholeWord = false;
                         }
-                        if (pos + variableName.length() < line.length() && 
-                            Character.isLetterOrDigit(line.charAt(pos + variableName.length()))) {
+                        if (pos + variableUpper.length() < line.length() && 
+                            Character.isLetterOrDigit(line.charAt(pos + variableUpper.length()))) {
                             isWholeWord = false;
                         }
                         
@@ -1900,14 +1977,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             if (!(trimmedLine.startsWith("//") || trimmedLine.startsWith("/*"))) {
                                 // Find the PsiElement at this offset
                                 PsiElement foundElement = file.findElementAt(elementOffset);
-                                if (foundElement != null && variableName.equals(foundElement.getText())) {
+                                if (foundElement != null && variableName.equalsIgnoreCase(foundElement.getText())) {
                                     results.add(foundElement);
                                 }
                             } else {
                                 HarbourLogger.log(COMPONENT, "VARIABLE SEARCH: Skipping comment line " + (lineNum + 1) + " in " + file.getName() + " -> Content: '" + trimmedLine + "'");
                             }
                         }
-                        pos += variableName.length();
+                        pos += variableUpper.length();
                     }
                 }
             }
@@ -2008,8 +2085,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         if (navigationElements.isEmpty()) {
             HarbourLogger.log(COMPONENT, "No valid navigation targets found for DATA field: " + variableName);
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(element, false, "No DATA field found: " + variableName);
-            return new PsiElement[] { dummy };
+            return PsiElement.EMPTY_ARRAY;
         }
 
         HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " DATA field targets for: " + variableName);
@@ -2156,8 +2232,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         if (navigationElements.isEmpty()) {
             HarbourLogger.log(COMPONENT, "No valid navigation targets found for DATA field usages: " + fieldName);
-            HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(null, false, "No DATA field usages: " + fieldName);
-            return new PsiElement[] { dummy };
+            return PsiElement.EMPTY_ARRAY;
         }
 
         HarbourLogger.log(COMPONENT, "Found " + navigationElements.size() + " usage targets for DATA field: " + fieldName);
@@ -2396,8 +2471,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
         
         HarbourLogger.log(COMPONENT, "No property navigation targets found");
-        HarbourDummyPsiElement dummy = new HarbourDummyPsiElement(null, false, "No property targets found");
-        return new PsiElement[] { dummy };
+        return PsiElement.EMPTY_ARRAY;
     }
 
     /**
@@ -2453,12 +2527,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (lineText != null) {
             HarbourLogger.log(COMPONENT, "DEBUG-FC: Line text for '" + identifierName + "': " + lineText.trim());
             
-            int pos = lineText.indexOf(identifierName);
+            String lineUpper = lineText.toUpperCase();
+            String identifierUpper = identifierName.toUpperCase();
+            int pos = lineUpper.indexOf(identifierUpper);
             if (pos >= 0) {
                 HarbourLogger.log(COMPONENT, "DEBUG-FC: Found '" + identifierName + "' at position " + pos + " in line");
                 
                 // Look for opening parenthesis after the identifier
-                int afterIdentifier = pos + identifierName.length();
+                int afterIdentifier = pos + identifierUpper.length();
                 StringBuilder nextChars = new StringBuilder();
                 
                 for (int i = afterIdentifier; i < lineText.length() && i < afterIdentifier + 10; i++) {
@@ -2509,11 +2585,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return false;
         }
         
-        // Find the identifier in the line and check what follows it
-        int pos = lineText.indexOf(identifierName);
+        // Find the identifier in the line and check what follows it (case-insensitive)
+        String lineUpper = lineText.toUpperCase();
+        String identifierUpper = identifierName.toUpperCase();
+        int pos = lineUpper.indexOf(identifierUpper);
         if (pos >= 0) {
             // Look for opening parenthesis after the identifier
-            int afterIdentifier = pos + identifierName.length();
+            int afterIdentifier = pos + identifierUpper.length();
             
             for (int i = afterIdentifier; i < lineText.length(); i++) {
                 char c = lineText.charAt(i);
@@ -2530,6 +2608,113 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 }
                 break; // Stop at first non-whitespace character
             }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Checks if the token type represents a keyword.
+     * Keywords have their own token types like ENDIF, ENDDO, etc.
+     */
+    private boolean isKeywordTokenType(String tokenType) {
+        if (tokenType == null) {
+            return false;
+        }
+        
+        // Check common keyword token types
+        return tokenType.equals("ENDIF") || tokenType.equals("ENDDO") || 
+               tokenType.equals("ENDFUNCTION") || tokenType.equals("ENDPROC") ||
+               tokenType.equals("ENDFUNC") || tokenType.equals("ENDCLASS") ||
+               tokenType.equals("ENDMETHOD") || tokenType.equals("ENDSWITCH") ||
+               tokenType.equals("IF") || tokenType.equals("ELSE") || 
+               tokenType.equals("ELSEIF") || tokenType.equals("DO") ||
+               tokenType.equals("WHILE") || tokenType.equals("FOR") ||
+               tokenType.equals("NEXT") || tokenType.equals("CASE") ||
+               tokenType.equals("OTHERWISE") || tokenType.equals("SWITCH") ||
+               tokenType.equals("BEGIN") || tokenType.equals("SEQUENCE") ||
+               tokenType.equals("RECOVER") || tokenType.equals("END") ||
+               tokenType.equals("SET") || tokenType.equals("RETURN") ||
+               tokenType.equals("EXIT") || tokenType.equals("LOOP") ||
+               tokenType.equals("LOCAL") || tokenType.equals("STATIC") ||
+               tokenType.equals("PRIVATE") || tokenType.equals("PUBLIC") ||
+               tokenType.equals("FIELD") || tokenType.equals("MEMVAR") ||
+               tokenType.equals("PARAMETER") || tokenType.equals("PARAMETERS") ||
+               tokenType.equals("CLASS") || tokenType.equals("METHOD") ||
+               tokenType.equals("DATA") || tokenType.equals("CLASSDATA") ||
+               tokenType.equals("EXPORTED") || tokenType.equals("PROTECTED") ||
+               tokenType.equals("HIDDEN") || tokenType.equals("AND") ||
+               tokenType.equals("OR") || tokenType.equals("NOT") ||
+               tokenType.equals("TO") || tokenType.equals("STEP") ||
+               tokenType.equals("ADDITIVE") || tokenType.equals("NIL") ||
+               tokenType.equals("TRUE") || tokenType.equals("FALSE") ||
+               tokenType.equals("IN") || tokenType.equals("WITH") ||
+               tokenType.equals("REPLACE") || tokenType.equals("ALL") ||
+               tokenType.equals("REST") || tokenType.equals("FROM") ||
+               tokenType.equals("SEEK") || tokenType.equals("SKIP") ||
+               tokenType.equals("USE") || tokenType.equals("INDEX") ||
+               tokenType.equals("ALIAS") || tokenType.equals("EXCLUSIVE") ||
+               tokenType.equals("SHARED") || tokenType.equals("NEW") ||
+               tokenType.equals("READONLY");
+    }
+
+    /**
+     * Checks if the text is a Harbour keyword that should not have navigation.
+     * This prevents creation of dummy elements for keywords like 'endif', 'enddo', etc.
+     */
+    private boolean isKeyword(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        
+        String upperText = text.toUpperCase();
+        
+        // Language structure keywords
+        if (upperText.equals("IF") || upperText.equals("ELSE") || upperText.equals("ELSEIF") || 
+            upperText.equals("ENDIF") || upperText.equals("DO") || upperText.equals("WHILE") || 
+            upperText.equals("ENDDO") || upperText.equals("FOR") || upperText.equals("NEXT") || 
+            upperText.equals("CASE") || upperText.equals("OTHERWISE") || upperText.equals("SWITCH") || 
+            upperText.equals("ENDSWITCH") || upperText.equals("BEGIN") || upperText.equals("SEQUENCE") ||
+            upperText.equals("RECOVER") || upperText.equals("END")) {
+            return true;
+        }
+        
+        // Commands and declarations
+        if (upperText.equals("SET") || upperText.equals("RETURN") || upperText.equals("EXIT") || 
+            upperText.equals("LOOP") || upperText.equals("LOCAL") || upperText.equals("STATIC") || 
+            upperText.equals("PRIVATE") || upperText.equals("PUBLIC") || upperText.equals("FIELD") ||
+            upperText.equals("MEMVAR") || upperText.equals("PARAMETER") || upperText.equals("PARAMETERS")) {
+            return true;
+        }
+        
+        // Class-related keywords
+        if (upperText.equals("CLASS") || upperText.equals("ENDCLASS") || upperText.equals("METHOD") || 
+            upperText.equals("ENDMETHOD") || upperText.equals("DATA") || upperText.equals("CLASSDATA") ||
+            upperText.equals("EXPORTED") || upperText.equals("PROTECTED") || upperText.equals("HIDDEN")) {
+            return true;
+        }
+        
+        // Function/Procedure keywords
+        if (upperText.equals("FUNCTION") || upperText.equals("PROCEDURE") || upperText.equals("ENDFUNCTION") ||
+            upperText.equals("ENDPROC") || upperText.equals("ENDFUNC")) {
+            return true;
+        }
+        
+        // Operators
+        if (upperText.equals("AND") || upperText.equals("OR") || upperText.equals("NOT") || 
+            upperText.equals(".AND.") || upperText.equals(".OR.") || upperText.equals(".NOT.")) {
+            return true;
+        }
+        
+        // Other keywords
+        if (upperText.equals("TO") || upperText.equals("STEP") || upperText.equals("ADDITIVE") ||
+            upperText.equals("NIL") || upperText.equals("TRUE") || upperText.equals("FALSE") ||
+            upperText.equals("IN") || upperText.equals("WITH") || upperText.equals("REPLACE") ||
+            upperText.equals("ALL") || upperText.equals("REST") || upperText.equals("FROM") ||
+            upperText.equals("SEEK") || upperText.equals("SKIP") || upperText.equals("USE") ||
+            upperText.equals("INDEX") || upperText.equals("ALIAS") || upperText.equals("EXCLUSIVE") ||
+            upperText.equals("SHARED") || upperText.equals("NEW") || upperText.equals("READONLY")) {
+            return true;
         }
         
         return false;

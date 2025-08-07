@@ -123,8 +123,32 @@ public class HarbourMethodReference extends PsiReferenceBase<PsiElement> impleme
     @NotNull
     @Override
     public ResolveResult[] multiResolve(boolean incompleteCode) {
+        HarbourLogger.log(COMPONENT, "multiResolve called for: " + methodName);
+        
+        // Check if we're in hover context - prevent multiple implementations popup on hover
+        boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+        HarbourLogger.log(COMPONENT, "Click mode detected: " + isClick);
+        
         PsiElement resolved = resolve();
-        return resolved != null ? new ResolveResult[]{new PsiElementResolveResult(resolved)} : ResolveResult.EMPTY_ARRAY;
+        if (resolved != null) {
+            HarbourLogger.log(COMPONENT, "Resolved to: " + resolved.getText() + " in " + resolved.getContainingFile().getName());
+            
+            // During hover (non-click), always return single result to prevent "Multiple implementations" popup
+            if (!isClick) {
+                HarbourLogger.log(COMPONENT, "HOVER MODE - returning single result to prevent popup");
+                return new ResolveResult[]{new PsiElementResolveResult(resolved)};
+            }
+            
+            // During click, we can return multiple results if we find them
+            HarbourLogger.log(COMPONENT, "CLICK MODE - allowing multiple results for navigation popup");
+            
+            // For now, still return single result but logged differently
+            // TODO: In future, could search for multiple implementations here
+            return new ResolveResult[]{new PsiElementResolveResult(resolved)};
+        }
+        
+        HarbourLogger.log(COMPONENT, "No resolution found for: " + methodName);
+        return ResolveResult.EMPTY_ARRAY;
     }
 
     @NotNull

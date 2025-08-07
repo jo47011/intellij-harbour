@@ -6,18 +6,33 @@ import com.intellij.psi.PsiElement;
 import com.intellij.ide.BrowserUtil;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.jetbrains.annotations.Nullable;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAction;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.options.ShowSettingsUtil;
+import org.jetbrains.annotations.NotNull;
 
 public class HarbourDocumentationProvider extends AbstractDocumentationProvider {
 
     @Override
     public @Nullable String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
-        HarbourLogger.log("DocumentationProvider", "QuickNavigateInfo requested for: " + element.getText());
+        
+        // Check if we're in hover mode
+        boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+        
+        if (!isClick) {
+            // During hover, return null to prevent popup
+            return null;
+        }
+        
+        // During click, generate documentation
         return generateDocumentation(element);
     }
 
     @Override
     public @Nullable String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
-        HarbourLogger.log("DocumentationProvider", "Generating doc for element: " + element.getText());
         return generateDocumentation(element);
     }
 
@@ -26,7 +41,6 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
         if (element.getParent() instanceof HarbourFunctionDeclaration) {
             HarbourFunctionDeclaration function = (HarbourFunctionDeclaration) element.getParent();
             String doc = "Function: " + function.getName();
-            HarbourLogger.log("DocumentationProvider", "Documentation generated for function: " + doc);
             return doc;
         }
 
@@ -34,11 +48,9 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
         if (element instanceof HarbourFunctionDeclaration) {
             HarbourFunctionDeclaration function = (HarbourFunctionDeclaration) element;
             String doc = "Function: " + function.getName();
-            HarbourLogger.log("DocumentationProvider", "Documentation generated for function: " + doc);
             return doc;
         }
 
-        HarbourLogger.log("DocumentationProvider", "Documentation not generated for element type: " + element.getClass().getSimpleName());
         return null;
     }
 
@@ -50,7 +62,19 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
      */
     public String getDocumentationUrl(Project project, String functionName) {
         HarbourSettings settings = HarbourSettings.getInstance(project);
-        return settings.getDocumentationBaseUrl() + functionName;
+        String baseUrl = settings.getDocumentationBaseUrl();
+        
+        // Ensure proper URL formatting
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            baseUrl = "https://harbour.github.io/doc/clc53.html";
+        }
+        
+        // Add # separator if not present
+        if (!baseUrl.endsWith("#") && !baseUrl.endsWith("/")) {
+            baseUrl = baseUrl + "#";
+        }
+        
+        return baseUrl + functionName;
     }
 
     /**
@@ -61,17 +85,16 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
      */
     public boolean openExternalDocumentation(Project project, String functionName) {
         try {
-            HarbourLogger.log("DocumentationProvider", "Opening external documentation for: " + functionName);
             String url = getDocumentationUrl(project, functionName);
-            HarbourLogger.log("DocumentationProvider", "Documentation URL: " + url);
 
             // Launch browser with the URL
             BrowserUtil.browse(url);
+            
+            // Show notification with actions
+            showExternalDocumentationNotification(project, functionName, url);
 
-            HarbourLogger.log("DocumentationProvider", "Browser launched successfully for: " + url);
             return true;
         } catch (Exception e) {
-            HarbourLogger.log("DocumentationProvider", "Error opening external documentation: " + e.getMessage());
             return false;
         }
     }
@@ -90,5 +113,53 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
         HarbourSettings settings = HarbourSettings.getInstance(project);
         return settings != null && settings.getDocumentationBaseUrl() != null &&
                 !settings.getDocumentationBaseUrl().isEmpty();
+    }
+    
+    /**
+     * Shows a notification with actions after opening external documentation
+     * @param project Current project
+     * @param functionName Name of the function
+     * @param url The documentation URL
+     */
+    private void showExternalDocumentationNotification(Project project, String functionName, String url) {
+        try {
+            // Create notification with actions
+            Notification notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Harbour Application")
+                .createNotification(
+                    "Opening documentation for: " + functionName,
+                    "URL: " + url,
+                    NotificationType.INFORMATION
+                )
+                .addAction(new NotificationAction("Open Browser Settings") {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+                        // Open the Tools > Web Browsers settings page
+                        ShowSettingsUtil.getInstance().showSettingsDialog(project, "Web Browsers");
+                        notification.expire();
+                    }
+                })
+                .addAction(new NotificationAction("Copy URL") {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+                        // Copy URL to clipboard
+                        java.awt.datatransfer.StringSelection selection = new java.awt.datatransfer.StringSelection(url);
+                        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+                        
+                        // Show a brief success message
+                        NotificationGroupManager.getInstance()
+                            .getNotificationGroup("Harbour Application")
+                            .createNotification("URL copied to clipboard", NotificationType.INFORMATION)
+                            .notify(project);
+                        
+                        notification.expire();
+                    }
+                });
+            
+            // Show the notification
+            notification.notify(project);
+            
+        } catch (Exception e) {
+        }
     }
 }

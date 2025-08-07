@@ -71,13 +71,30 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Linting settings
     private boolean lintingEnabled = true; // Default to enabled
     private boolean lintOnSave = true; // Default to lint on save only
-    private String harbourCompilerPath = ""; // Path to harbour compiler
+    private String harbourCompilerPath = getDefaultHarbourCompilerPath(); // Path to harbour compiler
     private int lintWarningLevel = 1; // Default warning level
     private String lintExtraOptions = ""; // Extra compiler options for linting
+    private String linterExclusionComment = "noqa"; // Comment text to exclude lines from linting
+    
+    // Navigation settings
+    private int maxNavigationResults = 20; // Maximum results to show initially in navigation popup
 
 
     public HarbourSettings() {
         // Empty constructor
+    }
+    
+    /**
+     * Get the default harbour compiler path based on the operating system
+     */
+    private static String getDefaultHarbourCompilerPath() {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("win")) {
+            return "harbour.exe";
+        } else {
+            // Unix/Linux/Mac - use just "harbour" without extension
+            return "harbour";
+        }
     }
 
     // Debug log path methods
@@ -368,6 +385,23 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public void setLintExtraOptions(String lintExtraOptions) {
         this.lintExtraOptions = lintExtraOptions;
+    }
+    
+    public String getLinterExclusionComment() {
+        return linterExclusionComment;
+    }
+    
+    public void setLinterExclusionComment(String linterExclusionComment) {
+        this.linterExclusionComment = linterExclusionComment;
+    }
+
+    // Navigation settings methods
+    public int getMaxNavigationResults() {
+        return maxNavigationResults;
+    }
+    
+    public void setMaxNavigationResults(int maxNavigationResults) {
+        this.maxNavigationResults = maxNavigationResults;
     }
 
 

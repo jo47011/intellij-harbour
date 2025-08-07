@@ -13,14 +13,6 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
 
     private static long lastClickTime = 0;
 
-    /**
-     * Get current click state - used by handlers to determine if in click or hover mode
-     * @return true if currently in a click operation (not hover)
-     */
-    public static boolean isClickOperation() {
-        long timeSinceClick = System.currentTimeMillis() - lastClickTime;
-        return timeSinceClick < CLICK_TIMEOUT;
-    }
 
     @Override
     public void mouseClicked(EditorMouseEvent event) {
@@ -29,10 +21,16 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
 
     @Override
     public void mousePressed(EditorMouseEvent event) {
-        if (event.getMouseEvent().isControlDown()) {
-            HarbourLogger.log(COMPONENT, "Ctrl+Press detected - setting click mode");
+        boolean ctrlDown = event.getMouseEvent().isControlDown();
+        HarbourLogger.log(COMPONENT, "Mouse pressed - Ctrl down: " + ctrlDown);
+        
+        if (ctrlDown) {
+            HarbourLogger.log(COMPONENT, "Ctrl+Press detected - setting click mode to TRUE");
             lastClickTime = System.currentTimeMillis();
             HarbourExternalDocumentationHandler.setClickMode(true);
+        } else {
+            HarbourLogger.log(COMPONENT, "Mouse pressed without Ctrl - setting click mode to FALSE");
+            HarbourExternalDocumentationHandler.setClickMode(false);
         }
     }
 
@@ -55,8 +53,18 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
     public void mouseMoved(EditorMouseEvent event) {
         // CRITICAL: Do not update click mode on hover
         // This prevents hover from canceling click operations
-        if (event.getMouseEvent().isControlDown()) {
-            HarbourLogger.log(COMPONENT, "Ctrl+Hover detected (ignoring)");
+        boolean ctrlDown = event.getMouseEvent().isControlDown();
+        
+        if (ctrlDown) {
+            HarbourLogger.log(COMPONENT, "Ctrl+Hover detected - click mode should remain: " + 
+                HarbourExternalDocumentationHandler.isClickMode());
+        }
+        
+        // Reset click mode after timeout to ensure hover events don't trigger popups
+        long timeSinceClick = System.currentTimeMillis() - lastClickTime;
+        if (timeSinceClick > CLICK_TIMEOUT && HarbourExternalDocumentationHandler.isClickMode()) {
+            HarbourLogger.log(COMPONENT, "Click timeout reached (" + timeSinceClick + "ms) - resetting click mode to FALSE");
+            HarbourExternalDocumentationHandler.setClickMode(false);
         }
     }
 

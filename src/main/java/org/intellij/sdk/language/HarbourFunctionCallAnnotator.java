@@ -54,22 +54,14 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                             HarbourFunctionClassificationService.getInstance(project);
                         
                         boolean isInternalFunction = classificationService.isInternalFunction(functionName);
-                        
-                        // Debug logging to understand the issue
-                        HarbourLogger.log("FunctionAnnotator", "CLASSIFY: " + functionName + 
-                            " -> isInternal=" + isInternalFunction + 
-                            ", serviceInitialized=" + classificationService.isInitialized() +
-                            ", totalInternal=" + classificationService.getInternalFunctionCount());
 
                         TextAttributesKey attributesKey;
                         if (isInternalFunction) {
                             // Internal function - use blue color from scheme
                             attributesKey = HarbourSyntaxHighlighter.LOCAL_FUNCTION;
-                            HarbourLogger.log("FunctionAnnotator", "DEBUG: Internal function: " + functionName);
                         } else {
                             // External function - use light blue color from scheme
                             attributesKey = HarbourSyntaxHighlighter.EXTERNAL_FUNCTION;
-                            HarbourLogger.log("FunctionAnnotator", "DEBUG: External function: " + functionName);
                         }
 
                         // Get the attributes from the scheme but don't modify them
@@ -87,8 +79,8 @@ public class HarbourFunctionCallAnnotator implements Annotator {
             // Rethrow without logging
             throw e;
         } catch (Exception e) {
+            // Log only to standard logger, not HarbourLogger to reduce clutter
             LOG.error("Error in HarbourFunctionCallAnnotator", e);
-            HarbourLogger.log("FunctionAnnotator", "Error: " + e.getMessage());
         }
     }
 

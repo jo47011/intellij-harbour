@@ -7,6 +7,24 @@ This plugin was implemented as `vibe-coding` project using <a href="https://open
 and <a href="https://claude.ai/" target="_blank">Claude</a>. For detailed development insights and experiences, see
 the [MAKING-OF](./MAKING_OF.md).
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Features](#features)
+- [Syntax Highlighting](#syntax-highlighting)
+- [Code Completion](#code-completion)
+- [Function Navigation](#function-navigation)
+- [Rename Refactoring](#rename-refactoring)
+- [Structure View](#structure-view)
+- [Code Formatting](#code-formatting)
+- [Linting](#linting)
+- [Debugging](#debugging)
+- [Building from Source](#building-from-source)
+- [License](#license)
+- [Settings](#settings)
+- [VS Code Users](#vs-code-users)
+- [Rodamap](#roadmap--todos)
+
 ## Features
 
 - **[Syntax Highlighting](#syntax-highlighting)** - Complete color coding for Harbour/Clipper keywords, functions, and
@@ -18,6 +36,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
 - **[Linting](#linting)** - Real-time code analysis and error detection
 - **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
+- **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
 
 ## Installation
 
@@ -88,7 +107,7 @@ Automatic code indentation and formatting follows Harbour conventions. Customize
 positioning in settings.
 
 <p align="center">
-  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
+  <img src="img/settings-formatting.png" alt="Code Style Settings Format"/>
   <br>
   <em>Customizable code formatting options</em>
 </p>

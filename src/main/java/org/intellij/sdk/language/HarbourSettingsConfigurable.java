@@ -16,6 +16,7 @@ import com.intellij.ui.AnActionButtonRunnable;
 import com.intellij.ui.CollectionListModel;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBList;
+import com.intellij.icons.AllIcons;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -53,6 +54,10 @@ public class HarbourSettingsConfigurable implements Configurable {
     private JTextField myHarbourCompilerPathField;
     private JSpinner myLintWarningLevelSpinner;
     private JTextField myLintExtraOptionsField;
+    private JTextField myLinterExclusionCommentField;
+    
+    // Navigation settings components
+    private JSpinner myMaxNavigationResultsSpinner;
 
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
@@ -136,10 +141,30 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridwidth = 2;
         myAutoCompletionEnabledCheckBox = new JCheckBox("Enable auto-completion while typing (otherwise only on Ctrl+Space)");
         generalPanel.add(myAutoCompletionEnabledCheckBox, constraints);
+        
+        // Navigation results limit
+        constraints.gridx = 0;
+        constraints.gridy = 4;
+        constraints.gridwidth = 2;
+        JLabel maxNavResultsLabel = new JLabel("Max navigation results:");
+        generalPanel.add(maxNavResultsLabel, constraints);
+        
+        // Explanation below the label
+        constraints.gridy = 5;
+        JLabel navResultsExplanation = new JLabel("<html><i>Number of results to show before 'Load All' button appears</i></html>");
+        navResultsExplanation.setFont(navResultsExplanation.getFont().deriveFont(Font.ITALIC));
+        generalPanel.add(navResultsExplanation, constraints);
+        
+        // Spinner on next line
+        constraints.gridy = 6;
+        constraints.gridwidth = 1;
+        SpinnerModel navResultsModel = new SpinnerNumberModel(20, 10, 500, 10);
+        myMaxNavigationResultsSpinner = new JSpinner(navResultsModel);
+        generalPanel.add(myMaxNavigationResultsSpinner, constraints);
 
         // Add spacer to general panel
         constraints.gridx = 0;
-        constraints.gridy = 4;
+        constraints.gridy = 7;
         constraints.weighty = 1.0;
         constraints.gridwidth = 2;
         constraints.fill = GridBagConstraints.BOTH;
@@ -157,7 +182,13 @@ public class HarbourSettingsConfigurable implements Configurable {
                 .setAddAction(createAddPathAction())
                 .setRemoveAction(createRemovePathAction())
                 .setMoveUpAction(anActionButton -> moveIncludePath(-1))
-                .setMoveDownAction(anActionButton -> moveIncludePath(1));
+                .setMoveDownAction(anActionButton -> moveIncludePath(1))
+                .addExtraAction(new AnActionButton("Copy Path", AllIcons.Actions.Copy) {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e) {
+                        copySelectedIncludePath();
+                    }
+                });
 
         JPanel includePathsListPanel = new JPanel(new BorderLayout());
         includePathsListPanel.add(
@@ -362,7 +393,11 @@ public class HarbourSettingsConfigurable implements Configurable {
         
         // Explanation below the label
         constraints.gridy = 3;
-        JLabel compilerPathExplanation = new JLabel("<html><i>Use harbour.exe (the compiler), not hbmk2.exe (the build tool)</i></html>");
+        String os = System.getProperty("os.name").toLowerCase();
+        String compilerName = os.contains("win") ? "harbour.exe" : "harbour";
+        String buildToolName = os.contains("win") ? "hbmk2.exe" : "hbmk2";
+        String examplePath = os.contains("win") ? "C:\\harbour\\bin\\harbour.exe" : "/usr/local/bin/harbour";
+        JLabel compilerPathExplanation = new JLabel("<html><i>Use " + compilerName + " (the compiler), not " + buildToolName + " (the build tool)</i></html>");
         compilerPathExplanation.setFont(compilerPathExplanation.getFont().deriveFont(Font.ITALIC));
         settingsPanel.add(compilerPathExplanation, constraints);
 
@@ -371,7 +406,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridy = 4;
         constraints.gridwidth = 2;
         myHarbourCompilerPathField = new JTextField();
-        myHarbourCompilerPathField.setToolTipText("Path to harbour.exe (the compiler), NOT hbmk2.exe (the build tool). Example: C:\\harbour\\bin\\harbour.exe");
+        myHarbourCompilerPathField.setToolTipText("Path to " + compilerName + " (the compiler), NOT " + buildToolName + " (the build tool). Example: " + examplePath);
         JPanel compilerPathPanel = new JPanel(new BorderLayout());
         compilerPathPanel.add(myHarbourCompilerPathField, BorderLayout.CENTER);
 
@@ -379,7 +414,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         browseCompilerButton.addActionListener(e -> {
             FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor();
             descriptor.setTitle("Select Harbour Compiler");
-            descriptor.setDescription("Select harbour.exe (the compiler), NOT hbmk2.exe. Usually located in harbour/bin directory.");
+            descriptor.setDescription("Select " + compilerName + " (the compiler), NOT " + buildToolName + ". Usually located in harbour/bin directory.");
             
             VirtualFile[] selectedFiles = FileChooserFactory.getInstance()
                     .createFileChooser(descriptor, myProject, null)
@@ -419,10 +454,22 @@ public class HarbourSettingsConfigurable implements Configurable {
         myLintExtraOptionsField = new JTextField();
         myLintExtraOptionsField.setToolTipText("Additional options to pass to the Harbour compiler (e.g., -DMYDEFINE)");
         settingsPanel.add(myLintExtraOptionsField, constraints);
+        
+        // Linter exclusion comment
+        constraints.gridx = 0;
+        constraints.gridy = 7;
+        constraints.gridwidth = 1;
+        JLabel exclusionCommentLabel = new JLabel("Exclude lines with comment:");
+        settingsPanel.add(exclusionCommentLabel, constraints);
+        
+        constraints.gridx = 1;
+        myLinterExclusionCommentField = new JTextField();
+        myLinterExclusionCommentField.setToolTipText("Lines with comments starting with this word will be excluded from linting (e.g., // noqa, /* noqa comment */)");
+        settingsPanel.add(myLinterExclusionCommentField, constraints);
 
         // Note about include paths
         constraints.gridx = 0;
-        constraints.gridy = 7;
+        constraints.gridy = 8;
         constraints.gridwidth = 2;
         constraints.weighty = 0.1;
         JLabel includePathsNote = new JLabel("<html><i>Note: Linting uses the include paths configured in Tools → Harbour → Include Paths</i></html>");
@@ -482,6 +529,33 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Update selection
         myIncludePathsList.setSelectedIndex(newIndex);
+    }
+    
+    /**
+     * Copy the selected include path to clipboard
+     */
+    private void copySelectedIncludePath() {
+        int selectedIndex = myIncludePathsList.getSelectedIndex();
+        if (selectedIndex < 0) {
+            Messages.showWarningDialog(
+                myMainPanel,
+                "Please select a path to copy",
+                "No Selection"
+            );
+            return;
+        }
+        
+        String selectedPath = myIncludePathsModel.getElementAt(selectedIndex);
+        
+        // Copy to clipboard
+        java.awt.datatransfer.StringSelection selection = new java.awt.datatransfer.StringSelection(selectedPath);
+        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+        
+        Messages.showInfoMessage(
+            myMainPanel,
+            "Path copied to clipboard:\n" + selectedPath,
+            "Path Copied"
+        );
     }
 
     private AnActionButtonRunnable createAddPathAction() {
@@ -639,7 +713,9 @@ public class HarbourSettingsConfigurable implements Configurable {
                 settings.isLintOnSave() != myLintOnSaveCheckBox.isSelected() ||
                 !settings.getHarbourCompilerPath().equals(myHarbourCompilerPathField.getText()) ||
                 settings.getLintWarningLevel() != (Integer) myLintWarningLevelSpinner.getValue() ||
-                !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText());
+                !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText()) ||
+                !settings.getLinterExclusionComment().equals(myLinterExclusionCommentField.getText()) ||
+                settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue();
     }
 
     @Override
@@ -667,6 +743,10 @@ public class HarbourSettingsConfigurable implements Configurable {
         settings.setHarbourCompilerPath(myHarbourCompilerPathField.getText());
         settings.setLintWarningLevel((Integer) myLintWarningLevelSpinner.getValue());
         settings.setLintExtraOptions(myLintExtraOptionsField.getText());
+        settings.setLinterExclusionComment(myLinterExclusionCommentField.getText());
+        
+        // Save navigation settings
+        settings.setMaxNavigationResults((Integer) myMaxNavigationResultsSpinner.getValue());
 
         // Notify HarbourReferenceService to update exclusions
         HarbourReferenceService service = HarbourReferenceService.getInstance(myProject);
@@ -727,6 +807,10 @@ public class HarbourSettingsConfigurable implements Configurable {
         myHarbourCompilerPathField.setText(settings.getHarbourCompilerPath());
         myLintWarningLevelSpinner.setValue(settings.getLintWarningLevel());
         myLintExtraOptionsField.setText(settings.getLintExtraOptions());
+        myLinterExclusionCommentField.setText(settings.getLinterExclusionComment());
+        
+        // Load navigation settings
+        myMaxNavigationResultsSpinner.setValue(settings.getMaxNavigationResults());
 
         // Default scan path to the project base path
         String defaultScanPath = myProject.getBasePath();
