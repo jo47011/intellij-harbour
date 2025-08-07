@@ -885,43 +885,6 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         }
 
         for (HarbourLintResult result : annotationResult) {
-            // Check if this line should be excluded from linting
-            int errorLine = result.getLine() - 1; // Convert to 0-based
-            if (errorLine >= 0 && errorLine < document.getLineCount()) {
-                String lineText = document.getText(new TextRange(
-                    document.getLineStartOffset(errorLine),
-                    document.getLineEndOffset(errorLine)
-                ));
-                
-                // Check if line has a comment starting with the exclusion word
-                boolean shouldExclude = false;
-                
-                // Check for // style comments
-                int singleLineComment = lineText.indexOf("//");
-                if (singleLineComment != -1) {
-                    String commentText = lineText.substring(singleLineComment + 2).trim();
-                    if (commentText.startsWith(exclusionComment)) {
-                        shouldExclude = true;
-                    }
-                }
-                
-                // Check for /* style comments
-                if (!shouldExclude) {
-                    int multiLineComment = lineText.indexOf("/*");
-                    if (multiLineComment != -1) {
-                        String commentText = lineText.substring(multiLineComment + 2).trim();
-                        if (commentText.startsWith(exclusionComment)) {
-                            shouldExclude = true;
-                        }
-                    }
-                }
-                
-                if (shouldExclude) {
-                    HarbourLogger.log("HarbourLinter", "Skipping line " + (errorLine + 1) + 
-                        " due to exclusion comment: " + exclusionComment);
-                    continue; // Skip this error/warning
-                }
-            }
             TextRange range = null;
             
             // Check if this is an unused variable warning
@@ -1063,6 +1026,36 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 
                 // Trim whitespace from the line to get the actual code range
                 String lineText = document.getText(range);
+                
+                // Check if this line should be excluded from linting (check the actual line being highlighted)
+                boolean shouldExclude = false;
+                
+                // Check for // style comments
+                int singleLineComment = lineText.indexOf("//");
+                if (singleLineComment != -1) {
+                    String commentText = lineText.substring(singleLineComment + 2).trim();
+                    if (commentText.startsWith(exclusionComment)) {
+                        shouldExclude = true;
+                    }
+                }
+                
+                // Check for /* style comments
+                if (!shouldExclude) {
+                    int multiLineComment = lineText.indexOf("/*");
+                    if (multiLineComment != -1) {
+                        String commentText = lineText.substring(multiLineComment + 2).trim();
+                        if (commentText.startsWith(exclusionComment)) {
+                            shouldExclude = true;
+                        }
+                    }
+                }
+                
+                if (shouldExclude) {
+                    HarbourLogger.log("HarbourLinter", "Skipping line " + (actualLine + 1) + 
+                        " due to exclusion comment: " + exclusionComment);
+                    continue; // Skip this error/warning
+                }
+                
                 int firstNonWhitespace = 0;
                 int lastNonWhitespace = lineText.length() - 1;
                 
