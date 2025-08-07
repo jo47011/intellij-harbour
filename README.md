@@ -9,21 +9,12 @@ the [MAKING-OF](./MAKING_OF.md).
 
 ## Table of Contents
 
-- [Installation](#installation)
 - [Features](#features)
-- [Syntax Highlighting](#syntax-highlighting)
-- [Code Completion](#code-completion)
-- [Function Navigation](#function-navigation)
-- [Rename Refactoring](#rename-refactoring)
-- [Structure View](#structure-view)
-- [Code Formatting](#code-formatting)
-- [Linting](#linting)
-- [Debugging](#debugging)
-- [Building from Source](#building-from-source)
-- [License](#license)
+- [Installation](#installation)
 - [Settings](#settings)
+- [License](#license)
 - [VS Code Users](#vs-code-users)
-- [Rodamap](#roadmap--todos)
+- [Roadmap](#roadmap--todos)
 
 ## Features
 
