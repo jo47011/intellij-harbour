@@ -622,33 +622,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         }
 
         // Add error handling libraries - order matters!
-        String errorHandlerPath;
-        String errorMonitorPath;
-        
-        if (currentOS.contains("windows")) {
-            errorHandlerPath = buildDir + "\\" + "harbour_error_handler.prg";
-            errorMonitorPath = buildDir + "\\" + "harbour_error_monitor.prg";
-        } else {
-            errorHandlerPath = buildDir + File.separator + "harbour_error_handler.prg";
-            errorMonitorPath = buildDir + File.separator + "harbour_error_monitor.prg";
-        }
+        String errorHandlerPath = buildDir + File.separator + "harbour_error_handler.prg";
+        String errorMonitorPath = buildDir + File.separator + "harbour_error_monitor.prg";
         
         // Always add error handler first (provides functions)
         parameters.add(errorHandlerPath);
         
         // Add debug library only in debug mode
         if (isDebugMode && !finalBuildTarget.endsWith("harbour_debug.prg")) {
-            String debugSourcePath;
-            
-            if (currentOS.contains("windows")) {
-                debugSourcePath = buildDir + "\\" + "harbour_debug.prg";
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "DEBUG MODE - WINDOWS: Adding debug library: " + debugSourcePath);
-            } else {
-                debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "DEBUG MODE - UNIX: Adding debug library: " + debugSourcePath);
-            }
+            String debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
+            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    "DEBUG MODE: Adding debug library: " + debugSourcePath);
             
             // Add error monitor then debug library
             parameters.add(errorMonitorPath);
@@ -1489,8 +1473,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 
                 if (initCldDir != null) {
                     // Normalize both paths to use the same separator for comparison
-                    String normalizedFilePath = filePath.replace('\\', '/').replace('/', File.separatorChar);
-                    String normalizedInitCldDir = initCldDir.replace('\\', '/').replace('/', File.separatorChar);
+                    String normalizedFilePath = HarbourFileUtils.normalizePathSeparators(filePath);
+                    String normalizedInitCldDir = HarbourFileUtils.normalizePathSeparators(initCldDir);
                     
                     isInProjectDir = normalizedFilePath.startsWith(normalizedInitCldDir) || normalizedFilePath.contains(normalizedInitCldDir);
                     HarbourLogger.log(project, "HarbourDebugger", "  Normalized file path: " + normalizedFilePath);
@@ -1501,8 +1485,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         String absoluteParent = initCldFile.getAbsoluteFile().getParent();
                         if (absoluteParent != null) {
                             // Normalize both paths for comparison
-                            String normalizedFilePath = filePath.replace('\\', '/').replace('/', File.separatorChar);
-                            String normalizedAbsoluteParent = absoluteParent.replace('\\', '/').replace('/', File.separatorChar);
+                            String normalizedFilePath = HarbourFileUtils.normalizePathSeparators(filePath);
+                            String normalizedAbsoluteParent = HarbourFileUtils.normalizePathSeparators(absoluteParent);
                             
                             isInProjectDir = normalizedFilePath.startsWith(normalizedAbsoluteParent) || normalizedFilePath.contains(normalizedAbsoluteParent);
                             HarbourLogger.log(project, "HarbourDebugger", "  Using absolute parent: " + absoluteParent);

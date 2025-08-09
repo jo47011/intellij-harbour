@@ -1052,10 +1052,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         }
         
         // Try filename only
+        String normalizedFileName = HarbourFileUtils.normalizePathSeparators(fileName);
         for (VirtualFile file : sourceFiles) {
+            String normalizedFilePath = HarbourFileUtils.normalizePathSeparators(file.getPath());
             if (file.getName().equals(fileName) || 
-                file.getPath().endsWith(fileName) ||
-                file.getPath().endsWith(fileName.replace("\\", "/"))) {
+                normalizedFilePath.endsWith(fileName) ||
+                normalizedFilePath.endsWith(normalizedFileName)) {
                 fileCache.put(fileName, file);
                 return file;
             }
