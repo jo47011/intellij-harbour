@@ -447,57 +447,22 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables before notifying position reached");
             
-            // Set a timeout in case variables don't arrive
+            // TIMEOUT REMOVED: No automatic timeout that continues execution
+            // However, we still need a fallback to ensure position is reached if no variables arrive
+            // This ensures debugger always suspends at breakpoint, even without variable information
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 try {
-                    Thread.sleep(3000); // Wait 3 seconds for variables (increased to handle slower responses)
+                    Thread.sleep(10000); // Wait 10 seconds for variables  
                     if (waitingForVariables && pendingStopPosition != null) {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                            "Variable timeout - notifying position reached anyway");
+                            "Variable fallback triggered - notifying position reached without full variable info");
                         waitingForVariables = false;
-                        variablesReceived = 0; // Reset counter for next stop
+                        variablesReceived = 0;
                         
                         // Capture values before clearing them
                         final String stopFile = pendingStopFile;
                         final int stopLine = pendingStopLine;
                         final XSourcePosition stopPosition = pendingStopPosition;
-                        
-                        // Check if this is a conditional breakpoint that needs evaluation BEFORE notifying
-                        if (conditionalBreakpointFile != null && conditionalBreakpointLine != -1) {
-                            if (stopFile != null && stopFile.equals(conditionalBreakpointFile) && stopLine == conditionalBreakpointLine) {
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                    "TIMEOUT DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                    "TIMEOUT DEBUG: Current variables: " + variables);
-                                
-                                boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                    "TIMEOUT DEBUG: shouldStopAtConditionalBreakpoint returned: " + shouldStop);
-                                
-                                if (!shouldStop) {
-                                    // Condition not met, continue execution without notifying position
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "TIMEOUT: Breakpoint condition not met at " + stopFile + ":" + stopLine + ", continuing");
-                                    
-                                    // Clear all pending and conditional info
-                                    pendingStopFile = null;
-                                    pendingStopLine = -1;
-                                    pendingStopPosition = null;
-                                    conditionalBreakpointFile = null;
-                                    conditionalBreakpointLine = -1;
-                                    
-                                    // Continue execution
-                                    sendCommand("GO");
-                                    return;
-                                } else {
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "TIMEOUT: Breakpoint condition met at " + stopFile + ":" + stopLine + ", stopping");
-                                }
-                            }
-                            // Clear conditional breakpoint info
-                            conditionalBreakpointFile = null;
-                            conditionalBreakpointLine = -1;
-                        }
                         
                         // Clear pending info BEFORE invokeLater
                         pendingStopFile = null;
@@ -506,7 +471,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         
                         ApplicationManager.getApplication().invokeLater(() -> {
                             if (getSession() == null) {
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null in timeout handler!");
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null in fallback handler!");
                                 return;
                             }
                             
@@ -517,17 +482,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                         stopPosition);
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                "Calling positionReached after timeout for " + (stopFile != null ? stopFile : "Unknown") + 
-                                ":" + stopLine);
+                                "Calling positionReached via fallback for " + (stopFile != null ? stopFile : "Unknown") + 
+                                ":" + stopLine + " - debugger will wait indefinitely at breakpoint");
                             
                             getSession().positionReached(suspendContext);
                             
-                            if (stopFile != null) {
-                                // DISABLED: Remove popup notifications for breakpoint hits
-                                // HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
-                            }
-                            
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended after timeout");
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended via fallback - program will wait indefinitely");
                         });
                     }
                 } catch (InterruptedException e) {
