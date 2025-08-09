@@ -659,7 +659,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             } else {
                 // Normal break - be more selective about adding semicolons
                 if (shouldAddContinuationSemicolon(segment, content, pos, breakPos)) {
-                    currentLine += segment + " ;";
+                    currentLine += segment + ";";
                 } else {
                     currentLine += segment;
                 }
@@ -698,15 +698,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             return false;
         }
         
-        // Don't break array/block assignments (from previous fix)
-        if (ARRAY_BLOCK_PATTERN.matcher(trimmed).matches()) {
-            return false;
-        }
-        
-        // Don't break code blocks (from previous fix)  
-        if (CODEBLOCK_PATTERN.matcher(trimmed).matches()) {
-            return false;
-        }
+        // Note: Removed array/block restrictions - user wants long lines to break
+        // The issue was incorrect semicolon placement, not that they shouldn't break
         
         // Allow breaking complex long lines (including complex GET statements)
         return true;
