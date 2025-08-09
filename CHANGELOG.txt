@@ -1,0 +1,43 @@
+# Harbour Language Plugin for PyCharm - Change Log
+
+## Version 1.1.1 (2024-08-07)
+### New Features
+- **NoQA Comment Support**: Added ability to exclude specific lines from linting using special comments
+  - Configurable exclusion comment (default: "noqa")
+  - Works with both // and /* style comments
+  - Comment must start with the exclusion word for precision
+  
+### Documentation
+- Added table of contents to README for better navigation
+- Added "Automatic Error Monitoring" to features list
+- Included VS Code Users section in table of contents
+
+## Version 1.1.0 (2024-08-06)
+### Major Features
+- **Navigation Popup Improvements**:
+  - Fixed navigation popup freeze when dealing with many search results (17-second EDT freeze resolved)
+  - Added configurable max results limit (default: 50)
+  - Implemented "Load All" option for viewing all results
+  - Perfect column alignment in navigation results
+  - Syntax highlighting in navigation popup using custom renderer
+  
+### UI Improvements
+- Fixed Ctrl+Hover behavior - functions no longer open on hover, only on click
+- Added function name in navigation popup title
+- Removed redundant "(definition)" text from navigation entries
+
+### Bug Fixes
+- Fixed NullPointerException when opening navigation popup
+- Fixed keyword clickability - keywords no longer show as clickable
+- Fixed internal function references showing underlines on Ctrl+hover
+- Fixed PropertyAccess navigation for expressions like getUser():date
+
+### Performance
+- Optimized linting performance with caching and debouncing
+- Added "Lint on save only" option for better performance
+- Reduced cache timeout from 30s to 5s for more responsive error detection
+
+### Code Quality
+- Disabled problematic quick syntax checker causing false positives
+- Removed all debug output statements from production code
+- Cleaned up unused classes and code duplication
