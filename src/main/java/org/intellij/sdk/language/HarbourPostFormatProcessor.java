@@ -61,6 +61,29 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     // Pattern for detecting comment-only lines
     private static final Pattern COMMENT_LINE_PATTERN =
             Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
+            
+    // Pattern for detecting array/block syntax that should not be broken
+    private static final Pattern ARRAY_BLOCK_PATTERN =
+            Pattern.compile(".*\\s*:=\\s*\\{.*\\}.*");
+    private static final Pattern CODEBLOCK_PATTERN =
+            Pattern.compile(".*\\{\\s*\\|\\|.*\\}.*");
+    
+    // Harbour keywords that should never be split across lines
+    private static final String[] HARBOUR_KEYWORDS = {
+        ".and.", ".or.", ".not.", ".t.", ".f.", ".true.", ".false."
+    };
+    
+    // Harbour regular keywords that should not be split (word boundaries)
+    private static final String[] HARBOUR_WORD_KEYWORDS = {
+        "when", "valid", "picture", "say", "get", "read"
+    };
+    
+    // Harbour constructs that should be treated carefully for line breaking
+    // Only prevent breaking very specific short constructs, allow breaking longer complex ones
+    private static final Pattern SIMPLE_GET_WHEN_PATTERN = 
+            Pattern.compile("^\\s*@\\s*\\w+\\s*get\\s+\\w+\\s+when\\s+\\w+\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SIMPLE_SAY_GET_PATTERN = 
+            Pattern.compile("^\\s*say\\s+\"[^\"]*\"\\s+get\\s+\\w+\\s*$", Pattern.CASE_INSENSITIVE);
     
     // Patterns for BEGIN SEQUENCE constructs
     private static final Pattern BEGIN_SEQUENCE_PATTERN =
@@ -226,10 +249,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String lineWithWhitespace = lines[i];
             String line = lineWithWhitespace.trim();
 
-            // Skip empty lines
+            // Skip empty lines, but avoid empty lines after semicolon continuations
             if (line.isEmpty()) {
-                result.append("\n");
-                continue;
+                // Check if previous non-empty line ended with semicolon for continuation
+                String lastResultLine = getLastNonEmptyLine(result.toString());
+                if (lastResultLine != null && lastResultLine.trim().endsWith(";")) {
+                    // Skip this empty line as it would break Harbour continuation syntax
+                    continue;
+                } else {
+                    result.append("\n");
+                    continue;
+                }
             }
 
             // Skip lone semicolons
@@ -468,7 +498,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         result.append("\n");
                     }
                 }
-            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000) {
+            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 && shouldBreakLine(processedLine)) {
                 // Line needs breaking (skip for very large files to improve performance)
                 List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
 
@@ -627,8 +657,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 String continuationIndent = indent + " ".repeat(indentSize);
                 currentLine = continuationIndent + stringDelimiter;
             } else {
-                // Normal break
-                if (!segment.trim().endsWith(";") && !segment.trim().endsWith("+") && !segment.trim().endsWith("//")) {
+                // Normal break - be more selective about adding semicolons
+                if (shouldAddContinuationSemicolon(segment, content, pos, breakPos)) {
                     currentLine += segment + " ;";
                 } else {
                     currentLine += segment;
@@ -652,12 +682,89 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     }
 
     /**
-     * Find a good break point
+     * Determine if a line should be broken
+     * Only prevent breaking simple constructs; allow breaking complex long statements
+     */
+    private boolean shouldBreakLine(String line) {
+        String trimmed = line.trim();
+        
+        // Don't break simple GET ... WHEN constructs (only very basic ones)
+        if (SIMPLE_GET_WHEN_PATTERN.matcher(trimmed).matches()) {
+            return false;
+        }
+        
+        // Don't break simple SAY ... GET constructs 
+        if (SIMPLE_SAY_GET_PATTERN.matcher(trimmed).matches()) {
+            return false;
+        }
+        
+        // Don't break array/block assignments (from previous fix)
+        if (ARRAY_BLOCK_PATTERN.matcher(trimmed).matches()) {
+            return false;
+        }
+        
+        // Don't break code blocks (from previous fix)  
+        if (CODEBLOCK_PATTERN.matcher(trimmed).matches()) {
+            return false;
+        }
+        
+        // Allow breaking complex long lines (including complex GET statements)
+        return true;
+    }
+    
+    /**
+     * Determine if a continuation semicolon should be added
+     */
+    private boolean shouldAddContinuationSemicolon(String segment, String fullContent, int currentPos, int breakPos) {
+        String trimmedSegment = segment.trim();
+        
+        // Don't add semicolon if segment already ends with one
+        if (trimmedSegment.endsWith(";") || trimmedSegment.endsWith("+") || trimmedSegment.endsWith("//")) {
+            return false;
+        }
+        
+        // Don't add semicolon if we're breaking inside array/block syntax
+        String contextBefore = fullContent.substring(0, currentPos);
+        String contextAfter = fullContent.substring(breakPos);
+        
+        // Count braces to see if we're inside a block
+        int braceCount = 0;
+        boolean inString = false;
+        char stringDelim = 0;
+        
+        for (char c : contextBefore.toCharArray()) {
+            if (!inString && (c == '"' || c == '\'')) {
+                inString = true;
+                stringDelim = c;
+            } else if (inString && c == stringDelim) {
+                inString = false;
+            } else if (!inString) {
+                if (c == '{') braceCount++;
+                else if (c == '}') braceCount--;
+            }
+        }
+        
+        // If we're inside braces, don't add semicolon
+        if (braceCount > 0) {
+            return false;
+        }
+        
+        // Check if this looks like an array assignment
+        if (contextBefore.contains(":=") && (contextBefore.contains("{") || contextAfter.contains("}"))) {
+            return false;
+        }
+        
+        // Default: add semicolon for normal line continuation
+        return true;
+    }
+
+    /**
+     * Find a good break point, avoiding splitting Harbour keywords
      */
     private int findBreakPoint(String content, int startPos, int endPos) {
         if (endPos >= content.length()) return content.length();
 
-        // Look for good break points
+        // Look for good break points, starting from the end and working backwards
         for (int i = endPos; i > startPos; i--) {
             char c = content.charAt(i);
 
@@ -665,20 +772,110 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (i > 0 && content.charAt(i-1) == '-' && c == '>') continue;
             if (i < content.length()-1 && c == '-' && content.charAt(i+1) == '>') continue;
 
-            // Check for logical operators
-            if (c == '.') {
-                String nearby = content.substring(
-                        Math.max(0, i-4),
-                        Math.min(content.length(), i+5)
-                );
-                if (nearby.contains(".and.") || nearby.contains(".or.")) continue;
+            // Check if we're inside or at the boundary of any Harbour keyword
+            if (isWithinHarbourKeyword(content, i)) {
+                continue; // Skip this position if it would break a keyword
             }
 
-            // Good break points
-            if (c == ',' || c == ' ' || c == '.' || c == ';' || c == ')') return i + 1;
+            // Good break points (in order of preference)
+            if (c == ' ') return i + 1;        // Prefer spaces
+            if (c == ',') return i + 1;        // Then commas  
+            if (c == '+') return i + 1;        // Then plus operators
+            if (c == ';') return i + 1;        // Then semicolons
+            if (c == ')') return i + 1;        // Then closing parentheses
+            if (c == '.' && !isWithinHarbourKeyword(content, i)) return i + 1; // Dots only if not in keywords
         }
 
-        return startPos;
+        return startPos; // No good break point found
+    }
+    
+    /**
+     * Check if a position is within a Harbour keyword that should not be split
+     */
+    private boolean isWithinHarbourKeyword(String content, int position) {
+        String lowerContent = content.toLowerCase();
+        
+        // Check dotted keywords (.and., .or., etc.)
+        for (String keyword : HARBOUR_KEYWORDS) {
+            if (isPositionWithinKeyword(lowerContent, position, keyword)) {
+                return true;
+            }
+        }
+        
+        // Check word keywords (when, valid, etc.) - must be whole words
+        for (String keyword : HARBOUR_WORD_KEYWORDS) {
+            if (isPositionWithinWordKeyword(content, position, keyword)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if position is within a dotted keyword
+     */
+    private boolean isPositionWithinKeyword(String lowerContent, int position, String keyword) {
+        for (int startIdx = Math.max(0, position - keyword.length() + 1); 
+             startIdx <= Math.min(position, lowerContent.length() - keyword.length()); 
+             startIdx++) {
+            
+            int endIdx = startIdx + keyword.length();
+            if (endIdx <= lowerContent.length()) {
+                String substring = lowerContent.substring(startIdx, endIdx);
+                if (substring.equals(keyword)) {
+                    if (position >= startIdx && position < endIdx) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Check if position is within a word keyword (must be whole word)
+     */
+    private boolean isPositionWithinWordKeyword(String content, int position, String keyword) {
+        String lowerContent = content.toLowerCase();
+        
+        for (int startIdx = Math.max(0, position - keyword.length() + 1); 
+             startIdx <= Math.min(position, content.length() - keyword.length()); 
+             startIdx++) {
+            
+            int endIdx = startIdx + keyword.length();
+            if (endIdx <= content.length()) {
+                String substring = lowerContent.substring(startIdx, endIdx);
+                if (substring.equals(keyword)) {
+                    // Check word boundaries
+                    boolean validStart = (startIdx == 0 || !Character.isLetterOrDigit(content.charAt(startIdx - 1)));
+                    boolean validEnd = (endIdx >= content.length() || !Character.isLetterOrDigit(content.charAt(endIdx)));
+                    
+                    if (validStart && validEnd && position >= startIdx && position < endIdx) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get the last non-empty line from the formatted text
+     */
+    private String getLastNonEmptyLine(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        
+        String[] lines = text.split("\n", -1);
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i].trim();
+            if (!line.isEmpty()) {
+                return lines[i]; // Return with original whitespace
+            }
+        }
+        return null;
     }
 
     /**
