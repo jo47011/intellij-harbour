@@ -48,13 +48,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private static final Pattern STRING_START_PATTERN =
             Pattern.compile("^\\s*[\"'].*");
 
-    // New patterns for switch/case statements
+    // New patterns for switch/case statements and DO CASE statements
     private static final Pattern SWITCH_PATTERN =
             Pattern.compile("^\\s*SWITCH\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DO_CASE_PATTERN =
+            Pattern.compile("^\\s*DO\\s+CASE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern CASE_PATTERN =
             Pattern.compile("^\\s*CASE\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ENDSWITCH_PATTERN =
             Pattern.compile("^\\s*ENDSWITCH.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENDCASE_PATTERN =
+            Pattern.compile("^\\s*ENDCASE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern LINE_CONTINUATION_PATTERN =
             Pattern.compile(".*;\\s*$");
 
@@ -202,6 +206,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int indentLevel = 0;
         boolean inFunctionBody = false;
         boolean inSwitchBlock = false;
+        boolean inDoCaseBlock = false;
         boolean inClassDefinition = false;
         int indentSize = 2; // Default indentation size for Harbour
         
@@ -279,6 +284,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 indentLevel = 0;
                 inFunctionBody = true;
                 inSwitchBlock = false;
+                inDoCaseBlock = false;
             }
 
             // Check for class start/end
@@ -297,6 +303,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 inSwitchBlock = true;
             }
 
+            // Check for DO CASE statement
+            boolean isDoCaseStatement = DO_CASE_PATTERN.matcher(line).matches();
+            if (isDoCaseStatement) {
+                // Found DO CASE statement
+                inDoCaseBlock = true;
+            }
+
             // Check for case statement
             boolean isCaseStatement = CASE_PATTERN.matcher(line).matches();
 
@@ -305,6 +318,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (isEndSwitchStatement) {
                 // Found endswitch statement
                 inSwitchBlock = false;
+            }
+            
+            // Check for endcase statement
+            boolean isEndCaseStatement = ENDCASE_PATTERN.matcher(line).matches();
+            if (isEndCaseStatement) {
+                inDoCaseBlock = false;
             }
 
             // Detect RETURN statements - all will use normal indentation now
@@ -359,13 +378,19 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 isBlockEnd = true;
             }
 
-            // Adjust indentation for case statements in switch blocks and content inside them
-            if (isCaseStatement && inSwitchBlock) {
-                // Handling case statement in switch block
-                // Case statements are at the same level as switch
-                effectiveIndentLevel = indentLevel - 1;
+            // Adjust indentation for case statements
+            if (isCaseStatement) {
+                if (inSwitchBlock) {
+                    // Handling case statement in switch block
+                    // Case statements are at the same level as switch
+                    effectiveIndentLevel = indentLevel - 1;
+                } else if (inDoCaseBlock) {
+                    // For DO CASE blocks, CASE statements should NOT be indented further
+                    // They should be at the same level as DO CASE
+                    if (indentLevel > 0) effectiveIndentLevel = indentLevel - 1;
+                }
             } else if (inSwitchBlock && !isEndSwitchStatement) {
-                // For content inside case blocks, use switch level + 1
+                // For content inside case blocks in SWITCH, use switch level + 1
                 // This gives one level of indentation instead of two
                 effectiveIndentLevel = Math.min(effectiveIndentLevel, (indentLevel - 1) + 1);
             }
@@ -525,8 +550,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (lowerLine.startsWith("if ") ||
                     lowerLine.startsWith("while ") ||
                     lowerLine.startsWith("for ") ||
-                    lowerLine.startsWith("do ") ||
-                    (lowerLine.startsWith("case ") && !inSwitchBlock)) { // Don't increase indent for case in switch
+                    (lowerLine.startsWith("do ") && !isDoCaseStatement) || // DO but not DO CASE
+                    isDoCaseStatement || // DO CASE starts a block
+                    (lowerLine.startsWith("case ") && !inSwitchBlock && !inDoCaseBlock)) { // Don't increase indent for case in switch or DO CASE
                 indentLevel++;
             }
             

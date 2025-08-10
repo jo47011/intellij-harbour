@@ -43,13 +43,10 @@ public class HarbourDebuggerConnection {
         try {
             HarbourLogger.log("HarbourDebuggerConnection", "=== STARTING PYCHARM DEBUG SERVER v1.0.260 ===");
             HarbourLogger.log("HarbourDebuggerConnection", "Starting to listen on port " + port);
-            System.out.println("🔧 HarbourDebuggerConnection.startListening() called");
-            System.out.println("🔧 Target port: " + port);
             
             // Aggressive port cleanup before binding
             if (!isPortAvailable(port)) {
                 HarbourLogger.log("HarbourDebuggerConnection", "Port " + port + " is in use, attempting to free it");
-                System.out.println("⚠️  Port " + port + " is in use, attempting to free it");
                 forceReleasePort(port);
                 
                 // Wait a moment for port to be released
@@ -62,23 +59,15 @@ public class HarbourDebuggerConnection {
                 // Check again
                 if (!isPortAvailable(port)) {
                     HarbourLogger.log("HarbourDebuggerConnection", "WARNING: Port " + port + " still appears to be in use");
-                    System.out.println("⚠️  WARNING: Port " + port + " still appears to be in use");
                 }
-            } else {
-                System.out.println("✅ Port " + port + " is available");
             }
             
-            System.out.println("🔧 Creating ServerSocket on port " + port + "...");
             serverSocket = new ServerSocket(port);
             serverSocket.setReuseAddress(true); // Allow quick restart
             serverSocket.setSoTimeout(ACCEPT_TIMEOUT);
             
             HarbourLogger.log("HarbourDebuggerConnection", "✅ Server socket created and listening on port " + port);
             HarbourLogger.log("HarbourDebuggerConnection", "Server socket address: " + serverSocket.getInetAddress() + ":" + serverSocket.getLocalPort());
-            
-            System.out.println("✅ SUCCESS: ServerSocket created and bound to port " + port);
-            System.out.println("🔗 Server address: " + serverSocket.getInetAddress() + ":" + serverSocket.getLocalPort());
-            System.out.println("⚡ PYCHARM IS NOW LISTENING ON PORT " + port + " - READY FOR HARBOUR!");
             
             return true;
             

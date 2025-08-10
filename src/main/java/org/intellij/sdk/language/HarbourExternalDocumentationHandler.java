@@ -45,10 +45,14 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         HarbourLogger.log("DocHandler", "HarbourExternalDocumentationHandler initialized on " + osName);
     }
     // Using static variable since ThreadLocal wasn't working correctly
-    private static boolean IS_CLICK_MODE = false;
-    private static long LAST_CLICK_TIME = 0;
-    private static AtomicInteger CALL_COUNTER = new AtomicInteger(0);
+    private static volatile boolean IS_CLICK_MODE = false;
+    private static volatile long LAST_CLICK_TIME = 0;
+    private static final AtomicInteger CALL_COUNTER = new AtomicInteger(0);
     private static boolean MOUSE_LISTENER_REGISTERED = false;
+    
+    // Flag to prevent premature click mode reset during concurrent handler processing
+    private static volatile boolean CLICK_MODE_LOCKED = false;
+    private static final Object CLICK_MODE_LOCK = new Object();
     
     // Cache to prevent duplicate browser openings within a short time window
     private static final Map<String, Long> recentlyOpenedUrls = new HashMap<>();
@@ -56,17 +60,65 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
 
     // Method to set click mode - called from mouse listener
     public static void setClickMode(boolean isClick) {
-        IS_CLICK_MODE = isClick;
-        if (isClick) {
-            LAST_CLICK_TIME = System.currentTimeMillis();
-            CALL_COUNTER.set(0);
+        synchronized (CLICK_MODE_LOCK) {
+            IS_CLICK_MODE = isClick;
+            if (isClick) {
+                LAST_CLICK_TIME = System.currentTimeMillis();
+                CALL_COUNTER.set(0);
+                CLICK_MODE_LOCKED = true; // Lock to prevent premature reset during processing
+                HarbourLogger.log("DocHandler", "Click mode set to: " + isClick + " (locked: " + CLICK_MODE_LOCKED + ")");
+            } else if (!CLICK_MODE_LOCKED) {
+                // Only reset if not locked during active processing
+                IS_CLICK_MODE = false;
+                HarbourLogger.log("DocHandler", "Click mode set to: " + isClick + " (locked: " + CLICK_MODE_LOCKED + ")");
+            } else {
+                HarbourLogger.log("DocHandler", "Click mode reset blocked - system is locked during processing");
+            }
         }
-        HarbourLogger.log("DocHandler", "Click mode set to: " + isClick);
     }
     
     // Method to check if currently in click mode - used by main handler for consistency
     public static boolean isClickMode() {
-        return IS_CLICK_MODE;
+        synchronized (CLICK_MODE_LOCK) {
+            // Defensive check: auto-expire click mode if too much time has passed
+            if (IS_CLICK_MODE) {
+                long timeSinceClick = System.currentTimeMillis() - LAST_CLICK_TIME;
+                if (timeSinceClick > 5000) { // 5 second safety timeout
+                    HarbourLogger.log("DocHandler", "SAFETY: Click mode auto-expired after " + timeSinceClick + "ms");
+                    IS_CLICK_MODE = false;
+                    CLICK_MODE_LOCKED = false;
+                }
+            }
+            return IS_CLICK_MODE;
+        }
+    }
+    
+    // Method to safely reset click mode after processing - prevents race conditions
+    public static void resetClickMode() {
+        synchronized (CLICK_MODE_LOCK) {
+            IS_CLICK_MODE = false;
+            CLICK_MODE_LOCKED = false;
+            HarbourLogger.log("DocHandler", "Click mode safely reset (unlocked)");
+        }
+    }
+    
+    // Method to check if click mode should be handled (recent click within timeout)
+    public static boolean shouldHandleAsClick() {
+        synchronized (CLICK_MODE_LOCK) {
+            if (!IS_CLICK_MODE) {
+                return false;
+            }
+            
+            long timeSinceClick = System.currentTimeMillis() - LAST_CLICK_TIME;
+            if (timeSinceClick > 2000) { // 2 second timeout for click events
+                HarbourLogger.log("DocHandler", "Click mode expired after " + timeSinceClick + "ms - auto-resetting");
+                IS_CLICK_MODE = false;
+                CLICK_MODE_LOCKED = false;
+                return false;
+            }
+            
+            return true;
+        }
     }
 
     @Override
@@ -180,14 +232,14 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
                          ", timeSinceClick=" + timeSinceClick + "ms");
 
         // Check if we're in click mode - only open browser on actual clicks, not hover
-        boolean shouldOpenBrowser = IS_CLICK_MODE;
+        boolean shouldOpenBrowser = shouldHandleAsClick();
         
         if (shouldOpenBrowser) {
             HarbourLogger.log("DocHandler", "CLICK MODE - Opening documentation for external function: " + functionName);
             openExternalDocumentation(project, functionName);
             
-            // Always reset click mode immediately after opening browser
-            setClickMode(false);
+            // Use safe reset to prevent race conditions with other handlers
+            resetClickMode();
             
             // Return empty array to prevent normal navigation after opening browser
             HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Click handled, returning empty array for: " + functionName);

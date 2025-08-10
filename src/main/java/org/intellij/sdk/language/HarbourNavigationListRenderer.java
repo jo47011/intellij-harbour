@@ -6,6 +6,7 @@ import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
@@ -92,7 +93,83 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             applySyntaxHighlighting(paddedCode, navElement.getLineNumber());
 
             // Definition indicator removed as requested
+        } else {
+            // Handle raw PsiElements (variables) with enhanced styling
+            handleVariablePsiElement(element, maxFileNameWidth);
         }
+    }
+
+    /**
+     * Handle raw PsiElement objects (variables) with enhanced styling
+     */
+    private void handleVariablePsiElement(PsiElement element, int maxFileNameWidth) {
+        if (element == null) return;
+        
+        try {
+            // Extract variable information from PsiElement
+            String variableName = element.getText();
+            PsiFile containingFile = element.getContainingFile();
+            if (containingFile == null) return;
+            
+            String fileName = containingFile.getName();
+            String filePath = containingFile.getVirtualFile() != null ? 
+                containingFile.getVirtualFile().getPath() : fileName;
+            
+            // Calculate line number
+            int lineNumber = HarbourLogger.calculateLineNumber(element);
+            
+            // Read line content for context
+            String lineContent = getLineText(containingFile, element);
+            String processedCode = truncateCodeText(lineContent != null ? lineContent.trim() : "");
+            
+            // Apply same formatting as HarbourNavigationElement
+            String truncatedFileName = truncateFileName(fileName, maxFileNameWidth);
+            String formattedFileName = String.format("%-" + maxFileNameWidth + "s", truncatedFileName);
+            String formattedLineNumber = String.format("%5d", lineNumber);
+            
+            // Add formatted output with same styling as functions
+            append(formattedFileName, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+            append(formattedLineNumber, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+            append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            
+            // Apply syntax highlighting to code
+            String paddedCode;
+            if (processedCode.length() > 80) {
+                paddedCode = processedCode.substring(0, 79) + "…";
+            } else {
+                paddedCode = String.format("%-80s", processedCode);
+            }
+            
+            applySyntaxHighlighting(paddedCode, lineNumber);
+            
+        } catch (Exception e) {
+            // Fallback to simple rendering
+            append(element.getText(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        }
+    }
+    
+    /**
+     * Get line text for a PsiElement
+     */
+    private String getLineText(PsiFile file, PsiElement element) {
+        try {
+            String fileText = file.getText();
+            if (fileText == null) return null;
+            
+            int offset = element.getTextOffset();
+            String[] lines = fileText.split("\n");
+            
+            int currentOffset = 0;
+            for (String line : lines) {
+                if (currentOffset + line.length() >= offset) {
+                    return line;
+                }
+                currentOffset += line.length() + 1; // +1 for newline
+            }
+        } catch (Exception e) {
+            // Ignore and return null
+        }
+        return null;
     }
 
 
@@ -250,8 +327,9 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             }
         }
         
-        // Add some reasonable limit to prevent extremely wide columns
-        return Math.min(maxWidth, 30);
+        // Add some reasonable limit to prevent extremely wide columns  
+        // Reduced width for better variable display
+        return Math.min(maxWidth, 20);
     }
     
     /**

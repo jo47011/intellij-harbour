@@ -26,7 +26,6 @@ public class HarbourDebuggerRunnerSimple extends GenericProgramRunner {
     
     public HarbourDebuggerRunnerSimple() {
         LOG.info("HarbourDebuggerRunnerSimple initialized on " + SystemInfo.getOsNameAndVersion());
-        System.out.println("🔧 HarbourDebuggerRunnerSimple CONSTRUCTOR v1.0.265 - " + SystemInfo.getOsNameAndVersion());
         
         // Log to file for Windows debugging (use temp directory to avoid permission issues)
         try {
@@ -51,11 +50,6 @@ public class HarbourDebuggerRunnerSimple extends GenericProgramRunner {
     @Override
     public boolean canRun(@NotNull String executorId, @NotNull RunProfile profile) {
         LOG.info("HarbourDebuggerRunnerSimple.canRun() called");
-        System.out.println("🔍 HarbourDebuggerRunnerSimple.canRun() called - v1.0.265");
-        System.out.println("🔍 OS: " + SystemInfo.getOsNameAndVersion());
-        System.out.println("🔍 Executor ID: " + executorId);
-        System.out.println("🔍 Profile class: " + profile.getClass().getName());
-        System.out.println("🔍 Profile name: " + profile.getName());
         
         // Log to file for Windows debugging
         try {
@@ -75,11 +69,8 @@ public class HarbourDebuggerRunnerSimple extends GenericProgramRunner {
         boolean isDebugExecutor = DefaultDebugExecutor.EXECUTOR_ID.equals(executorId);
         boolean isHarbourDebugConfig = profile instanceof HarbourDebuggerRunConfig;
         
-        System.out.println("🔍 Is debug executor: " + isDebugExecutor);
-        System.out.println("🔍 Is HarbourDebuggerRunConfig: " + isHarbourDebugConfig);
         
         boolean result = isDebugExecutor && isHarbourDebugConfig;
-        System.out.println("🔍 HarbourDebuggerRunnerSimple.canRun() returning: " + result);
         LOG.info("HarbourDebuggerRunnerSimple.canRun() returning: " + result);
         
         return result;
@@ -90,9 +81,6 @@ public class HarbourDebuggerRunnerSimple extends GenericProgramRunner {
     protected RunContentDescriptor doExecute(@NotNull RunProfileState state,
                                              @NotNull ExecutionEnvironment env) throws ExecutionException {
         LOG.info("HarbourDebuggerRunnerSimple.doExecute() called");
-        System.out.println("🚀 HarbourDebuggerRunnerSimple.doExecute() called - v1.0.265");
-        System.out.println("🚀 OS: " + SystemInfo.getOsNameAndVersion());
-        System.out.println("🚀 Project: " + env.getProject().getName());
         
         // Log to file for Windows debugging
         try {

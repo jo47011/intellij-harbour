@@ -21,8 +21,12 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.options.ShowSettingsUtil;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -292,14 +296,24 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             
             message.append("\nLinting will continue with available syntax checks.");
             
-            NotificationGroupManager.getInstance()
+            Notification notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Harbour Application")
                 .createNotification(
                     "Missing Include Files",
                     message.toString(),
                     NotificationType.WARNING
-                )
-                .notify(project);
+                );
+            
+            // Add action to open settings
+            notification.addAction(new NotificationAction("Configure Include Paths") {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "Harbour");
+                    notification.expire();
+                }
+            });
+            
+            notification.notify(project);
         });
     }
     
