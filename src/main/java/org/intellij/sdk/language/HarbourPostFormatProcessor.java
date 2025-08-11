@@ -765,8 +765,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private boolean shouldAddContinuationSemicolon(String segment, String fullContent, int currentPos, int breakPos) {
         String trimmedSegment = segment.trim();
         
-        // Don't add semicolon if segment already ends with one
-        if (trimmedSegment.endsWith(";") || trimmedSegment.endsWith("+") || trimmedSegment.endsWith("//")) {
+        // Don't add semicolon if segment already ends with one or ends with comment
+        if (trimmedSegment.endsWith(";") || trimmedSegment.endsWith("//")) {
             return false;
         }
         

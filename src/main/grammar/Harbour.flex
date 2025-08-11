@@ -81,6 +81,7 @@ SPECIAL_CHARS = [ÄÖÜäöüß]
     "while"                 { return HarbourCustomTypes.WHILE; }
     "enddo"                 { return HarbourCustomTypes.ENDDO; }
     "for"                   { return HarbourCustomTypes.FOR; }
+    "each"                  { return HarbourCustomTypes.IDENT; } // Treat as identifier for now
     "next"                  { return HarbourCustomTypes.NEXT; }
     "switch"                { return HarbourCustomTypes.SWITCH; }
     "case"                  { return HarbourCustomTypes.CASE; }
