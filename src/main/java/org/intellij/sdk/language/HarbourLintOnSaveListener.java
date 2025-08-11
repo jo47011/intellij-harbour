@@ -12,7 +12,8 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 
 /**
- * Listener to trigger linting when Harbour files are saved.
+ * Listener to trigger linting and function re-indexing when Harbour files are saved.
+ * This is essential for both linting functionality and forcing re-annotation after dynamic indexing.
  */
 public class HarbourLintOnSaveListener implements FileDocumentManagerListener {
     
@@ -57,14 +58,20 @@ public class HarbourLintOnSaveListener implements FileDocumentManagerListener {
         // Trigger a code analysis update for this file
         PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
         if (psiFile != null) {
-            HarbourLogger.log("HarbourLinter", "=== SAVE TRIGGERED - Triggering lint on save for: " + file.getName() + " ===");
+            HarbourLogger.log("HarbourLinter", "=== SAVE TRIGGERED - Processing: " + file.getName() + " ===");
             
-            // Set save trigger flag for the external annotator
+            // Update function registry with new functions from this file (save-based indexing)
+            HarbourFunctionClassificationService functionService = HarbourFunctionClassificationService.getInstance(project);
+            functionService.updateFileInternalFunctions(file);
+            
+            // Set save trigger flag for the external annotator  
             String filePath = file.getPath();
             HarbourExternalAnnotator.setSaveTrigger(filePath);
             
-            // Force external annotator to run
+            // Force re-annotation to update both linting and function call colors
             DaemonCodeAnalyzer.getInstance(project).restart(psiFile);
+            
+            HarbourLogger.log("HarbourLinter", "=== SAVE COMPLETE - Function indexing and linting completed for: " + file.getName() + " ===");
         }
     }
 }
