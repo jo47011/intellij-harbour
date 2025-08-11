@@ -33,6 +33,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             Pattern.compile("^\\s*LOCAL\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern DATA_DECLARATION_PATTERN =
             Pattern.compile("^\\s*DATA\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MEMVAR_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*MEMVAR\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PRIVATE_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*PRIVATE\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern METHOD_DECLARATION_PATTERN =
             Pattern.compile("^\\s*METHOD\\s+\\w+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern METHOD_IMPLEMENTATION_PATTERN =
@@ -215,6 +219,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int returnIndent = settings.RETURN_INDENT;
         int dataIndent = settings.DATA_INDENT;
         int methodIndent = settings.METHOD_INDENT;
+        int memvarIndent = settings.MEMVAR_INDENT;
+        int privateIndent = settings.PRIVATE_INDENT;
         boolean sequenceLikeNormalCode = settings.SEQUENCE_LIKE_NORMAL_CODE;
 
         // Removed verbose logging for performance
@@ -332,6 +338,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for statement types
             boolean isLocalDeclaration = LOCAL_DECLARATION_PATTERN.matcher(line).matches();
             boolean isDataDeclaration = DATA_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isMemvarDeclaration = MEMVAR_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isPrivateDeclaration = PRIVATE_DECLARATION_PATTERN.matcher(line).matches();
             boolean isMethodDeclaration = METHOD_DECLARATION_PATTERN.matcher(line).matches();
             boolean isBeginSequence = BEGIN_SEQUENCE_PATTERN.matcher(line).matches();
             boolean isRecoverUsing = RECOVER_USING_PATTERN.matcher(line).matches();
@@ -358,6 +366,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             } else if (isDataDeclaration) {
                 // Apply custom indentation for DATA declarations
                 customIndentSpaces = dataIndent;
+            } else if (isMemvarDeclaration) {
+                // Apply custom indentation for MEMVAR declarations
+                customIndentSpaces = memvarIndent;
+            } else if (isPrivateDeclaration) {
+                // Apply custom indentation for PRIVATE declarations
+                customIndentSpaces = privateIndent;
             } else if (isMethodDeclaration && inClassDefinition) {
                 // Apply custom indentation for METHOD declarations only inside CLASS/ENDCLASS
                 customIndentSpaces = methodIndent;

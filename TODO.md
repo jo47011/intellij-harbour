@@ -3,6 +3,14 @@
 - cleanup code, get claude to find duplicate, unused etc code snippets
 
 
+renaming feature:
+
+- ctrl-F6 rename => propose current function or variable name in rename field
+
+=> not working, pls fix, see Screenshot where I want the text that the user wants to rename
+
+
+
 formatting:
 
       do case

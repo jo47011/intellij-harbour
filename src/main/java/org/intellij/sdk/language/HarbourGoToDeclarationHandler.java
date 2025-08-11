@@ -512,6 +512,22 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (!isFunction) {
             isFunction = isFunctionCall(file, element, identifierName);
         }
+        
+        // Be more aggressive about treating things as functions if they look like function calls
+        // This helps with missing includes where PSI parsing might fail
+        if (!isFunction && identifierName != null && identifierName.length() > 0) {
+            // Check if this looks like a function call pattern (identifier followed by parentheses somewhere in context)
+            {
+                String contextLineText = getLineText(file, element);
+                if (contextLineText != null) {
+                    String pattern = "\\b" + Pattern.quote(identifierName) + "\\s*\\(";
+                    if (Pattern.compile(pattern, Pattern.CASE_INSENSITIVE).matcher(contextLineText).find()) {
+                        isFunction = true;
+                        HarbourLogger.log(COMPONENT, "Treating as function based on pattern match: " + identifierName);
+                    }
+                }
+            }
+        }
 
         // Use our custom finder to locate occurrences of this symbol
         Project project = element.getProject();
@@ -828,9 +844,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 }
             }
             
-            // Show popup for external functions on click
-            if (isExternalFunction && isFunction && isClick) {
-                HarbourLogger.log(COMPONENT, "Single external function on click - showing popup");
+            // Show popup for functions on click (both external and internal)
+            if (isFunction && isClick) {
+                HarbourLogger.log(COMPONENT, "Single function on click - showing popup (external: " + isExternalFunction + ")");
                 final String searchedFunctionName = identifierName;
                 
                 ApplicationManager.getApplication().invokeLater(() -> {
@@ -2106,6 +2122,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         int scopeStart = 0;
         for (int i = clickedLineIndex; i >= 0; i--) {
             String line = lines[i].toUpperCase().trim();
+            // Skip comments - they should not be considered as function declarations
+            if (line.startsWith("//") || line.startsWith("/*")) {
+                continue;
+            }
             if (line.startsWith("FUNCTION ") || line.startsWith("PROCEDURE ") || 
                 line.startsWith("METHOD ") || line.startsWith("CLASS ")) {
                 scopeStart = i;
@@ -2117,6 +2137,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         int scopeEnd = lines.length - 1;
         for (int i = scopeStart + 1; i < lines.length; i++) {
             String line = lines[i].toUpperCase().trim();
+            // Skip comments - they should not be considered as function declarations
+            if (line.startsWith("//") || line.startsWith("/*")) {
+                continue;
+            }
             if (line.startsWith("FUNCTION ") || line.startsWith("PROCEDURE ") || 
                 line.startsWith("METHOD ") || line.startsWith("CLASS ")) {
                 scopeEnd = i - 1;

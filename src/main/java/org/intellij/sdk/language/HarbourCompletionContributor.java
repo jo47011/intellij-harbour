@@ -83,9 +83,9 @@ public class HarbourCompletionContributor extends CompletionContributor {
                                 HarbourLogger.log("CompletionContributor", "Available commands: " + String.join(", ", commands));
                             }
 
-                            // Create case-insensitive prefix matcher
-                            CompletionResultSet caseInsensitiveResult = result.withPrefixMatcher(
-                                    new CamelHumpMatcher(result.getPrefixMatcher().getPrefix(), true));
+                            // Use the original result without modifying prefix matcher
+                            // This should provide the most straightforward completion behavior
+                            CompletionResultSet caseInsensitiveResult = result;
 
                             // Get project from original file
                             Project project = parameters.getOriginalFile().getProject();
@@ -332,13 +332,15 @@ public class HarbourCompletionContributor extends CompletionContributor {
             for (int i = scope[0]; i <= Math.min(scope[1], lines.length - 1); i++) {
                 scopeText.append(lines[i]).append("\n");
             }
+            
+            // Debug logging removed - issue found and fixed
 
             // Find all LOCAL variable declarations in the current scope
             Set<String> localVariables = new HashSet<>();
             Set<String> paramSet = new HashSet<>(); // Set to track parameters separately
 
-            // Pattern for LOCAL variable declarations
-            Pattern localPattern = Pattern.compile("(?i)\\bLOCAL\\s+([\\w,\\s:=]+)");
+            // Pattern for LOCAL variable declarations - stop at end of line to avoid matching across lines
+            Pattern localPattern = Pattern.compile("(?i)^\\s*LOCAL\\s+([\\w,\\s:=]+?)\\s*$", Pattern.MULTILINE);
             Matcher localMatcher = localPattern.matcher(scopeText.toString());
 
             while (localMatcher.find()) {
@@ -349,6 +351,7 @@ public class HarbourCompletionContributor extends CompletionContributor {
 
                 // Split by commas to get individual variables
                 String[] vars = declarations.split(",");
+                
                 for (String var : vars) {
                     // Extract variable name (before any assignment or type declaration)
                     String varName = var.trim();
