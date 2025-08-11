@@ -194,6 +194,133 @@ public final class HarbourFunctionClassificationService {
     }
 
     /**
+     * Add a function to the internal function registry.
+     * 
+     * @param functionName The function name to add
+     */
+    public void addInternalFunction(@NotNull String functionName) {
+        String normalizedName = functionName.toLowerCase();
+        internalFunctions.add(normalizedName);
+        HarbourLogger.log("FunctionClassification", "Added internal function: " + functionName);
+    }
+
+    /**
+     * Add a procedure to the internal procedure registry.
+     * 
+     * @param procedureName The procedure name to add
+     */
+    public void addInternalProcedure(@NotNull String procedureName) {
+        String normalizedName = procedureName.toLowerCase();
+        internalProcedures.add(normalizedName);
+        HarbourLogger.log("FunctionClassification", "Added internal procedure: " + procedureName);
+    }
+
+    /**
+     * Add a class to the internal class registry.
+     * 
+     * @param className The class name to add
+     */
+    public void addInternalClass(@NotNull String className) {
+        String normalizedName = className.toLowerCase();
+        internalClasses.add(normalizedName);
+        HarbourLogger.log("FunctionClassification", "Added internal class: " + className);
+    }
+
+    /**
+     * Add a method to the internal method registry.
+     * 
+     * @param methodName The method name to add
+     */
+    public void addInternalMethod(@NotNull String methodName) {
+        String normalizedName = methodName.toLowerCase();
+        internalMethods.add(normalizedName);
+        HarbourLogger.log("FunctionClassification", "Added internal method: " + methodName);
+    }
+
+    /**
+     * Remove a function from the internal function registry.
+     * 
+     * @param functionName The function name to remove
+     */
+    public void removeInternalFunction(@NotNull String functionName) {
+        String normalizedName = functionName.toLowerCase();
+        if (internalFunctions.remove(normalizedName)) {
+            HarbourLogger.log("FunctionClassification", "Removed internal function: " + functionName);
+        }
+    }
+
+    /**
+     * Remove a procedure from the internal procedure registry.
+     * 
+     * @param procedureName The procedure name to remove
+     */
+    public void removeInternalProcedure(@NotNull String procedureName) {
+        String normalizedName = procedureName.toLowerCase();
+        if (internalProcedures.remove(normalizedName)) {
+            HarbourLogger.log("FunctionClassification", "Removed internal procedure: " + procedureName);
+        }
+    }
+
+    /**
+     * Remove a class from the internal class registry.
+     * 
+     * @param className The class name to remove
+     */
+    public void removeInternalClass(@NotNull String className) {
+        String normalizedName = className.toLowerCase();
+        if (internalClasses.remove(normalizedName)) {
+            HarbourLogger.log("FunctionClassification", "Removed internal class: " + className);
+        }
+    }
+
+    /**
+     * Remove a method from the internal method registry.
+     * 
+     * @param methodName The method name to remove
+     */
+    public void removeInternalMethod(@NotNull String methodName) {
+        String normalizedName = methodName.toLowerCase();
+        if (internalMethods.remove(normalizedName)) {
+            HarbourLogger.log("FunctionClassification", "Removed internal method: " + methodName);
+        }
+    }
+
+    /**
+     * Scan a single file and update the internal function registries based on its current content.
+     * This method compares the current file content with what was previously indexed and updates accordingly.
+     * 
+     * @param file The virtual file to scan
+     */
+    public void updateFileInternalFunctions(@NotNull VirtualFile file) {
+        HarbourLogger.log("FunctionClassification", "Updating internal functions for file: " + file.getName());
+        
+        PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
+        if (psiFile == null) {
+            return;
+        }
+        
+        String fileContent = psiFile.getText();
+        if (fileContent == null || fileContent.isEmpty()) {
+            return;
+        }
+        
+        // Store current functions from this file (we don't have a per-file tracking yet, 
+        // so we'll just add new ones - this is simpler and follows KISS principle)
+        
+        // Extract and add new functions found in the file
+        int functionsFound = findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", file.getName());
+        int proceduresFound = findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", file.getName());
+        int classesFound = findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", file.getName());
+        int methodsFound = findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", file.getName());
+        
+        if (functionsFound > 0 || proceduresFound > 0 || classesFound > 0 || methodsFound > 0) {
+            HarbourLogger.log("FunctionClassification", 
+                    String.format("Updated file %s: %d functions, %d procedures, %d classes, %d methods", 
+                            file.getName(), functionsFound, proceduresFound, classesFound, methodsFound));
+        }
+    }
+
+    /**
      * Force re-scan of the project to update internal function registry.
      * This should be called when project files change significantly.
      */
@@ -466,6 +593,9 @@ public final class HarbourFunctionClassificationService {
         @Override
         public void runActivity(@NotNull Project project) {
             HarbourLogger.log("FunctionClassification", "Initializing function classification service");
+            
+            // Initialize the save listener service to ensure it's available
+            HarbourSaveListenerService.getInstance();
             
             // Get the service instance (this will create it if needed)
             HarbourFunctionClassificationService service = getInstance(project);

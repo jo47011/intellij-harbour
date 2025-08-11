@@ -8,14 +8,21 @@ import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import org.intellij.sdk.language.psi.HarbourCustomTypes;
 import org.jetbrains.annotations.NotNull;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Annotator for Harbour function calls.
@@ -24,10 +31,18 @@ import org.jetbrains.annotations.NotNull;
  */
 public class HarbourFunctionCallAnnotator implements Annotator {
     private static final Logger LOG = Logger.getInstance(HarbourFunctionCallAnnotator.class);
+    
+    // Track file modification times to detect changes
+    private static final ConcurrentHashMap<String, Long> fileModificationTimes = new ConcurrentHashMap<>();
+    private static final AtomicLong lastIndexingCheck = new AtomicLong(0);
+    private static final long INDEXING_THROTTLE_MS = 1000; // Check for changes at most once per second
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
         try {
+            // Dynamic indexing: Check if the current file has changed and needs re-indexing
+            checkAndUpdateFileIndex(element);
+            
             // Direct token approach - look for any IDENT token
             if (element instanceof LeafPsiElement) {
                 LeafPsiElement leaf = (LeafPsiElement) element;
@@ -111,5 +126,67 @@ public class HarbourFunctionCallAnnotator implements Annotator {
         }
 
         return false;
+    }
+    
+    /**
+     * Check if the current file has changed and update function index if needed.
+     * This provides dynamic function indexing without relying on save listeners.
+     */
+    private void checkAndUpdateFileIndex(@NotNull PsiElement element) {
+        long currentTime = System.currentTimeMillis();
+        
+        // Throttle indexing checks to avoid excessive processing
+        if (currentTime - lastIndexingCheck.get() < INDEXING_THROTTLE_MS) {
+            return;
+        }
+        
+        lastIndexingCheck.set(currentTime);
+        
+        try {
+            PsiFile psiFile = element.getContainingFile();
+            if (psiFile == null) return;
+            
+            VirtualFile virtualFile = psiFile.getVirtualFile();
+            if (virtualFile == null) return;
+            
+            // Only process Harbour files
+            if (!"prg".equalsIgnoreCase(virtualFile.getExtension())) {
+                return;
+            }
+            
+            String filePath = virtualFile.getPath();
+            long currentModTime = virtualFile.getModificationStamp();
+            Long lastKnownModTime = fileModificationTimes.get(filePath);
+            
+            // Check if file has been modified since last indexing
+            if (lastKnownModTime == null || currentModTime > lastKnownModTime) {
+                HarbourLogger.log("FunctionCallAnnotator", "Dynamic indexing: Updating index for " + virtualFile.getName());
+                
+                // Update modification time first to prevent duplicate processing
+                fileModificationTimes.put(filePath, currentModTime);
+                
+                // Get function classification service and update index for this file
+                Project project = element.getProject();
+                HarbourFunctionClassificationService classificationService = 
+                    HarbourFunctionClassificationService.getInstance(project);
+                
+                classificationService.updateFileInternalFunctions(virtualFile);
+                
+                // Trigger re-annotation to update function call colors after indexing
+                PsiFile currentPsiFile = PsiManager.getInstance(project).findFile(virtualFile);
+                if (currentPsiFile != null) {
+                    // Schedule re-annotation in a non-blocking way
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        DaemonCodeAnalyzer.getInstance(project).restart(currentPsiFile);
+                    });
+                }
+                
+                HarbourLogger.log("FunctionCallAnnotator", "Dynamic indexing: Completed for " + virtualFile.getName());
+            }
+            
+        } catch (Exception e) {
+            // Log only to standard logger to avoid excessive debug output
+            LOG.error("Error in dynamic file indexing", e);
+        }
     }
 }

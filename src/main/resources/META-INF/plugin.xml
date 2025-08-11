@@ -92,7 +92,8 @@
         <!-- Breakpoint Properties Storage Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
         
-        <!-- Function Classification Service -->
+        <!-- Services -->
+        <applicationService serviceImplementation="org.intellij.sdk.language.HarbourSaveListenerService"/>
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
         
         <!-- Startup Activities -->
@@ -134,10 +135,6 @@
         
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
-        
-        <!-- File Save Listener for Linting -->
-        <listener class="org.intellij.sdk.language.HarbourLintOnSaveListener"
-                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </extensions>
 
     <actions>
