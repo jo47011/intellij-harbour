@@ -726,10 +726,37 @@ public class HarbourRenameProcessor extends RenamePsiElementProcessor {
                 HarbourIdElement idElement = (HarbourIdElement) element;
                 String name = idElement.getName();
                 HarbourLogger.log(COMPONENT, "HarbourIdElement getName(): " + name);
+                // Return the element itself if it has a name
+                if (name != null && !name.isEmpty()) {
+                    return element;
+                }
             } else if (element instanceof HarbourNamedElement) {
                 HarbourNamedElement namedElement = (HarbourNamedElement) element;
                 String name = namedElement.getName();
                 HarbourLogger.log(COMPONENT, "HarbourNamedElement getName(): " + name);
+                // Return the element itself if it has a name
+                if (name != null && !name.isEmpty()) {
+                    return element;
+                }
+            } else if (element instanceof FunctionCallImpl) {
+                // For function calls, try to get the name
+                String name = element.getText();
+                if (name != null && !name.isEmpty()) {
+                    // Extract just the function name (before parentheses if any)
+                    int parenIndex = name.indexOf('(');
+                    if (parenIndex > 0) {
+                        name = name.substring(0, parenIndex);
+                    }
+                    HarbourLogger.log(COMPONENT, "FunctionCall name extracted: " + name);
+                    return element;
+                }
+            } else if (element instanceof LeafPsiElement) {
+                // For leaf elements (like variable names), wrap them in a PsiNamedElement
+                String text = element.getText();
+                if (text != null && !text.isEmpty() && text.matches("\\w+")) {
+                    HarbourLogger.log(COMPONENT, "Wrapping LeafPsiElement '" + text + "' in HarbourNamedElementWrapper");
+                    return new HarbourNamedElementWrapper(element);
+                }
             }
         }
         
