@@ -183,7 +183,6 @@ PROCEDURE printDebugStackTrace()
    // Format stack trace for PyCharm console pattern matching
    cStackTrace := "[" + DToS(Date()) + " " + Time() + "]" + CRLF
    cStackTrace += "RUNTIME ERROR from custom ErrorBlock" + CRLF
-   cStackTrace += "Custom error handler called printDebugStackTrace()" + CRLF + CRLF
    cStackTrace += FormatStackTrace(aStack)
    
    // Write to .hbmk/pycharm_errors.log for PyCharm to detect

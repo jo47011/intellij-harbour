@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -160,6 +161,9 @@ public class HarbourFunctionCallAnnotator implements Annotator {
             
             // Check if file has been modified since last indexing
             if (lastKnownModTime == null || currentModTime > lastKnownModTime) {
+                // Check for cancellation before processing
+                ProgressManager.checkCanceled();
+                
                 HarbourLogger.log("FunctionCallAnnotator", "Dynamic indexing: Updating index for " + virtualFile.getName());
                 
                 // Update modification time first to prevent duplicate processing
@@ -170,6 +174,8 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                 HarbourFunctionClassificationService classificationService = 
                     HarbourFunctionClassificationService.getInstance(project);
                 
+                // Check for cancellation before expensive operation
+                ProgressManager.checkCanceled();
                 classificationService.updateFileInternalFunctions(virtualFile);
                 
                 // Trigger re-annotation to update function call colors after indexing
@@ -184,6 +190,9 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                 HarbourLogger.log("FunctionCallAnnotator", "Dynamic indexing: Completed for " + virtualFile.getName());
             }
             
+        } catch (ProcessCanceledException e) {
+            // Control flow exceptions should be rethrown, not logged
+            throw e;
         } catch (Exception e) {
             // Log only to standard logger to avoid excessive debug output
             LOG.error("Error in dynamic file indexing", e);

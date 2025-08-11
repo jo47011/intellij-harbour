@@ -12,9 +12,14 @@ import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
+import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.project.Project;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiFile;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
@@ -2046,6 +2051,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(project, "HarbourDebugger", "Starting universal error monitor for: " + hbmkErrorPath);
         HarbourLogger.log(project, "HarbourDebugger", "Error file monitor working directory: " + workingDir);
         
+        // Make workingDir effectively final for lambda
+        final String finalWorkingDir = workingDir;
+        
         // Start a background thread to monitor the error file
         Thread errorMonitor = new Thread(() -> {
             long hbmkLastModified = 0;
@@ -2075,9 +2083,14 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                             try {
                                 String content = new String(java.nio.file.Files.readAllBytes(hbmkErrorFile.toPath()));
                                 if (!content.trim().isEmpty()) {
-                                    // Send error to console
-                                    console.print("\n[Harbour Runtime Error from .hbmk/pycharm_errors.log]\n\n" + content.trim() + "\n", 
-                                        com.intellij.execution.ui.ConsoleViewContentType.ERROR_OUTPUT);
+                                    // Send error to console with simple direct hyperlinks
+                                    console.print("\n[Harbour Runtime Error from .hbmk/pycharm_errors.log]\n\n", 
+                                        ConsoleViewContentType.ERROR_OUTPUT);
+                                    
+                                    // Use simple direct hyperlink approach
+                                    displayClickableStackTrace(console, project, content.trim(), finalWorkingDir);
+                                    
+                                    console.print("\n", ConsoleViewContentType.ERROR_OUTPUT);
                                     
                                     HarbourLogger.log(project, "HarbourDebugger", 
                                         "Runtime error captured from .hbmk/pycharm_errors.log");
@@ -2116,6 +2129,193 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         errorMonitor.start();
         
         HarbourLogger.log(project, "HarbourDebugger", "Error file monitor started successfully");
+    }
+    
+    /**
+     * Display stacktrace with clickable lines - supports all formats
+     */
+    private void displayClickableStackTrace(ConsoleView console, Project project, String content, String workingDir) {
+        try {
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Starting displayClickableStackTrace");
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Content length: " + content.length() + " chars");
+            
+            String[] lines = content.split("\\r?\\n");
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Split into " + lines.length + " lines");
+        
+        for (String line : lines) {
+            String trimmedLine = line.trim();
+            boolean isClickableLine = false;
+            
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Processing line: '" + line + "', trimmed: '" + trimmedLine + "'");
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: startsWith('at ')=" + trimmedLine.startsWith("at ") + 
+                ", contains('(')=" + trimmedLine.contains("(") + 
+                ", contains(')')=" + trimmedLine.contains(")"));
+            
+            // Check Format 1 conditions
+            boolean isFormat1 = trimmedLine.startsWith("Stack:") && trimmedLine.contains("(") && trimmedLine.contains(")") && trimmedLine.contains(" in ");
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format1 check=" + isFormat1);
+            
+            // Check Format 2 conditions  
+            boolean isFormat2 = trimmedLine.startsWith("at ") && trimmedLine.contains("(") && trimmedLine.contains(")");
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 check=" + isFormat2);
+            
+            // Support all 3 formats:
+            // Format 1: "Stack: FUNCTION(LINE) in FILE.prg" 
+            // Format 2: "at FILE.prg(LINE)"
+            // Format 3: Any other format we encounter
+            
+            if (isFormat1) {
+                // Format 1: "Stack: MAIN(20) in test-gui.prg"
+                try {
+                    int inIndex = trimmedLine.lastIndexOf(" in ");
+                    if (inIndex > 0) {
+                        String fileName = trimmedLine.substring(inIndex + 4).trim();
+                        
+                        // Extract line number from function call
+                        int openParen = trimmedLine.indexOf('(');
+                        int closeParen = trimmedLine.indexOf(')', openParen);
+                        if (openParen > 0 && closeParen > openParen) {
+                            String lineNumberStr = trimmedLine.substring(openParen + 1, closeParen);
+                            try {
+                                int lineNumber = Integer.parseInt(lineNumberStr);
+                                VirtualFile file = findSourceFile(project, fileName, workingDir);
+                                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format1 - fileName=" + fileName + ", lineNumber=" + lineNumber + ", file=" + (file != null ? file.getPath() : "null"));
+                                if (file != null) {
+                                    HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format1 - Creating hyperlink for: " + fileName);
+                                    console.printHyperlink(line, new OpenFileHyperlinkInfo(project, file, lineNumber - 1));
+                                    console.print("\n", ConsoleViewContentType.ERROR_OUTPUT);
+                                    isClickableLine = true;
+                                }
+                            } catch (NumberFormatException e) {
+                                // Ignore, fall through to regular display
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Ignore parsing errors
+                }
+            } else if (isFormat2) {
+                // Format 2: "at menu.prg(87)" or "at FUNCTION(LINE)"
+                try {
+                    String afterAt = trimmedLine.substring(3).trim();
+                    int openParen = afterAt.lastIndexOf('(');
+                    int closeParen = afterAt.lastIndexOf(')', openParen + 1);
+                    
+                    if (openParen > 0 && closeParen > openParen) {
+                        String beforeParen = afterAt.substring(0, openParen).trim();
+                        String lineNumberStr = afterAt.substring(openParen + 1, closeParen);
+                        
+                        // Check if it's a file (contains .prg) or just a function name
+                        if (beforeParen.toLowerCase().endsWith(".prg")) {
+                            // It's a file reference: "at menu.prg(87)"
+                            try {
+                                int lineNumber = Integer.parseInt(lineNumberStr);
+                                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 - Parsed fileName='" + beforeParen + "', lineNumber=" + lineNumber);
+                                VirtualFile file = findSourceFile(project, beforeParen, workingDir);
+                                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 - file=" + (file != null ? file.getPath() : "null"));
+                                if (file != null) {
+                                    HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 - Creating hyperlink for: " + beforeParen);
+                                    console.printHyperlink(line, new OpenFileHyperlinkInfo(project, file, lineNumber - 1));
+                                    console.print("\n", ConsoleViewContentType.ERROR_OUTPUT);
+                                    isClickableLine = true;
+                                } else {
+                                    HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 - File not found, cannot create hyperlink");
+                                }
+                            } catch (NumberFormatException e) {
+                                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 - NumberFormatException: " + e.getMessage());
+                            }
+                        }
+                        // If it's just a function name like "at TRIM(0)", we can't make it clickable without more info
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Format2 exception: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+            
+            if (!isClickableLine) {
+                // Display line normally if not clickable
+                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Printing normal line: " + line);
+                console.print(line + "\n", ConsoleViewContentType.ERROR_OUTPUT);
+            }
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Completed displayClickableStackTrace");
+        } catch (Exception e) {
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Exception in displayClickableStackTrace: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Find source file in project - simple approach
+     */
+    private VirtualFile findSourceFile(Project project, String fileName, String workingDir) {
+        HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: findSourceFile called - fileName='" + fileName + "', workingDir='" + workingDir + "'");
+        
+        // Try working directory first
+        File file = new File(workingDir, fileName);
+        HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying workingDir path: " + file.getAbsolutePath() + ", exists=" + file.exists());
+        if (file.exists()) {
+            VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file in workingDir: " + (vf != null ? vf.getPath() : "null"));
+            return vf;
+        }
+        
+        // Try absolute path if fileName looks like it might be one
+        file = new File(fileName);
+        HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying as absolute path: " + file.getAbsolutePath() + ", exists=" + file.exists());
+        if (file.exists() && file.isAbsolute()) {
+            VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file as absolute: " + (vf != null ? vf.getPath() : "null"));
+            return vf;
+        }
+        
+        // Try project base directory
+        String basePath = project.getBasePath();
+        if (basePath != null) {
+            file = new File(basePath, fileName);
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying project base path: " + file.getAbsolutePath() + ", exists=" + file.exists());
+            if (file.exists()) {
+                VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file in project base: " + (vf != null ? vf.getPath() : "null"));
+                return vf;
+            }
+        }
+        
+        // Windows specific: Try the config working directory (C:\myprog\hbmiki)
+        if (runConfig != null && runConfig.getWorkingDirectory() != null) {
+            file = new File(runConfig.getWorkingDirectory(), fileName);
+            HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying config workingDir: " + file.getAbsolutePath() + ", exists=" + file.exists());
+            if (file.exists()) {
+                VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+                HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file in config workingDir: " + (vf != null ? vf.getPath() : "null"));
+                return vf;
+            }
+        }
+        
+        HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: File not found in any location");
+        return null;
+    }
+    
+    /**
+     * Simple hyperlink info for opening files
+     */
+    private static class OpenFileHyperlinkInfo implements com.intellij.execution.filters.HyperlinkInfo {
+        private final Project project;
+        private final VirtualFile file;
+        private final int line;
+        
+        public OpenFileHyperlinkInfo(Project project, VirtualFile file, int line) {
+            this.project = project;
+            this.file = file;
+            this.line = line;
+        }
+        
+        @Override
+        public void navigate(Project project) {
+            new com.intellij.openapi.fileEditor.OpenFileDescriptor(project, file, line, 0).navigate(true);
+        }
     }
 
 }
