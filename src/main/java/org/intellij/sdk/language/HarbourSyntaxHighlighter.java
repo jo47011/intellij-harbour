@@ -89,6 +89,9 @@ public class HarbourSyntaxHighlighter extends com.intellij.openapi.fileTypes.Syn
             tokenType == HarbourCustomTypes.DO ||
             tokenType == HarbourCustomTypes.WHILE ||
             tokenType == HarbourCustomTypes.ENDDO ||
+            tokenType == HarbourCustomTypes.FOR ||
+            tokenType == HarbourCustomTypes.TO ||
+            tokenType == HarbourCustomTypes.NEXT ||
             tokenType == HarbourCustomTypes.FUNCTION ||
             tokenType == HarbourCustomTypes.ENDFUNCTION ||
             tokenType == HarbourCustomTypes.PROCEDURE ||
@@ -112,7 +115,10 @@ public class HarbourSyntaxHighlighter extends com.intellij.openapi.fileTypes.Syn
             tokenType == HarbourCustomTypes.END ||
             tokenType == HarbourCustomTypes.AND ||
             tokenType == HarbourCustomTypes.OR ||
-            tokenType == HarbourCustomTypes.NOT) {
+            tokenType == HarbourCustomTypes.NOT ||
+            tokenType == HarbourCustomTypes.DOT_AND ||
+            tokenType == HarbourCustomTypes.DOT_OR ||
+            tokenType == HarbourCustomTypes.DOT_NOT) {
       return KEYWORD_KEYS;
     }
     // Comments

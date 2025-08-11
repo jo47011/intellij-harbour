@@ -6,10 +6,12 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.rename.PsiElementRenameHandler;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourNamedElement;
+import org.intellij.sdk.language.psi.HarbourTypes;
 import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
 import org.jetbrains.annotations.NotNull;
 
@@ -188,8 +190,59 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             if (PsiElementRenameHandler.DEFAULT_NAME.equals(dataId)) {
                 return element;
             }
+            if ("rename.suggested.name".equals(dataId)) {
+                // Provide the current name as suggestion
+                String currentName = getCurrentElementName(element);
+                HarbourLogger.log(COMPONENT, "Suggesting name for rename: " + currentName);
+                return currentName;
+            }
             return dataContext.getData(dataId);
         };
+    }
+    
+    /**
+     * Gets the current name of an element for use as rename suggestion
+     */
+    private String getCurrentElementName(PsiElement element) {
+        if (element == null) return null;
+        
+        // Try to get name from named elements
+        if (element instanceof HarbourNamedElement) {
+            String name = ((HarbourNamedElement) element).getName();
+            if (name != null && !name.isEmpty()) {
+                return name;
+            }
+        }
+        
+        if (element instanceof HarbourIdElement) {
+            String name = ((HarbourIdElement) element).getName();
+            if (name != null && !name.isEmpty()) {
+                return name;
+            }
+        }
+        
+        // For function calls, extract the function name
+        if (element instanceof FunctionCallImpl) {
+            PsiElement[] children = element.getChildren();
+            for (PsiElement child : children) {
+                if (child instanceof LeafPsiElement && 
+                    ((LeafPsiElement) child).getElementType() == HarbourTypes.IDENT) {
+                    return child.getText();
+                }
+            }
+        }
+        
+        // For leaf elements, use the text directly
+        if (element instanceof LeafPsiElement) {
+            LeafPsiElement leafElement = (LeafPsiElement) element;
+            if (leafElement.getElementType() == HarbourTypes.IDENT ||
+                leafElement.getElementType().toString().contains("IDENT")) {
+                return leafElement.getText();
+            }
+        }
+        
+        // Fallback to element text
+        return element.getText();
     }
 
     @Override

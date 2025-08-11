@@ -377,6 +377,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (isEndSwitchStatement || isEndClassStatement || isEndSequence) {
                 isBlockEnd = true;
             }
+            
+            // RECOVER USING should also be treated as a block ending/transition
+            if (isRecoverUsing) {
+                isBlockEnd = true;
+            }
 
             // Adjust indentation for case statements
             if (isCaseStatement) {
@@ -398,15 +403,23 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for else/elseif statements that need special handling
             boolean isElseStatement = lowerLine.equals("else") || lowerLine.startsWith("elseif");
             
-            // Reduce indentation for block endings
-            if (isBlockEnd) {
-                if (indentLevel > 0) indentLevel--;
-            }
-            
             // Handle else/elseif indentation - they should be at the same level as their corresponding if
             if (isElseStatement) {
                 // Temporarily decrease effectiveIndentLevel for this line only
                 if (effectiveIndentLevel > 0) effectiveIndentLevel--;
+            }
+            
+            // Special handling for SEQUENCE block terminators - they should align with BEGIN SEQUENCE
+            if (isRecoverUsing || isEndSequence) {
+                // These should be at the same level as BEGIN SEQUENCE, so reduce by 1
+                if (effectiveIndentLevel > 0) {
+                    effectiveIndentLevel = effectiveIndentLevel - 1;
+                }
+            }
+            
+            // Reduce indentation for block endings AFTER all other adjustments
+            if (isBlockEnd) {
+                if (indentLevel > 0) indentLevel--;
             }
 
             // Check if this line is a continuation of previous line
@@ -417,8 +430,21 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String newIndent;
 
             if (isCommentOnlyLine) {
-                // Comments should be indented like normal code (use previous line's actual indentation)
-                newIndent = previousLineActualIndent;
+                // Check if next line is a function/procedure declaration
+                boolean nextLineIsFunction = false;
+                if (i < lines.length - 1) {
+                    String nextLine = lines[i + 1].trim();
+                    nextLineIsFunction = FUNCTION_START_PATTERN.matcher(nextLine).matches() || 
+                                       METHOD_IMPLEMENTATION_PATTERN.matcher(nextLine).matches();
+                }
+                
+                if (nextLineIsFunction) {
+                    // Comments above functions should not be indented
+                    newIndent = "";
+                } else {
+                    // Other comments should use previous line's indentation
+                    newIndent = previousLineActualIndent;
+                }
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
@@ -714,6 +740,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private boolean shouldBreakLine(String line) {
         String trimmed = line.trim();
         
+        // Allow breaking lines with comments - the findBreakPoint method will handle breaking before the comment
+        
         // Don't break simple GET ... WHEN constructs (only very basic ones)
         if (SIMPLE_GET_WHEN_PATTERN.matcher(trimmed).matches()) {
             return false;
@@ -742,9 +770,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             return false;
         }
         
+        // Check what comes after the break point - if next content starts with comment, no semicolon needed
+        String contextAfter = fullContent.substring(breakPos).trim();
+        if (contextAfter.startsWith("//") || contextAfter.startsWith("/*")) {
+            return false;
+        }
+        
         // Don't add semicolon if we're breaking inside array/block syntax
         String contextBefore = fullContent.substring(0, currentPos);
-        String contextAfter = fullContent.substring(breakPos);
         
         // Count braces to see if we're inside a block
         int braceCount = 0;
@@ -782,6 +815,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private int findBreakPoint(String content, int startPos, int endPos) {
         if (endPos >= content.length()) return content.length();
+
+        // Check if line contains // comment - if so, don't break after it
+        int commentStart = content.indexOf("//", startPos);
+        if (commentStart >= 0 && commentStart < endPos) {
+            // Line has comment, only break before the comment
+            endPos = Math.min(endPos, commentStart);
+            if (endPos <= startPos) {
+                // Can't break before comment, don't break line at all
+                return content.length();
+            }
+        }
 
         // Look for good break points, starting from the end and working backwards
         for (int i = endPos; i > startPos; i--) {
