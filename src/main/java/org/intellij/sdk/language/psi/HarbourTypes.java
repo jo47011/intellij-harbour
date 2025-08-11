@@ -32,6 +32,7 @@ public interface HarbourTypes {
     IElementType CASE = new HarbourTokenType("CASE");
     IElementType OTHERWISE = new HarbourTokenType("OTHERWISE");
     IElementType ENDSWITCH = new HarbourTokenType("ENDSWITCH");
+    IElementType ENDCASE = new HarbourTokenType("ENDCASE");
     IElementType RETURN = new HarbourTokenType("RETURN");
     IElementType EXIT = new HarbourTokenType("EXIT");
     IElementType LOOP = new HarbourTokenType("LOOP");

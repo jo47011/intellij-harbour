@@ -11,18 +11,6 @@ renaming feature:
 
 
 
-formatting:
-
-      do case
-      case RECHAUS->Aufart$"NG"
-        kom:="GS"
-      case RECHAUS->Aufart="A"
-        kom:="Au"
-      case RECHAUS->Aufart="S"
-        kom:="St"
-        otherwise  <= this is wrong, should not be indented
-        kom:="Re"
-      endcase  <= wrong color, should be keyword as well
 
 
 

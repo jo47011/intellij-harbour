@@ -87,6 +87,7 @@ SPECIAL_CHARS = [ÄÖÜäöüß]
     "case"                  { return HarbourCustomTypes.CASE; }
     "otherwise"             { return HarbourCustomTypes.OTHERWISE; }
     "endswitch"             { return HarbourCustomTypes.ENDSWITCH; }
+    "endcase"               { return HarbourCustomTypes.ENDCASE; }
     "return"                { return HarbourCustomTypes.RETURN; }
     "exit"                  { return HarbourCustomTypes.EXIT; }
     "loop"                  { return HarbourCustomTypes.LOOP; }

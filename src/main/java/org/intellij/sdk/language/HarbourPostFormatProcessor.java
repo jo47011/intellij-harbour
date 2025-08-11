@@ -59,6 +59,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             Pattern.compile("^\\s*DO\\s+CASE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern CASE_PATTERN =
             Pattern.compile("^\\s*CASE\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern OTHERWISE_PATTERN =
+            Pattern.compile("^\\s*OTHERWISE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ENDSWITCH_PATTERN =
             Pattern.compile("^\\s*ENDSWITCH.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ENDCASE_PATTERN =
@@ -318,6 +320,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Check for case statement
             boolean isCaseStatement = CASE_PATTERN.matcher(line).matches();
+            
+            // Check for otherwise statement
+            boolean isOtherwiseStatement = OTHERWISE_PATTERN.matcher(line).matches();
 
             // Check for endswitch statement
             boolean isEndSwitchStatement = ENDSWITCH_PATTERN.matcher(line).matches();
@@ -397,14 +402,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 isBlockEnd = true;
             }
 
-            // Adjust indentation for case statements
-            if (isCaseStatement) {
+            // Adjust indentation for case and otherwise statements
+            if (isCaseStatement || isOtherwiseStatement) {
                 if (inSwitchBlock) {
-                    // Handling case statement in switch block
-                    // Case statements are at the same level as switch
+                    // Handling case/otherwise statement in switch block
+                    // Case/otherwise statements are at the same level as switch
                     effectiveIndentLevel = indentLevel - 1;
                 } else if (inDoCaseBlock) {
-                    // For DO CASE blocks, CASE statements should NOT be indented further
+                    // For DO CASE blocks, CASE and OTHERWISE statements should NOT be indented further
                     // They should be at the same level as DO CASE
                     if (indentLevel > 0) effectiveIndentLevel = indentLevel - 1;
                 }

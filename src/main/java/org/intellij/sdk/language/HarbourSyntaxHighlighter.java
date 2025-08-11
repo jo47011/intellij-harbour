@@ -103,6 +103,7 @@ public class HarbourSyntaxHighlighter extends com.intellij.openapi.fileTypes.Syn
             tokenType == HarbourCustomTypes.ENDMETHOD ||
             tokenType == HarbourCustomTypes.SWITCH ||
             tokenType == HarbourCustomTypes.ENDSWITCH ||
+            tokenType == HarbourCustomTypes.ENDCASE ||
             tokenType == HarbourCustomTypes.CASE ||
             tokenType == HarbourCustomTypes.OTHERWISE ||
             tokenType == HarbourCustomTypes.RETURN ||
