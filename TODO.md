@@ -2,18 +2,22 @@
 
 - cleanup code, get claude to find duplicate, unused etc code snippets
 
-- internal/external function: do we index only once?
-   what the best if we write a new function?
+
+formatting:
+
+      do case
+      case RECHAUS->Aufart$"NG"
+        kom:="GS"
+      case RECHAUS->Aufart="A"
+        kom:="Au"
+      case RECHAUS->Aufart="S"
+        kom:="St"
+        otherwise  <= this is wrong, should not be indented
+        kom:="Re"
+      endcase  <= wrong color, should be keyword as well
 
 
 
-
-
-navigation:
-
-- sometimes still uses comment as function declaration, see Screenshots
-
-- can we make the declaration dialog movable?
 
 code completion:
 - sometimes extra word is added, see Screenshot

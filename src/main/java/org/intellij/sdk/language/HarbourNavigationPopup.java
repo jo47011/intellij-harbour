@@ -109,6 +109,8 @@ public class HarbourNavigationPopup {
         JBPopupFactory.getInstance()
                 .createListPopupBuilder(list)
                 .setTitle(title)
+                .setMovable(true)
+                .setResizable(true)
                 .setItemChoosenCallback(() -> {
                     PsiElement selected = list.getSelectedValue();
                     
@@ -163,6 +165,8 @@ public class HarbourNavigationPopup {
                 .setTitle(searchedFunctionName != null ?
                     createHtmlTitle(searchedFunctionName, String.format("Choose Declaration (showing all %d results)", targets.size())) :
                     String.format("Choose Declaration (showing all %d results)", targets.size()))
+                .setMovable(true)
+                .setResizable(true)
                 .setItemChoosenCallback(() -> {
                     PsiElement selected = list.getSelectedValue();
                     if (selected instanceof Navigatable) {

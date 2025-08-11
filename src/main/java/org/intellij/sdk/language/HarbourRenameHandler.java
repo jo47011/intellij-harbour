@@ -155,8 +155,6 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             if (renamableElement != null && renamableElement != element) {
                 // Verify the renamable element is still valid
                 if (isValidElement(renamableElement)) {
-                    // Set this element as the one to rename in the context
-                    dataContext = updateDataContext(dataContext, renamableElement);
                     HarbourLogger.log(COMPONENT, "Using more specific element for rename: " + renamableElement.getText());
                     element = renamableElement;
                 } else {
@@ -171,7 +169,29 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
         if (element != null) {
             HarbourLogger.log(COMPONENT, "Starting rename on: " + element.getText());
             try {
-                super.invoke(project, editor, file, dataContext);
+                // Get the current name for suggestion
+                String currentName = getCurrentElementName(element);
+                HarbourLogger.log(COMPONENT, "Current name for suggestion: " + currentName);
+                
+                // Make element final for use in lambda
+                final PsiElement finalElement = element;
+                final String finalCurrentName = currentName;
+                
+                // Create a custom data context with the suggested name
+                DataContext customContext = new DataContext() {
+                    @Override
+                    public Object getData(String dataId) {
+                        if ("rename.suggested.name".equals(dataId) && finalCurrentName != null) {
+                            return finalCurrentName;
+                        }
+                        if (PsiElementRenameHandler.DEFAULT_NAME.equals(dataId)) {
+                            return finalElement;
+                        }
+                        return dataContext.getData(dataId);
+                    }
+                };
+                
+                super.invoke(project, editor, file, customContext);
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during invoke: " + e.getMessage());
                 HarbourLogger.logStackTrace(COMPONENT, e);

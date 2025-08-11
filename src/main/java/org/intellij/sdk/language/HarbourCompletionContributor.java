@@ -67,6 +67,12 @@ public class HarbourCompletionContributor extends CompletionContributor {
                                 }
                             }
 
+                            // Check if we're in a comment - if so, skip completion
+                            if (isInComment(parameters)) {
+                                HarbourLogger.log("CompletionContributor", "Skipping completion inside comment");
+                                return;
+                            }
+                            
                             // Standard completion handling proceeds
                             HarbourLogger.log("CompletionContributor", "Starting completion");
 
@@ -1134,6 +1140,66 @@ public class HarbourCompletionContributor extends CompletionContributor {
         }
     }
 
+    /**
+     * Check if the completion position is inside a comment
+     */
+    private boolean isInComment(CompletionParameters parameters) {
+        try {
+            PsiElement position = parameters.getPosition();
+            if (position == null) return false;
+            
+            // Check if the position is directly a comment element
+            if (position instanceof LeafPsiElement) {
+                LeafPsiElement leaf = (LeafPsiElement) position;
+                if (leaf.getElementType() == HarbourTypes.EOL_COMMENT ||
+                    leaf.getElementType() == HarbourTypes.BLOCK_COMMENT) {
+                    return true;
+                }
+            }
+            
+            // Check if any parent is a comment
+            PsiElement current = position.getParent();
+            while (current != null) {
+                if (current instanceof LeafPsiElement) {
+                    LeafPsiElement leaf = (LeafPsiElement) current;
+                    if (leaf.getElementType() == HarbourTypes.EOL_COMMENT ||
+                        leaf.getElementType() == HarbourTypes.BLOCK_COMMENT) {
+                        return true;
+                    }
+                }
+                current = current.getParent();
+            }
+            
+            // Also check the text context around the position
+            PsiFile file = position.getContainingFile();
+            if (file != null) {
+                String text = file.getText();
+                int offset = position.getTextOffset();
+                
+                // Look backwards for // on the same line
+                int lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+                String linePrefix = text.substring(lineStart, Math.min(offset, text.length()));
+                
+                if (linePrefix.contains("//")) {
+                    return true;
+                }
+                
+                // Look for /* */ block comments
+                int blockStart = text.lastIndexOf("/*", offset);
+                int blockEnd = text.lastIndexOf("*/", offset);
+                
+                if (blockStart >= 0 && (blockEnd < 0 || blockStart > blockEnd)) {
+                    return true;
+                }
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error checking comment context: " + e.getMessage());
+        }
+        
+        return false;
+    }
+    
     /**
      * Extract function name from a PsiElement
      */
