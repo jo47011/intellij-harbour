@@ -592,12 +592,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Update indentation for next lines
-            if (lowerLine.startsWith("if ") ||
+            // Don't increase indent if this is a continuation line (part of previous statement)
+            if (!isLineContinuation && (
+                    lowerLine.startsWith("if ") ||
                     lowerLine.startsWith("while ") ||
                     lowerLine.startsWith("for ") ||
                     (lowerLine.startsWith("do ") && !isDoCaseStatement) || // DO but not DO CASE
                     isDoCaseStatement || // DO CASE starts a block
-                    (lowerLine.startsWith("case ") && !inSwitchBlock && !inDoCaseBlock)) { // Don't increase indent for case in switch or DO CASE
+                    (lowerLine.startsWith("case ") && !inSwitchBlock && !inDoCaseBlock))) { // Don't increase indent for case in switch or DO CASE
                 indentLevel++;
             }
             
@@ -613,12 +615,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
             
             // elseif increases indent like if, but else does NOT increase indent
-            if (lowerLine.startsWith("elseif")) {
+            // Don't increase indent if this is a continuation line
+            if (!isLineContinuation && lowerLine.startsWith("elseif")) {
                 indentLevel++;
             }
 
             // Increase indent after switch statement
-            if (isSwitchStatement) {
+            // Don't increase indent if this is a continuation line
+            if (!isLineContinuation && isSwitchStatement) {
                 indentLevel++;
             }
 
