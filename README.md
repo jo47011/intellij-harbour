@@ -321,7 +321,11 @@ valuable insights into Harbour language support implementation.
 - **Ctrl+hover** should not show tooltip
 - **Ctrl-click**: sometimes on 1st click navigates to function directly instead of opening dialog. 2nd and further
   clicks work fine.
-- most function/procedure features do not work yet for truncated keywords func/proce
+- most function/procedure features do not work yet for truncated keywords func/proce.
+- Internal function navigation may jump to function definition instead of showing a declaration dialog
+  if the file w/ the function definition misses some include file.  Seems to be a harbour issue.
+
+
 
 
 
