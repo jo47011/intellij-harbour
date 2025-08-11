@@ -15,6 +15,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - [License](#license)
 - [VS Code Users](#vs-code-users)
 - [Roadmap](#roadmap--todos)
+- [Known Issues](#known-issues)
 
 ## Features
 
@@ -308,3 +309,9 @@ valuable insights into Harbour language support implementation.
 - **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
 - **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
   as well.
+
+## Known Issues
+
+- **Ctrl+hover** should not show tooltip
+- **Ctrl-click**: sometimes on 1st click navigates to function directly instead of opening dialog.  2nd and further click work fine.
+
