@@ -58,7 +58,6 @@ public class HarbourSettingsConfigurable implements Configurable {
     
     // Navigation settings components
     private JSpinner myMaxNavigationResultsSpinner;
-    private JSpinner myMaxNavigationLimitSpinner;
 
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
@@ -163,31 +162,10 @@ public class HarbourSettingsConfigurable implements Configurable {
         myMaxNavigationResultsSpinner = new JSpinner(navResultsModel);
         myMaxNavigationResultsSpinner.setToolTipText("Initial results to show before 'Load All' button appears");
         generalPanel.add(myMaxNavigationResultsSpinner, constraints);
-        
-        // Max navigation limit label
-        constraints.gridx = 0;
-        constraints.gridy = 7;
-        constraints.gridwidth = 2;
-        JLabel maxNavLimitLabel = new JLabel("Max navigation limit:");
-        generalPanel.add(maxNavLimitLabel, constraints);
-        
-        // Explanation for max limit
-        constraints.gridy = 8;
-        JLabel navLimitExplanation = new JLabel("<html><i>Absolute maximum results to load (for functions like Message())</i></html>");
-        navLimitExplanation.setFont(navLimitExplanation.getFont().deriveFont(11f));
-        generalPanel.add(navLimitExplanation, constraints);
-        
-        // Max limit spinner
-        constraints.gridy = 9;
-        constraints.gridwidth = 1;
-        SpinnerModel navLimitModel = new SpinnerNumberModel(1200, 100, 5000, 100);
-        myMaxNavigationLimitSpinner = new JSpinner(navLimitModel);
-        myMaxNavigationLimitSpinner.setToolTipText("Never load more than this many results");
-        generalPanel.add(myMaxNavigationLimitSpinner, constraints);
 
         // Add spacer to general panel
         constraints.gridx = 0;
-        constraints.gridy = 10;
+        constraints.gridy = 7;
         constraints.weighty = 1.0;
         constraints.gridwidth = 2;
         constraints.fill = GridBagConstraints.BOTH;
@@ -738,8 +716,7 @@ public class HarbourSettingsConfigurable implements Configurable {
                 settings.getLintWarningLevel() != (Integer) myLintWarningLevelSpinner.getValue() ||
                 !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText()) ||
                 !settings.getLinterExclusionComment().equals(myLinterExclusionCommentField.getText()) ||
-                settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue() ||
-                settings.getMaxNavigationLimit() != (Integer) myMaxNavigationLimitSpinner.getValue();
+                settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue();
     }
 
     @Override
@@ -771,7 +748,6 @@ public class HarbourSettingsConfigurable implements Configurable {
         
         // Save navigation settings
         settings.setMaxNavigationResults((Integer) myMaxNavigationResultsSpinner.getValue());
-        settings.setMaxNavigationLimit((Integer) myMaxNavigationLimitSpinner.getValue());
 
         // Notify HarbourReferenceService to update exclusions
         HarbourReferenceService service = HarbourReferenceService.getInstance(myProject);
@@ -836,7 +812,6 @@ public class HarbourSettingsConfigurable implements Configurable {
         
         // Load navigation settings
         myMaxNavigationResultsSpinner.setValue(settings.getMaxNavigationResults());
-        myMaxNavigationLimitSpinner.setValue(settings.getMaxNavigationLimit());
 
         // Default scan path to the project base path
         String defaultScanPath = myProject.getBasePath();

@@ -78,7 +78,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     
     // Navigation settings
     private int maxNavigationResults = 20; // Maximum results to preload initially (with "load all" button for more)
-    private int maxNavigationLimit = 1200; // Absolute maximum results to load (never load more than this)
 
 
     public HarbourSettings() {
@@ -405,14 +404,6 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
         this.maxNavigationResults = maxNavigationResults;
     }
     
-    public int getMaxNavigationLimit() {
-        return maxNavigationLimit;
-    }
-    
-    public void setMaxNavigationLimit(int maxNavigationLimit) {
-        this.maxNavigationLimit = maxNavigationLimit;
-    }
-
 
 
     /**
