@@ -548,9 +548,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourLogger.log(COMPONENT, "Initial search result: " + foundElements.size() + " elements found");
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during initial function search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                // If we get a JobCancellationException, return null to let other handlers try
-                if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                    HarbourLogger.log(COMPONENT, "JobCancellationException detected - returning null to let other handlers try");
+                // If we get a cancellation exception, return null to let other handlers try
+                String exceptionName = e.getClass().getSimpleName();
+                if (exceptionName.contains("JobCancellation") || exceptionName.contains("ProcessCanceled") || 
+                    exceptionName.contains("CeProcessCanceled")) {
+                    HarbourLogger.log(COMPONENT, "Cancellation exception detected (" + exceptionName + ") - returning null to let other handlers try");
                     return null;
                 }
                 foundElements = new ArrayList<>();
@@ -576,9 +578,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         }
                     } catch (Exception e) {
                         HarbourLogger.log(COMPONENT, "Exception during reindex/project search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                        // If we get a JobCancellationException during reindex, return null to let other handlers try
-                        if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                            HarbourLogger.log(COMPONENT, "JobCancellationException during reindex - returning null to let other handlers try");
+                        // If we get a cancellation exception during reindex, return null to let other handlers try
+                        String exceptionName = e.getClass().getSimpleName();
+                        if (exceptionName.contains("JobCancellation") || exceptionName.contains("ProcessCanceled") || 
+                            exceptionName.contains("CeProcessCanceled")) {
+                            HarbourLogger.log(COMPONENT, "Cancellation exception during reindex (" + exceptionName + ") - returning null to let other handlers try");
                             return null;
                         }
                         // If reindexing fails, just return empty list and let it fail gracefully
@@ -597,9 +601,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 foundElements = findVariableInCurrentFileWithScope(element, identifierName);
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during variable search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                // If we get a JobCancellationException, return null to let other handlers try
-                if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                    HarbourLogger.log(COMPONENT, "JobCancellationException during variable search - returning null to let other handlers try");
+                // If we get a cancellation exception, return null to let other handlers try
+                String exceptionName = e.getClass().getSimpleName();
+                if (exceptionName.contains("JobCancellation") || exceptionName.contains("ProcessCanceled") || 
+                    exceptionName.contains("CeProcessCanceled")) {
+                    HarbourLogger.log(COMPONENT, "Cancellation exception during variable search (" + exceptionName + ") - returning null to let other handlers try");
                     return null;
                 }
                 foundElements = new ArrayList<>();
@@ -926,9 +932,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 }
             }
             
-            // Show popup for functions on click (both external and internal)
-            if (isFunction && isClick) {
-                HarbourLogger.log(COMPONENT, "Single function on click - showing popup (external: " + isExternalFunction + ")");
+            // ALWAYS show popup on click - never navigate directly (per user requirement)
+            if (isClick) {
+                HarbourLogger.log(COMPONENT, "Click event - always showing popup (external: " + isExternalFunction + ")");
                 final String searchedFunctionName = identifierName;
                 
                 ApplicationManager.getApplication().invokeLater(() -> {
@@ -945,8 +951,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 return null; // Prevent default navigation
             }
             
-            // For other cases, navigate directly
-            HarbourLogger.log(COMPONENT, "Single target - navigating directly");
+            // For hover (not click), allow direct navigation for single target
+            HarbourLogger.log(COMPONENT, "Single target on hover - navigating directly");
             PsiElement[] singleTarget = navigationElements.toArray(new PsiElement[0]);
             if (singleTarget.length == 0) {
                 HarbourLogger.log(COMPONENT, "WARNING: navigationElements had size 1 but toArray returned empty - returning empty array");
