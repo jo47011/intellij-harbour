@@ -11,6 +11,10 @@ or somewhere else.
 If really sure remove them.
 If in doubt do not remove and tell me the name and location so I will check.
 
+- navigation, click on method should also be treated like internal method
+  if getUser():isBackgroundTask
+
+
 n2h:
 
 - function / hotkey to add variable under cursor to LOCAL in function

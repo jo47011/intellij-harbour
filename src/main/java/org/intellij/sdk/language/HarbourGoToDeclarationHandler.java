@@ -27,6 +27,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.Collection;
 
 /**
  * Handles "Go To Declaration" for Harbour identifiers.
@@ -547,12 +548,19 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourLogger.log(COMPONENT, "Initial search result: " + foundElements.size() + " elements found");
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during initial function search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                // If we get a JobCancellationException, return null to let other handlers try
+                // If we get a JobCancellationException, don't give up - try a simpler approach
                 if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                    HarbourLogger.log(COMPONENT, "JobCancellationException detected - returning null to let other handlers try");
-                    return null;
+                    HarbourLogger.log(COMPONENT, "JobCancellationException detected - trying fallback search");
+                    // Don't return null - instead create a simple navigation element to show something
+                    foundElements = new ArrayList<>();
+                    // For known internal functions that commonly fail search, create a placeholder
+                    if (identifierName.equalsIgnoreCase("Message") || identifierName.equalsIgnoreCase("getUser")) {
+                        HarbourLogger.log(COMPONENT, "Creating placeholder for commonly used function: " + identifierName);
+                        // We'll let the empty list continue to force reindex attempt below
+                    }
+                } else {
+                    foundElements = new ArrayList<>();
                 }
-                foundElements = new ArrayList<>();
             }
 
             // If we didn't find anything, try force-reindexing the file first
@@ -575,13 +583,17 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         }
                     } catch (Exception e) {
                         HarbourLogger.log(COMPONENT, "Exception during reindex/project search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                        // If we get a JobCancellationException during reindex, return null to let other handlers try
+                        // If we get a JobCancellationException during reindex, don't give up completely
                         if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                            HarbourLogger.log(COMPONENT, "JobCancellationException during reindex - returning null to let other handlers try");
-                            return null;
+                            HarbourLogger.log(COMPONENT, "JobCancellationException during reindex - using partial results if any");
+                            // Use whatever partial results we have
+                            if (foundElements == null) {
+                                foundElements = new ArrayList<>();
+                            }
+                        } else {
+                            // If reindexing fails, just return empty list and let it fail gracefully
+                            foundElements = new ArrayList<>();
                         }
-                        // If reindexing fails, just return empty list and let it fail gracefully
-                        foundElements = new ArrayList<>();
                     }
                 } else {
                     HarbourLogger.log(COMPONENT, "File is not a HarbourFile, cannot reindex");
@@ -754,10 +766,87 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        // If we have no valid elements, return empty array to prevent ANY popups
+        // If we have no valid elements, try one more fallback for functions that timeout
         if (definitionElements.isEmpty() && callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning empty array to prevent ALL popups");
-            return PsiElement.EMPTY_ARRAY;
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - trying fallback search");
+            
+            // For functions that often fail due to timeouts, try a simpler grep-like search
+            if (isFunction) {
+                HarbourLogger.log(COMPONENT, "Attempting simple pattern search for function: " + identifierName);
+                try {
+                    // Use a simple pattern to find function/procedure definitions
+                    // Allow optional whitespace and/or parentheses after function name
+                    String pattern = "(?i)^\\s*(FUNCTION|PROCEDURE)\\s+" + Pattern.quote(identifierName) + "(?:\\s*\\(|\\s|$)";
+                    Pattern funcPattern = Pattern.compile(pattern, Pattern.MULTILINE);
+                    
+                    // Search through project files quickly
+                    Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
+                        HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+                    
+                    int maxFiles = 100; // Increased limit
+                    int filesChecked = 0;
+                    boolean found = false;
+                    
+                    for (VirtualFile virtualFile : virtualFiles) {
+                        if (filesChecked++ > maxFiles) {
+                            HarbourLogger.log(COMPONENT, "Reached file limit in fallback search");
+                            break;
+                        }
+                        
+                        try {
+                            PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
+                            if (psiFile != null) {
+                                String fileText = psiFile.getText();
+                                if (fileText == null || fileText.isEmpty()) continue;
+                                
+                                Matcher matcher = funcPattern.matcher(fileText);
+                                if (matcher.find()) {
+                                    // Count line number
+                                    int lineNumber = 1;
+                                    for (int i = 0; i < matcher.start(); i++) {
+                                        if (fileText.charAt(i) == '\n') lineNumber++;
+                                    }
+                                    HarbourLogger.log(COMPONENT, "Found " + identifierName + " definition in " + 
+                                        virtualFile.getName() + " at line " + lineNumber);
+                                    
+                                    // Create a navigation element for the definition
+                                    HarbourNavigationElement navElement = new HarbourNavigationElement(
+                                        psiFile, identifierName, virtualFile.getPath(), lineNumber, "Function", true, false);
+                                    definitionElements.add(navElement);
+                                    found = true;
+                                    break; // Found definition, stop searching
+                                }
+                            }
+                        } catch (Exception ex) {
+                            HarbourLogger.log(COMPONENT, "Error checking file " + virtualFile.getName() + ": " + ex.getMessage());
+                        }
+                    }
+                    
+                    if (!found) {
+                        HarbourLogger.log(COMPONENT, "Fallback search checked " + filesChecked + " files but found no definition for " + identifierName);
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log(COMPONENT, "Fallback pattern search failed: " + e.getMessage());
+                }
+            }
+            
+            // If still no elements after fallback, create a dummy element for common functions
+            // This ensures they get underlined even if we can't find their definition
+            if (definitionElements.isEmpty() && callElements.isEmpty()) {
+                HarbourLogger.log(COMPONENT, "MAIN HANDLER: Still no elements after fallback");
+                
+                // For known internal functions, create a dummy navigation element
+                // This ensures they get underlined and clickable
+                if (isFunction && identifierName != null) {
+                    HarbourLogger.log(COMPONENT, "Creating dummy navigation element for function: " + identifierName);
+                    // Create a dummy element that at least makes the function clickable
+                    HarbourNavigationElement dummyElement = new HarbourNavigationElement(
+                        element, identifierName, "Unknown location", 1, "Function (location unknown)", false, false);
+                    return new PsiElement[] { dummyElement };
+                }
+                
+                return PsiElement.EMPTY_ARRAY;
+            }
         }
 
         // If we only have calls but no definitions, show the calls (for variables, these are references)

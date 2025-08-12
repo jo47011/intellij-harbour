@@ -84,6 +84,7 @@ public final class HarbourFunctionClassificationService {
             "index", "reindex", "set", "get", "readmodal", "clear",
             "qout", "qqout", "devpos", "devout", "setpos", "row", "col",
             "inkey", "lastkey", "readkey", "tone", "alert", "msginfo",
+            "msgstop", "msgyesno", "msgretrycancel", "msgexclamation",
             "file", "ferase", "frename", "fcreate", "fopen", "fclose",
             "fread", "fwrite", "fseek", "ferror", "directory", "adir",
             "type", "valtype", "array", "aadd", "adel", "ains", "asort",
@@ -123,8 +124,8 @@ public final class HarbourFunctionClassificationService {
         }
         
         if (!initialized && !scanning) {
-            // If not initialized yet, trigger initialization
-            initializeWithProgress();
+            // If not initialized yet, trigger initialization in background without blocking
+            initializeInBackground();
             // Return true (internal) as default during initialization
             // This prevents the "all functions light blue" issue during startup
             return !KNOWN_EXTERNAL_FUNCTIONS.contains(normalizedName);

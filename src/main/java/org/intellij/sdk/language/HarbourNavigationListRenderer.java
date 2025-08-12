@@ -81,16 +81,22 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             append(formattedLineNumber, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
             
-            // Ensure code is padded to consistent width, with ellipsis for truncated lines
-            String paddedCode;
+            // Apply syntax highlighting to the unpadded code first
+            String codeToHighlight;
             if (processedCode.length() > 80) {
-                paddedCode = processedCode.substring(0, 79) + "…";
+                codeToHighlight = processedCode.substring(0, 79) + "…";
             } else {
-                paddedCode = String.format("%-80s", processedCode);
+                codeToHighlight = processedCode;
             }
             
-            // Apply syntax highlighting to padded code portion
-            applySyntaxHighlighting(paddedCode, navElement.getLineNumber());
+            // Apply syntax highlighting to unpadded code
+            applySyntaxHighlighting(codeToHighlight, navElement.getLineNumber());
+            
+            // Add padding spaces after syntax highlighting if needed
+            if (codeToHighlight.length() < 80) {
+                int spacesToAdd = 80 - codeToHighlight.length();
+                append(" ".repeat(spacesToAdd), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            }
 
             // Definition indicator removed as requested
         } else {
@@ -132,15 +138,22 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             append(formattedLineNumber, SimpleTextAttributes.GRAYED_ATTRIBUTES);
             append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
             
-            // Apply syntax highlighting to code
-            String paddedCode;
+            // Apply syntax highlighting to the unpadded code first
+            String codeToHighlight;
             if (processedCode.length() > 80) {
-                paddedCode = processedCode.substring(0, 79) + "…";
+                codeToHighlight = processedCode.substring(0, 79) + "…";
             } else {
-                paddedCode = String.format("%-80s", processedCode);
+                codeToHighlight = processedCode;
             }
             
-            applySyntaxHighlighting(paddedCode, lineNumber);
+            // Apply syntax highlighting to unpadded code
+            applySyntaxHighlighting(codeToHighlight, lineNumber);
+            
+            // Add padding spaces after syntax highlighting if needed
+            if (codeToHighlight.length() < 80) {
+                int spacesToAdd = 80 - codeToHighlight.length();
+                append(" ".repeat(spacesToAdd), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            }
             
         } catch (Exception e) {
             // Fallback to simple rendering
