@@ -153,18 +153,36 @@ public class HarbourNavigationPopup {
             return;
         }
         
-        HarbourLogger.log(COMPONENT, "Showing ALL " + targets.size() + " navigation targets");
+        // Get the max limit setting
+        HarbourSettings settings = HarbourSettings.getInstance(editor.getProject());
+        int maxLimit = settings.getMaxNavigationLimit();
         
-        // Create the list with custom renderer showing all results
-        JBList<PsiElement> list = new JBList<>(targets);
+        // Apply the absolute maximum limit
+        List<PsiElement> limitedTargets = targets;
+        boolean hitLimit = false;
+        if (targets.size() > maxLimit) {
+            limitedTargets = new ArrayList<>(targets.subList(0, maxLimit));
+            hitLimit = true;
+            HarbourLogger.log(COMPONENT, "Limiting results from " + targets.size() + " to max limit of " + maxLimit);
+        }
+        
+        HarbourLogger.log(COMPONENT, "Showing " + limitedTargets.size() + " navigation targets" + 
+                         (hitLimit ? " (limited from " + targets.size() + ")" : " (all)"));
+        
+        // Create the list with custom renderer showing limited results
+        JBList<PsiElement> list = new JBList<>(limitedTargets);
         list.setCellRenderer(new HarbourNavigationListRenderer(searchedFunctionName));
 
-        // Create and show the popup with all results
+        // Create and show the popup with limited results
+        String titleSuffix = hitLimit ? 
+            String.format("Choose Declaration (showing %d of %d results - max limit reached)", limitedTargets.size(), targets.size()) :
+            String.format("Choose Declaration (showing all %d results)", limitedTargets.size());
+        
         JBPopupFactory.getInstance()
                 .createListPopupBuilder(list)
                 .setTitle(searchedFunctionName != null ?
-                    createHtmlTitle(searchedFunctionName, String.format("Choose Declaration (showing all %d results)", targets.size())) :
-                    String.format("Choose Declaration (showing all %d results)", targets.size()))
+                    createHtmlTitle(searchedFunctionName, titleSuffix) :
+                    titleSuffix)
                 .setMovable(true)
                 .setResizable(true)
                 .setItemChoosenCallback(() -> {

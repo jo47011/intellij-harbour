@@ -530,6 +530,15 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
+        // Check if user clicked on a function/procedure definition  
+        boolean isFunctionDefinitionClick = false;
+        if (isFunction) {
+            isFunctionDefinitionClick = isDefinitionElement(leafElement, getElementContext(leafElement));
+            if (isFunctionDefinitionClick) {
+                HarbourLogger.log(COMPONENT, "User clicked on function/procedure definition - will show all usages");
+            }
+        }
+        
         // Use our custom finder to locate occurrences of this symbol
         Project project = element.getProject();
         HarbourReferenceService service = HarbourReferenceService.getInstance(project);
@@ -539,6 +548,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         HarbourLogger.log(COMPONENT, "Service instance: " + (service != null ? "OK" : "NULL"));
         HarbourLogger.log(COMPONENT, "Current file: " + (file != null ? file.getName() : "NULL"));
         HarbourLogger.log(COMPONENT, "isFunction: " + isFunction);
+        HarbourLogger.log(COMPONENT, "isFunctionDefinitionClick: " + isFunctionDefinitionClick);
 
         List<PsiElement> foundElements;
         if (isFunction) {
@@ -841,6 +851,21 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     // Create a dummy element that at least makes the function clickable
                     HarbourNavigationElement dummyElement = new HarbourNavigationElement(
                         element, identifierName, "Unknown location", 1, "Function (location unknown)", false, false);
+                    
+                    // Check if this is a click event - if so, show popup
+                    boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
+                    if (isClick) {
+                        HarbourLogger.log(COMPONENT, "Click event - showing popup for dummy element");
+                        final String searchedName = identifierName;
+                        final List<PsiElement> dummyList = Collections.singletonList(dummyElement);
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            if (editor != null && !editor.isDisposed() && editor.getComponent().isShowing()) {
+                                HarbourNavigationPopup.showNavigationPopup(dummyList, editor, searchedName);
+                            }
+                        });
+                        return null; // Prevent default navigation
+                    }
+                    
                     return new PsiElement[] { dummyElement };
                 }
                 
@@ -852,7 +877,22 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         // Don't return null to prevent default handlers from running
         if (definitionElements.isEmpty() && !callElements.isEmpty()) {
             HarbourLogger.log(COMPONENT, "MAIN HANDLER: Only calls/references found for " + identifierName + 
-                            " (" + callElements.size() + " calls) - showing them instead of delegating to prevent default handlers");
+                            " (" + callElements.size() + " calls) - checking click/hover mode");
+            
+            // Check if this is a click event - if so, show popup instead of navigating directly
+            boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
+            if (isClick) {
+                HarbourLogger.log(COMPONENT, "Click event - showing popup for calls/references");
+                final String searchedName = identifierName;
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (editor != null && !editor.isDisposed() && editor.getComponent().isShowing()) {
+                        HarbourNavigationPopup.showNavigationPopup(callElements, editor, searchedName);
+                    }
+                });
+                return null; // Prevent default navigation
+            }
+            
+            // For hover, return the elements for default behavior
             return callElements.toArray(new PsiElement[0]);
         }
 
