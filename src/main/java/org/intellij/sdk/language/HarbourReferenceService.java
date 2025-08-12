@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -597,12 +598,14 @@ public final class HarbourReferenceService {
             PsiManager psiManager = PsiManager.getInstance(project);
 
             for (VirtualFile virtualFile : virtualFiles) {
+                // Check for cancellation periodically to allow graceful cancellation
+                ProgressManager.checkCanceled();
+                
                 // Skip excluded files
                 if (isFileExcluded(virtualFile)) {
                     continue;
                 }
 
-                // Process cancellation should be rethrown, not caught
                 PsiFile psiFile = psiManager.findFile(virtualFile);
                 if (psiFile == null) continue;
 
@@ -684,7 +687,8 @@ public final class HarbourReferenceService {
                         }
                     }
                 }
-
+                
+                if (!isFunction) {
                 // For all identifiers (function identifiers and variable identifiers)
                 Matcher identMatcher = identifierPattern.matcher(fileContent);
                 while (identMatcher.find()) {
@@ -714,6 +718,7 @@ public final class HarbourReferenceService {
                             }
                         }
                     }
+                }
                 }
             }
         } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
