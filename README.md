@@ -127,6 +127,8 @@ Configure linting settings in **Settings** → **Tools** → **Harbour** → **L
   <em>Customizable linting rules and severity levels</em>
 </p>
 
+> **Note:** For proper linting functionality, ensure all include paths are correctly configured in your project settings. Missing include files or incorrect paths may prevent the linter from detecting syntax errors and unused variables.
+
 ## Debugging
 
 The plugin provides **full debugging support** for both console and GUI applications with PyCharm debugger integration

@@ -934,19 +934,29 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 int actualLine = line;
                 
                 // Try to extract identifier from various error messages
+                // IMPORTANT: Skip this for syntax errors - they should be shown exactly where reported
                 String identifier = null;
-                if (message != null) {
+                boolean isSyntaxError = message != null && 
+                    (message.toLowerCase().contains("syntax error") || 
+                     (result.getErrorCode() != null && result.getErrorCode().equals("E0030")));
+                
+                if (!isSyntaxError && message != null) {
                     // Try different patterns to extract identifier
                     Pattern[] patterns = {
-                        Pattern.compile("'([^']+)'"),                    // Most common: 'IDENTIFIER'
-                        Pattern.compile("\"([^\"]+)\""),                 // Sometimes: "IDENTIFIER"
-                        Pattern.compile("\\b([A-Z_][A-Z0-9_]*)\\b")     // Fallback: uppercase identifier
+                        Pattern.compile("'([A-Za-z_][A-Za-z0-9_]*)'"),   // Valid identifier in quotes
+                        Pattern.compile("\"([A-Za-z_][A-Za-z0-9_]*)\""), // Valid identifier in double quotes
+                        Pattern.compile("\\b([A-Z_][A-Z0-9_]+)\\b")      // Fallback: uppercase identifier
                     };
                     
                     for (Pattern pattern : patterns) {
                         Matcher matcher = pattern.matcher(message);
                         if (matcher.find()) {
                             identifier = matcher.group(1);
+                            // Skip single character non-letter identifiers (like '.')
+                            if (identifier.length() == 1 && !Character.isLetter(identifier.charAt(0))) {
+                                identifier = null;
+                                continue;
+                            }
                             break;
                         }
                     }
