@@ -3,7 +3,6 @@ package org.intellij.sdk.language;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.components.Service;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
@@ -33,7 +32,6 @@ import java.util.regex.Pattern;
  */
 @Service(Service.Level.PROJECT)
 public final class HarbourFunctionClassificationService {
-    private static final Logger LOG = Logger.getInstance(HarbourFunctionClassificationService.class);
 
     // Set of internal function names (lowercase) found in the project
     private final Set<String> internalFunctions = ConcurrentHashMap.newKeySet();
@@ -486,11 +484,11 @@ public final class HarbourFunctionClassificationService {
                     String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
                             duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
             
-            LOG.info(String.format("HarbourFunctionClassificationService initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
+            HarbourLogger.log("FunctionClassification", String.format("Service initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
                     functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
 
         } catch (Exception e) {
-            LOG.error("Error during project scan for internal functions", e);
+            HarbourLogger.error("FunctionClassification", "Error during project scan for internal functions: " + e.getMessage());
             HarbourLogger.log("FunctionClassification", "Error during project scan: " + e.getMessage());
         }
     }
@@ -577,11 +575,11 @@ public final class HarbourFunctionClassificationService {
                     String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
                             duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
             
-            LOG.info(String.format("HarbourFunctionClassificationService initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
+            HarbourLogger.log("FunctionClassification", String.format("Service initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
                     functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
 
         } catch (Exception e) {
-            LOG.error("Error during project scan for internal functions", e);
+            HarbourLogger.error("FunctionClassification", "Error during project scan for internal functions: " + e.getMessage());
             HarbourLogger.log("FunctionClassification", "Error during project scan: " + e.getMessage());
         }
     }

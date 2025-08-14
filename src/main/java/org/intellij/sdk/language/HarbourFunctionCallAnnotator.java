@@ -3,7 +3,6 @@ package org.intellij.sdk.language;
 import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
@@ -31,7 +30,6 @@ import java.util.concurrent.atomic.AtomicLong;
  * or external (not defined in project) using dynamic classification.
  */
 public class HarbourFunctionCallAnnotator implements Annotator {
-    private static final Logger LOG = Logger.getInstance(HarbourFunctionCallAnnotator.class);
     
     // Track file modification times to detect changes
     private static final ConcurrentHashMap<String, Long> fileModificationTimes = new ConcurrentHashMap<>();
@@ -96,7 +94,7 @@ public class HarbourFunctionCallAnnotator implements Annotator {
             throw e;
         } catch (Exception e) {
             // Log only to standard logger, not HarbourLogger to reduce clutter
-            LOG.error("Error in HarbourFunctionCallAnnotator", e);
+            HarbourLogger.error("FunctionCallAnnotator", "Error in annotation: " + e.getMessage());
         }
     }
 
@@ -195,7 +193,7 @@ public class HarbourFunctionCallAnnotator implements Annotator {
             throw e;
         } catch (Exception e) {
             // Log only to standard logger to avoid excessive debug output
-            LOG.error("Error in dynamic file indexing", e);
+            HarbourLogger.error("FunctionCallAnnotator", "Error in dynamic file indexing: " + e.getMessage());
         }
     }
 }

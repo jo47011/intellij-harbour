@@ -32,7 +32,6 @@ import java.util.regex.Pattern;
  * Action to declare a LOCAL variable for the identifier under cursor
  */
 public class HarbourDeclareLocalVariableAction extends AnAction {
-    private static boolean DEBUG = true;
 
     @Override
     public @NotNull ActionUpdateThread getActionUpdateThread() {
@@ -92,15 +91,24 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
             return;
         }
 
-        debug("Variable to declare: " + variableName);
+        HarbourLogger.log("DeclareLocalVariable", "Variable to declare: " + variableName);
 
-        // Find the containing function or procedure
+        // Check if this is actually a function/method call or keyword
+        String validationResult = validateIdentifier(project, variableName);
+        if (validationResult != null) {
+            showNotification(project, "Cannot Declare", 
+                validationResult, 
+                NotificationType.WARNING);
+            return;
+        }
+
+        // Find the containing function, procedure, or method
         String text = document.getText();
         int functionStart = findFunctionStart(text, offset);
         
         if (functionStart == -1) {
             showNotification(project, "No Function", 
-                "Cursor is not inside a FUNCTION or PROCEDURE", 
+                "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD", 
                 NotificationType.WARNING);
             return;
         }
@@ -147,7 +155,7 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                     NotificationType.INFORMATION);
                     
             } catch (Exception ex) {
-                debug("Error: " + ex.getMessage());
+                HarbourLogger.log("DeclareLocalVariable", "Error: " + ex.getMessage());
                 showNotification(project, "Error", 
                     "Failed to declare variable: " + ex.getMessage(), 
                     NotificationType.ERROR);
@@ -223,12 +231,12 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
     }
 
     private int findFunctionStart(String text, int offset) {
-        // Look backwards for FUNCTION or PROCEDURE
+        // Look backwards for FUNCTION, PROCEDURE, or METHOD
         String textBefore = text.substring(0, offset);
         
-        // Pattern to match function/procedure declarations
+        // Pattern to match function/procedure/method declarations
         Pattern pattern = Pattern.compile(
-            "(?i)^\\s*((?:STATIC|LOCAL)?\\s*)?(FUNCTION|PROCEDURE)\\s+\\w+",
+            "(?i)^\\s*((?:STATIC|LOCAL)?\\s*)?(FUNCTION|PROCEDURE|METHOD)\\s+\\w+",
             Pattern.MULTILINE
         );
         
@@ -265,10 +273,10 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 continue;
             }
             
-            // Found function/procedure declaration
-            if (trimmed.startsWith("FUNCTION") || trimmed.startsWith("PROCEDURE") ||
-                trimmed.startsWith("STATIC FUNCTION") || trimmed.startsWith("STATIC PROCEDURE") ||
-                trimmed.startsWith("LOCAL FUNCTION") || trimmed.startsWith("LOCAL PROCEDURE")) {
+            // Found function/procedure/method declaration
+            if (trimmed.startsWith("FUNCTION") || trimmed.startsWith("PROCEDURE") || trimmed.startsWith("METHOD") ||
+                trimmed.startsWith("STATIC FUNCTION") || trimmed.startsWith("STATIC PROCEDURE") || trimmed.startsWith("STATIC METHOD") ||
+                trimmed.startsWith("LOCAL FUNCTION") || trimmed.startsWith("LOCAL PROCEDURE") || trimmed.startsWith("LOCAL METHOD")) {
                 foundFunctionLine = true;
                 currentPos += line.length() + 1;
                 continue;
@@ -374,8 +382,39 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         return customSettings.LOCAL_INDENT;
     }
 
-    private void debug(String message) {
-        if (!DEBUG) return;
-        HarbourLogger.log("DeclareLocalVariable", message);
+    private String validateIdentifier(Project project, String identifier) {
+        if (identifier == null || identifier.isEmpty()) {
+            return null;
+        }
+        
+        String upperIdent = identifier.toUpperCase();
+        
+        // Check if it's a Harbour keyword
+        if (isKeyword(upperIdent)) {
+            return "'" + identifier + "' is a Harbour keyword and cannot be declared as a variable";
+        }
+        
+        // Check if it's a known function using the classification service
+        HarbourFunctionClassificationService classificationService = 
+            project.getService(HarbourFunctionClassificationService.class);
+        
+        if (classificationService != null) {
+            // Check if it's an internal function (this includes functions, procedures, and methods)
+            if (classificationService.isInternalFunction(identifier)) {
+                return "'" + identifier + "' is an internal function/procedure/method in this project";
+            }
+            
+            // Check if it's an external (standard Harbour) function
+            if (classificationService.isExternalFunction(identifier)) {
+                return "'" + identifier + "' is a standard Harbour function";
+            }
+            
+            // Also check the standard functions provider directly
+            if (HarbourStandardFunctionsProvider.isStandardFunction(identifier)) {
+                return "'" + identifier + "' is a standard Harbour function";
+            }
+        }
+        
+        return null; // Identifier is valid for declaration
     }
 }

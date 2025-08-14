@@ -1,6 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.*;
@@ -17,7 +16,6 @@ import java.util.regex.Pattern;
  * Specialized reference contributor for Harbour include statements that acts on files as a whole
  */
 public class HarbourDirectIncludeReferenceContributor extends PsiReferenceContributor {
-    private static final Logger LOG = Logger.getInstance(HarbourDirectIncludeReferenceContributor.class);
     private static final Pattern INCLUDE_PATTERN = Pattern.compile("(#include|#INCLUDE)\\s*[\"<]([^\">\n]+)[>\"]");
     private static final String COMPONENT = "DirectIncludeRef";
 
@@ -34,7 +32,7 @@ public class HarbourDirectIncludeReferenceContributor extends PsiReferenceContri
                         }
 
                         PsiFile file = (PsiFile) element;
-                        LOG.info("Processing entire file for includes: " + file.getName());
+                        HarbourLogger.log("DirectIncludeRef", "Processing entire file for includes: " + file.getName());
                         HarbourLogger.log(COMPONENT, "Processing entire file for includes: " + file.getName());
 
                         // Parse file text to find all include statements
@@ -74,7 +72,7 @@ public class HarbourDirectIncludeReferenceContributor extends PsiReferenceContri
                                 TextRange range = new TextRange(filenameStart, filenameEnd);
                                 references.add(new HarbourIncludeReferenceContributor.HarbourIncludeReference(file, range, includeFile));
                             } catch (Exception e) {
-                                LOG.error("Error processing include statement: " + e.getMessage(), e);
+                                HarbourLogger.error("DirectIncludeRef", "Error processing include statement: " + e.getMessage());
                                 HarbourLogger.log(COMPONENT, "Error processing include statement: " + e.getMessage());
                             }
                         }
@@ -84,7 +82,7 @@ public class HarbourDirectIncludeReferenceContributor extends PsiReferenceContri
                     }
                 });
 
-        LOG.info("Registered HarbourDirectIncludeReferenceContributor for entire files");
+        HarbourLogger.log("DirectIncludeRef", "Registered HarbourDirectIncludeReferenceContributor for entire files");
         HarbourLogger.log(COMPONENT, "Registered HarbourDirectIncludeReferenceContributor for entire files");
     }
 }

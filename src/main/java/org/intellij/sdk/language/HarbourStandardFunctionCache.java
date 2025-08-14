@@ -1,6 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
 import org.jetbrains.annotations.NotNull;
@@ -14,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * This cache uses dynamic classification instead of hardcoded function lists.
  */
 public class HarbourStandardFunctionCache {
-    private static final Logger LOG = Logger.getInstance(HarbourStandardFunctionCache.class);
     private static final Map<String, Boolean> FUNCTION_CLASSIFICATION_CACHE = new ConcurrentHashMap<>();
     private static volatile boolean initialized = false;
 
@@ -59,11 +57,11 @@ public class HarbourStandardFunctionCache {
             return;
         }
 
-        LOG.info("Initializing function classification cache (dynamic mode)");
+        HarbourLogger.log("FunctionCache", "Initializing function classification cache (dynamic mode)");
         
         // No hardcoded functions to initialize - cache will be populated dynamically
         initialized = true;
-        LOG.info("Function classification cache initialized in dynamic mode");
+        HarbourLogger.log("FunctionCache", "Function classification cache initialized in dynamic mode");
     }
 
     /**
@@ -71,7 +69,7 @@ public class HarbourStandardFunctionCache {
      * This is called at a later stage to ensure the classification service is ready.
      */
     public static void initializeFullCache(Project project) {
-        LOG.info("Initializing full function classification cache");
+        HarbourLogger.log("FunctionCache", "Initializing full function classification cache");
 
         // Ensure provider is initialized
         HarbourStandardFunctionsProvider.initialize(project);
@@ -80,7 +78,7 @@ public class HarbourStandardFunctionCache {
         HarbourFunctionClassificationService classificationService = 
             HarbourFunctionClassificationService.getInstance(project);
         
-        LOG.info("Full function classification cache ready with dynamic classification");
+        HarbourLogger.log("FunctionCache", "Full function classification cache ready with dynamic classification");
     }
 
     /**
@@ -99,7 +97,7 @@ public class HarbourStandardFunctionCache {
      */
     public static void clearCache() {
         FUNCTION_CLASSIFICATION_CACHE.clear();
-        LOG.info("Function classification cache cleared");
+        HarbourLogger.log("FunctionCache", "Function classification cache cleared");
     }
 
     /**
@@ -108,7 +106,7 @@ public class HarbourStandardFunctionCache {
     public static class Initializer implements StartupActivity.DumbAware {
         @Override
         public void runActivity(@NotNull Project project) {
-            LOG.info("Running standard function cache initializer");
+            HarbourLogger.log("FunctionCache", "Running standard function cache initializer");
 
             // Initialize basic cache right away
             initializeCache();
@@ -118,7 +116,7 @@ public class HarbourStandardFunctionCache {
                 initializeFullCache(project);
             });
             
-            LOG.info("Function classification cache initializer completed");
+            HarbourLogger.log("FunctionCache", "Function classification cache initializer completed");
         }
     }
 }

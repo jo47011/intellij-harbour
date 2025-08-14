@@ -1,6 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -21,7 +20,6 @@ import java.util.regex.Pattern;
  * Reference contributor for Harbour #include statements
  */
 public class HarbourIncludeReferenceContributor extends PsiReferenceContributor {
-    private static final Logger LOG = Logger.getInstance(HarbourIncludeReferenceContributor.class);
     private static final Pattern INCLUDE_PATTERN = Pattern.compile("(#include|#INCLUDE)\\s*[\"<]([^\">\n]+)[>\"]");
     private static final String COMPONENT = "IncludeRef";
 
@@ -31,7 +29,7 @@ public class HarbourIncludeReferenceContributor extends PsiReferenceContributor 
         PsiElementPattern.Capture<PsiElement> pattern =
                 PlatformPatterns.psiElement().inFile(PlatformPatterns.psiFile().withLanguage(HarbourLanguage.INSTANCE));
 
-        LOG.info("Registering HarbourIncludeReferenceContributor");
+        HarbourLogger.log("IncludeReferenceContributor", "Registering HarbourIncludeReferenceContributor");
         HarbourLogger.log(COMPONENT, "Registering HarbourIncludeReferenceContributor");
 
         registrar.registerReferenceProvider(pattern, new PsiReferenceProvider() {

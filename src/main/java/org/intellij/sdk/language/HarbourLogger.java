@@ -87,7 +87,7 @@ public class HarbourLogger {
         // Get the appropriate logger
         Logger logger = Logger.getInstance(componentName);
 
-        // Always log to IntelliJ log
+        // Only log WARNING and ERROR to IntelliJ log (not DEBUG/INFO to avoid flooding)
         switch (level) {
             case ERROR:
                 logger.error("[Harbour " + componentName + "] " + message);
@@ -98,7 +98,8 @@ public class HarbourLogger {
             case INFO:
             case DEBUG:
             default:
-                logger.info("[Harbour " + componentName + "] " + message);
+                // Skip logging DEBUG/INFO to idea.log to avoid flooding
+                // These will still go to custom log files if configured
                 break;
         }
         
