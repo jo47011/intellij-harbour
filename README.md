@@ -30,6 +30,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - **[Linting](#linting)** - Real-time code analysis and error detection
 - **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
 - **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
+- **[Code Helpers](#code-helpers)** - Quick actions to improve code quality and reduce typing
 
 ## Installation
 
@@ -213,6 +214,39 @@ RETURN NIL
 - Add `printDebugStackTrace()` to your custom error handler
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
+
+## Code Helpers
+
+The plugin provides quick actions to improve code quality and reduce repetitive typing:
+
+### Declare Local Variable (Alt+L)
+
+Quickly declare undefined variables as LOCAL with proper placement and indentation.
+
+**How to use:**
+1. Place cursor on any undefined variable in your code
+2. Press **Alt+L** 
+3. The plugin automatically:
+   - Detects the variable name under cursor
+   - Finds the containing function or procedure
+   - Adds `LOCAL variableName` declaration at the proper position
+   - Respects your LOCAL indentation settings
+
+**Example:**
+```harbour
+FUNCTION TestFunction()
+   LOCAL existingVar
+   
+   myNewVar := 10  // Place cursor on 'myNewVar' and press Alt+L
+   // Plugin will add: LOCAL myNewVar
+```
+
+**Features:**
+- Smart placement after existing LOCAL declarations
+- Validates variable names (prevents declaring keywords)
+- Checks for duplicate declarations
+- Uses indentation from code style settings
+- Shows helpful notifications for errors or success
 
 ## Building from Source
 

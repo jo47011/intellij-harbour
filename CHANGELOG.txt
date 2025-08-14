@@ -1,5 +1,25 @@
 # Harbour Language Plugin for PyCharm - Change Log
 
+## Version 1.1.2 (2024-08-14)
+### New Features
+- **Declare Local Variable Action (Alt+L)**:
+  - Quickly declare undefined variables as LOCAL
+
+### Improvements
+- **Return Keyword Auto-Unindent**:
+  - Context-aware auto-indentation for RETURN statements
+  - Respects RETURN_INDENT code style setting
+  - Only unindents at function level, not inside control structures
+
+### Bug Fixes
+- Fixed linting line number offset for syntax errors
+- Fixed DO CASE/ENDCASE formatting with proper OTHERWISE alignment
+- Fixed LOCAL variable code completion regex pattern
+
+### Documentation
+- Added Code Helpers section to README
+- Updated feature documentation
+
 ## Version 1.1.1 (2024-08-07)
 ### New Features
 - **NoQA Comment Support**: Added ability to exclude specific lines from linting using special comments

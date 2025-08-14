@@ -155,5 +155,14 @@
         </action>
 
         <!-- REMOVED: HarbourTestErrorAction - obsolete since error handling now works properly -->
+        
+        <!-- Declare Local Variable Action -->
+        <action id="HarbourDeclareLocalVariableAction" class="org.intellij.sdk.language.HarbourDeclareLocalVariableAction"
+                text="Declare Local Variable" description="Declare variable under cursor as LOCAL">
+            <add-to-group group-id="CodeMenu" anchor="after" relative-to-action="IntroduceVariable"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="IntroduceVariable"/>
+            <add-to-group group-id="RefactoringMenu" anchor="after" relative-to-action="IntroduceVariable"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt L"/>
+        </action>
     </actions>
 </idea-plugin>
