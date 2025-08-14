@@ -141,7 +141,9 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 // Create the indentation string based on settings
                 String indentation = " ".repeat(localIndent);
                 
-                // Create the LOCAL declaration
+                // Check if we're inserting at end of LOCAL block or after function
+                // If there are existing LOCALs, we add at end with no leading newline
+                // If no LOCALs exist, we add right after function with no leading newline
                 String localDeclaration = indentation + "LOCAL " + variableName + "\n";
                 
                 // Insert the declaration
@@ -252,32 +254,28 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
 
     private int findLocalInsertPosition(String text, int functionStart) {
         // Find where to insert the LOCAL declaration
-        // It should be after the function/procedure line and any parameter declarations
-        // but before any executable statements
+        // If LOCAL block exists, add to end of it
+        // Otherwise, add right after function declaration
         
         String functionText = text.substring(functionStart);
-        String[] lines = functionText.split("\n");
+        String[] lines = functionText.split("\n", -1); // -1 to preserve trailing empty strings
         
         int currentPos = functionStart;
         boolean foundFunctionLine = false;
         boolean inLocalBlock = false;
         int lastLocalLine = -1;
+        int functionLineEnd = -1;
         
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
             String trimmed = line.trim().toUpperCase();
             
-            // Skip empty lines and comments
-            if (trimmed.isEmpty() || trimmed.startsWith("*") || trimmed.startsWith("//")) {
-                currentPos += line.length() + 1;
-                continue;
-            }
-            
             // Found function/procedure/method declaration
-            if (trimmed.startsWith("FUNCTION") || trimmed.startsWith("PROCEDURE") || trimmed.startsWith("METHOD") ||
+            if (!foundFunctionLine && (trimmed.startsWith("FUNCTION") || trimmed.startsWith("PROCEDURE") || trimmed.startsWith("METHOD") ||
                 trimmed.startsWith("STATIC FUNCTION") || trimmed.startsWith("STATIC PROCEDURE") || trimmed.startsWith("STATIC METHOD") ||
-                trimmed.startsWith("LOCAL FUNCTION") || trimmed.startsWith("LOCAL PROCEDURE") || trimmed.startsWith("LOCAL METHOD")) {
+                trimmed.startsWith("LOCAL FUNCTION") || trimmed.startsWith("LOCAL PROCEDURE") || trimmed.startsWith("LOCAL METHOD"))) {
                 foundFunctionLine = true;
+                functionLineEnd = currentPos + line.length() + 1;  // Position after the newline
                 currentPos += line.length() + 1;
                 continue;
             }
@@ -287,10 +285,22 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 continue;
             }
             
+            // Skip empty lines
+            if (trimmed.isEmpty()) {
+                currentPos += line.length() + 1;
+                continue;
+            }
+            
+            // Skip comments
+            if (trimmed.startsWith("*") || trimmed.startsWith("//")) {
+                currentPos += line.length() + 1;
+                continue;
+            }
+            
             // Check for LOCAL declarations
             if (trimmed.startsWith("LOCAL ")) {
                 inLocalBlock = true;
-                lastLocalLine = currentPos + line.length() + 1;
+                lastLocalLine = currentPos + line.length() + 1;  // After this LOCAL line
                 currentPos += line.length() + 1;
                 continue;
             }
@@ -300,29 +310,41 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 trimmed.startsWith("PUBLIC ") || trimmed.startsWith("MEMVAR ")) {
                 // These can come after LOCAL
                 if (inLocalBlock && lastLocalLine > 0) {
+                    // Found end of LOCAL block, insert at end of block
                     return lastLocalLine;
                 }
                 currentPos += line.length() + 1;
                 continue;
             }
             
-            // If we hit an executable statement, insert before it
-            if (!trimmed.startsWith("PARAMETER") && !trimmed.startsWith("PARAMETERS")) {
-                if (inLocalBlock && lastLocalLine > 0) {
-                    return lastLocalLine;
-                }
-                return currentPos;
+            // If we hit an executable statement or PARAMETER
+            if (inLocalBlock && lastLocalLine > 0) {
+                // We have a LOCAL block, add to end of it
+                return lastLocalLine;
             }
             
-            currentPos += line.length() + 1;
+            // No LOCAL block exists, insert right after function declaration
+            return functionLineEnd;
         }
         
-        return -1;
+        // If we reach end of function
+        if (inLocalBlock && lastLocalLine > 0) {
+            return lastLocalLine;  // Add to end of LOCAL block
+        }
+        
+        return functionLineEnd;  // Add after function declaration
     }
 
     private boolean isVariableDeclared(String text, int functionStart, int insertPosition, String variableName) {
         // Check if the variable is already declared in LOCAL statements
-        String declarationArea = text.substring(functionStart, insertPosition);
+        // We need to check the entire function, not just before insert position
+        // Find the end of the function
+        int functionEnd = findFunctionEnd(text, functionStart);
+        if (functionEnd == -1) {
+            functionEnd = text.length();
+        }
+        
+        String functionText = text.substring(functionStart, functionEnd);
         
         // Pattern to match LOCAL declarations
         Pattern pattern = Pattern.compile(
@@ -330,7 +352,7 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
             Pattern.MULTILINE
         );
         
-        Matcher matcher = pattern.matcher(declarationArea);
+        Matcher matcher = pattern.matcher(functionText);
         
         while (matcher.find()) {
             String varList = matcher.group(1);
@@ -346,6 +368,26 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         }
         
         return false;
+    }
+    
+    private int findFunctionEnd(String text, int functionStart) {
+        // Find the next FUNCTION, PROCEDURE, METHOD, or ENDCLASS
+        String textAfter = text.substring(functionStart);
+        Pattern pattern = Pattern.compile(
+            "(?i)^\\s*(STATIC\\s+|LOCAL\\s+)?(FUNCTION|PROCEDURE|METHOD|ENDCLASS|ENDMETHOD)\\s",
+            Pattern.MULTILINE
+        );
+        
+        Matcher matcher = pattern.matcher(textAfter);
+        // Skip the first match as that's our current function
+        if (matcher.find()) {
+            // Look for the next one
+            if (matcher.find()) {
+                return functionStart + matcher.start();
+            }
+        }
+        
+        return -1;
     }
 
     private String getIndentationAtPosition(String text, int position) {

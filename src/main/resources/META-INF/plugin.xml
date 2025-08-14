@@ -94,12 +94,14 @@
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
         
         <!-- Services -->
-        <applicationService serviceImplementation="org.intellij.sdk.language.HarbourSaveListenerService"/>
+        <!-- applicationService disabled to reduce startup impact, will be created on demand -->
+        <!-- <applicationService serviceImplementation="org.intellij.sdk.language.HarbourSaveListenerService"/> -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
         
-        <!-- Startup Activities -->
-        <startupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
-        <startupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
+        <!-- Startup Activities - Disabled to prevent startup hang
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
+        -->
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"

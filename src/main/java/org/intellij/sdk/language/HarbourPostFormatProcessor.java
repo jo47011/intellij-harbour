@@ -763,6 +763,33 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private boolean shouldBreakLine(String line) {
         String trimmed = line.trim();
         
+        // Don't break text/string output lines (e.g., ? "very long string")
+        // Check if line starts with ? (output command) followed by string literal
+        if (trimmed.startsWith("?")) {
+            // Check if it contains a string literal
+            if (trimmed.contains("\"") || trimmed.contains("'")) {
+                return false; // Don't break text output lines
+            }
+        }
+        
+        // Don't break lines that are primarily string literals
+        // Pattern: lines that start with a string literal or are assignment to string literals
+        if (trimmed.matches("^[\"'].*[\"'].*$") || 
+            trimmed.matches(".*:=\\s*[\"'].*[\"'].*$")) {
+            // Check if it's primarily a string (not code with a string in it)
+            // Count quotes - if there are only 2 quotes, it's likely a single string
+            int quoteCount = 0;
+            for (char c : trimmed.toCharArray()) {
+                if (c == '"' || c == '\'') {
+                    quoteCount++;
+                }
+            }
+            // If there are 2 quotes or less, it's likely a single string - don't break
+            if (quoteCount <= 2) {
+                return false;
+            }
+        }
+        
         // Allow breaking lines with comments - the findBreakPoint method will handle breaking before the comment
         
         // Don't break simple GET ... WHEN constructs (only very basic ones)

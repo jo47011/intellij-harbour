@@ -8,6 +8,7 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
+import com.intellij.openapi.startup.ProjectActivity;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
@@ -122,8 +123,10 @@ public final class HarbourFunctionClassificationService {
         }
         
         if (!initialized && !scanning) {
-            // If not initialized yet, trigger initialization in background without blocking
-            initializeInBackground();
+            // Lazy initialization - start scan on first use
+            ApplicationManager.getApplication().invokeLater(() -> {
+                initializeWithProgress();
+            });
             // Return true (internal) as default during initialization
             // This prevents the "all functions light blue" issue during startup
             return !KNOWN_EXTERNAL_FUNCTIONS.contains(normalizedName);
@@ -348,8 +351,8 @@ public final class HarbourFunctionClassificationService {
         
         scanning = true;
         
-        // Use Modal progress with TITLE and description for better visibility
-        ProgressManager.getInstance().run(new Task.Modal(project, "Harbour Plugin Initialization", true) {
+        // Use Backgroundable task but with explicit progress dialog
+        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Harbour Plugin Initialization", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setText("Indexing Harbour functions and procedures...");
@@ -446,50 +449,38 @@ public final class HarbourFunctionClassificationService {
             int classesFound = 0;
             int methodsFound = 0;
             
-            // Process files in batches to avoid long blocking
-            final int BATCH_SIZE = 10;
-            
-            for (int i = 0; i < filesToProcess.size(); i += BATCH_SIZE) {
+            // Process files without batching - let progress update naturally
+            for (int i = 0; i < filesToProcess.size(); i++) {
+                VirtualFile virtualFile = filesToProcess.get(i);
+                
                 if (indicator.isCanceled()) {
                     HarbourLogger.log("FunctionClassification", "Scan cancelled by user");
                     return;
                 }
                 
-                int endIndex = Math.min(i + BATCH_SIZE, filesToProcess.size());
-                List<VirtualFile> batch = filesToProcess.subList(i, endIndex);
+                processedFiles++;
+                double progress = (double) processedFiles / totalFiles;
+                indicator.setFraction(progress);
+                indicator.setText("Scanning Harbour project files... (" + processedFiles + "/" + totalFiles + ")");
+                indicator.setText2(virtualFile.getName());
                 
-                for (VirtualFile virtualFile : batch) {
-                    if (indicator.isCanceled()) {
-                        return;
-                    }
-                    
-                    processedFiles++;
-                    double progress = (double) processedFiles / totalFiles;
-                    indicator.setFraction(progress);
-                    indicator.setText("Scanning Harbour project files... (" + processedFiles + "/" + totalFiles + ")");
-                    indicator.setText2(virtualFile.getName());
-
-                    PsiFile psiFile = psiManager.findFile(virtualFile);
-                    if (psiFile == null) continue;
-
-                    // Process file content efficiently
-                    String fileContent = psiFile.getText();
-                    if (fileContent == null || fileContent.isEmpty()) continue;
-                    
-                    // Use optimized pattern matching
-                    functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
-                    proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
-                    classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
-                    methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
+                // Force indicator update every 10 files
+                if (processedFiles % 10 == 0) {
+                    indicator.checkCanceled();
                 }
+
+                PsiFile psiFile = psiManager.findFile(virtualFile);
+                if (psiFile == null) continue;
+
+                // Process file content efficiently
+                String fileContent = psiFile.getText();
+                if (fileContent == null || fileContent.isEmpty()) continue;
                 
-                // Brief pause to allow UI updates
-                try {
-                    Thread.sleep(1);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+                // Use optimized pattern matching
+                functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
+                proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
+                classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
+                methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
             }
 
             // Mark as initialized
@@ -609,34 +600,13 @@ public final class HarbourFunctionClassificationService {
 
     /**
      * Initializer for the service that runs on project startup.
+     * DISABLED - Now using lazy initialization to prevent startup hang.
      */
-    public static class Initializer implements StartupActivity.DumbAware {
+    public static class Initializer implements StartupActivity.Background {
         @Override
         public void runActivity(@NotNull Project project) {
-            HarbourLogger.log("FunctionClassification", "Initializing function classification service");
-            
-            // Initialize the save listener service to ensure it's available
-            HarbourSaveListenerService.getInstance();
-            
-            // Get the service instance (this will create it if needed)
-            HarbourFunctionClassificationService service = getInstance(project);
-            
-            // Delay the initialization slightly to let the IDE fully load
-            // This prevents the modal dialog from appearing too early
-            ApplicationManager.getApplication().invokeLater(() -> {
-                // Start initialization with progress on a slight delay
-                ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                    try {
-                        // Small delay to let IDE settle
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        // Ignore
-                    }
-                    ApplicationManager.getApplication().invokeLater(() -> {
-                        service.initializeWithProgress();
-                    });
-                });
-            });
+            // DISABLED - Service now initializes lazily on first use
+            // This prevents the 14-17 second startup hang
         }
     }
 }
