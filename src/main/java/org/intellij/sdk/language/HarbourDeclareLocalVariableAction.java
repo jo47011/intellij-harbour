@@ -404,14 +404,11 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 return "'" + identifier + "' is an internal function/procedure/method in this project";
             }
             
-            // Check if it's an external (standard Harbour) function
-            // Only check this if the classification service is properly initialized
-            if (classificationService.isExternalFunction(identifier)) {
-                return "'" + identifier + "' is a standard Harbour function";
-            }
+            // Note: We don't check isExternalFunction here because it just returns !isInternalFunction
+            // which would incorrectly identify all non-internal identifiers as standard functions.
+            // There's currently no reliable way to check if something is a standard Harbour function
+            // without a proper list of standard functions.
         }
-        // Note: We don't use HarbourStandardFunctionsProvider.isStandardFunction here
-        // because it defaults to true when not initialized, causing false positives
         
         return null; // Identifier is valid for declaration
     }

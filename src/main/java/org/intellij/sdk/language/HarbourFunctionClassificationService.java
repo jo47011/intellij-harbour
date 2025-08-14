@@ -348,22 +348,40 @@ public final class HarbourFunctionClassificationService {
         
         scanning = true;
         
-        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Scanning Harbour Functions", true) {
+        // Use Modal progress with TITLE and description for better visibility
+        ProgressManager.getInstance().run(new Task.Modal(project, "Harbour Plugin Initialization", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
+                indicator.setText("Indexing Harbour functions and procedures...");
+                indicator.setIndeterminate(false);
                 ReadAction.run(() -> {
                     scanProjectForInternalFunctionsWithProgress(indicator);
                 });
             }
             
             @Override
-            public void onFinished() {
+            public void onSuccess() {
                 scanning = false;
+                HarbourLogger.log("FunctionClassification", "Project scan completed successfully");
                 // Force re-highlighting after scan complete
                 ApplicationManager.getApplication().invokeLater(() -> {
                     // Trigger re-highlighting by clearing the cache
                     HarbourStandardFunctionCache.clearCache();
                 });
+            }
+            
+            @Override
+            public void onCancel() {
+                scanning = false;
+                initialized = false;
+                HarbourLogger.log("FunctionClassification", "Project scan was cancelled");
+            }
+            
+            @Override
+            public void onThrowable(@NotNull Throwable error) {
+                scanning = false;
+                initialized = false;
+                HarbourLogger.error("FunctionClassification", "Project scan failed: " + error.getMessage());
             }
         });
     }
@@ -399,8 +417,10 @@ public final class HarbourFunctionClassificationService {
         Instant start = Instant.now();
         HarbourLogger.log("FunctionClassification", "Starting project scan for internal functions with progress");
         
-        indicator.setText("Scanning Harbour files for function declarations...");
+        indicator.setText("Scanning Harbour project files...");
+        indicator.setText2("");
         indicator.setIndeterminate(false);
+        indicator.setFraction(0.0);
 
         try {
             // Get all Harbour files in the project
@@ -446,7 +466,8 @@ public final class HarbourFunctionClassificationService {
                     processedFiles++;
                     double progress = (double) processedFiles / totalFiles;
                     indicator.setFraction(progress);
-                    indicator.setText2("Processing: " + virtualFile.getName() + " (" + processedFiles + "/" + totalFiles + ")");
+                    indicator.setText("Scanning Harbour project files... (" + processedFiles + "/" + totalFiles + ")");
+                    indicator.setText2(virtualFile.getName());
 
                     PsiFile psiFile = psiManager.findFile(virtualFile);
                     if (psiFile == null) continue;
@@ -477,7 +498,8 @@ public final class HarbourFunctionClassificationService {
             Instant end = Instant.now();
             Duration duration = Duration.between(start, end);
             
-            indicator.setText("Scan completed");
+            indicator.setText("Harbour function indexing completed");
+            indicator.setText2("");
             indicator.setFraction(1.0);
             
             HarbourLogger.log("FunctionClassification", 
@@ -599,8 +621,22 @@ public final class HarbourFunctionClassificationService {
             // Get the service instance (this will create it if needed)
             HarbourFunctionClassificationService service = getInstance(project);
             
-            // Start background initialization with progress
-            service.initializeWithProgress();
+            // Delay the initialization slightly to let the IDE fully load
+            // This prevents the modal dialog from appearing too early
+            ApplicationManager.getApplication().invokeLater(() -> {
+                // Start initialization with progress on a slight delay
+                ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                    try {
+                        // Small delay to let IDE settle
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        // Ignore
+                    }
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        service.initializeWithProgress();
+                    });
+                });
+            });
         }
     }
 }
