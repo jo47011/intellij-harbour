@@ -7,6 +7,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.jetbrains.annotations.NotNull;
 
@@ -54,8 +55,8 @@ public class HarbourTypedHandlerDelegate extends TypedHandlerDelegate {
     }
     
     private boolean couldCompleteEndKeyword(char c) {
-        // Characters that could complete end keywords
-        return c == 'f' || c == 'o' || c == 't' || c == 'e' || c == 's' || c == 'h';
+        // Characters that could complete end keywords (including 'n' for return)
+        return c == 'f' || c == 'o' || c == 't' || c == 'e' || c == 's' || c == 'h' || c == 'n';
     }
     
     private boolean isEndKeyword(String word) {
@@ -73,7 +74,8 @@ public class HarbourTypedHandlerDelegate extends TypedHandlerDelegate {
                word.equals("else") ||
                word.startsWith("elseif") ||
                word.equals("recover using") ||
-               word.equals("end sequence");
+               word.equals("end sequence") ||
+               word.equals("return");
     }
     
     private void correctIndentationForEndKeyword(Editor editor, Document document, int lineNumber, String keyword) {
@@ -110,6 +112,52 @@ public class HarbourTypedHandlerDelegate extends TypedHandlerDelegate {
             // Map end keywords to their start keywords
             String[] startKeywords = getMatchingStartKeywords(endKeyword);
             if (startKeywords == null) {
+                return null;
+            }
+            
+            // Special handling for 'return' - check if it should be unindented based on context and settings
+            if (endKeyword.equals("return")) {
+                // First check if we're inside any control structures (if, while, for, etc.)
+                boolean insideControlStructure = isInsideControlStructure(document, lineNumber);
+                
+                if (insideControlStructure) {
+                    // Return inside control structure - don't unindent
+                    HarbourLogger.log("TypedHandler", "Return is inside control structure, no auto-unindent");
+                    return null;
+                }
+                
+                // At function level - check RETURN_INDENT setting
+                Project project = getProjectFromDocument(document);
+                if (project != null) {
+                    HarbourCodeStyleSettings settings = CodeStyleSettingsManager.getSettings(project).getCustomSettings(HarbourCodeStyleSettings.class);
+                    if (settings.RETURN_INDENT > 0) {
+                        // RETURN_INDENT is set to a specific column, don't auto-unindent
+                        HarbourLogger.log("TypedHandler", "RETURN_INDENT is " + settings.RETURN_INDENT + ", no auto-unindent");
+                        return null;
+                    }
+                }
+                
+                // RETURN at function level with RETURN_INDENT = 0 - find function indentation
+                for (int i = lineNumber - 1; i >= 0; i--) {
+                    int lineStart = document.getLineStartOffset(i);
+                    int lineEnd = document.getLineEndOffset(i);
+                    String lineText = document.getCharsSequence().subSequence(lineStart, lineEnd).toString();
+                    String trimmedLine = lineText.trim().toLowerCase();
+                    
+                    if (trimmedLine.isEmpty()) {
+                        continue;
+                    }
+                    
+                    // Check if this line contains a function/procedure/method declaration
+                    for (String startKeyword : startKeywords) {
+                        if (trimmedLine.equals(startKeyword) || trimmedLine.startsWith(startKeyword + " ")) {
+                            // Found the enclosing function/procedure/method, return its indentation
+                            String indentation = getIndentation(lineText);
+                            HarbourLogger.log("TypedHandler", "Found enclosing " + startKeyword + " at line " + i + " with indent: '" + indentation + "'");
+                            return indentation;
+                        }
+                    }
+                }
                 return null;
             }
             
@@ -182,6 +230,9 @@ public class HarbourTypedHandlerDelegate extends TypedHandlerDelegate {
                 return new String[]{"begin sequence"};
             case "end sequence":
                 return new String[]{"begin sequence"};
+            case "return":
+                // return should match with function or procedure declarations
+                return new String[]{"function", "procedure", "method"};
             default:
                 return null;
         }
@@ -193,5 +244,75 @@ public class HarbourTypedHandlerDelegate extends TypedHandlerDelegate {
             i++;
         }
         return line.substring(0, i);
+    }
+    
+    private boolean isInsideControlStructure(Document document, int lineNumber) {
+        try {
+            int depth = 0;
+            // Search backwards to see if we're inside control structures
+            for (int i = lineNumber - 1; i >= 0; i--) {
+                int lineStart = document.getLineStartOffset(i);
+                int lineEnd = document.getLineEndOffset(i);
+                String lineText = document.getCharsSequence().subSequence(lineStart, lineEnd).toString();
+                String trimmedLine = lineText.trim().toLowerCase();
+                
+                if (trimmedLine.isEmpty() || trimmedLine.startsWith("//") || trimmedLine.startsWith("*")) {
+                    continue;
+                }
+                
+                // Check for control structure end keywords (going backwards, these increase depth)
+                if (trimmedLine.equals("endif") || trimmedLine.equals("enddo") || 
+                    trimmedLine.equals("next") || trimmedLine.equals("endfor") || 
+                    trimmedLine.equals("endwhile") || trimmedLine.equals("endcase") ||
+                    trimmedLine.equals("endswitch") || trimmedLine.equals("endwith")) {
+                    depth++;
+                }
+                // Check for control structure start keywords (going backwards, these decrease depth)
+                else if (trimmedLine.startsWith("if ") || trimmedLine.equals("if") ||
+                         trimmedLine.startsWith("do ") || trimmedLine.equals("do") ||
+                         trimmedLine.startsWith("while ") || trimmedLine.equals("while") ||
+                         trimmedLine.startsWith("for ") || trimmedLine.equals("for") ||
+                         trimmedLine.startsWith("switch ") || trimmedLine.equals("switch") ||
+                         trimmedLine.startsWith("with ") || trimmedLine.equals("with") ||
+                         trimmedLine.equals("do case") || trimmedLine.startsWith("do case")) {
+                    depth--;
+                    if (depth < 0) {
+                        // We found an unclosed control structure, so we're inside it
+                        HarbourLogger.log("TypedHandler", "Found unclosed control structure: " + trimmedLine);
+                        return true;
+                    }
+                }
+                // Check for function/procedure/method declaration - stop searching if we hit one
+                else if (trimmedLine.startsWith("function ") || trimmedLine.equals("function") ||
+                         trimmedLine.startsWith("procedure ") || trimmedLine.equals("procedure") ||
+                         trimmedLine.startsWith("method ") || trimmedLine.equals("method") ||
+                         trimmedLine.startsWith("static function ") || 
+                         trimmedLine.startsWith("static procedure ") ||
+                         trimmedLine.startsWith("static method ")) {
+                    // Reached function boundary, we're at function level if depth is 0
+                    return depth != 0;
+                }
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("TypedHandler", "Error checking control structure context: " + e.getMessage());
+        }
+        return false;
+    }
+    
+    private Project getProjectFromDocument(Document document) {
+        try {
+            // Try to get project through the EditorFactory
+            com.intellij.openapi.editor.EditorFactory editorFactory = com.intellij.openapi.editor.EditorFactory.getInstance();
+            Editor[] editors = editorFactory.getEditors(document);
+            if (editors.length > 0 && editors[0].getProject() != null) {
+                return editors[0].getProject();
+            }
+            
+            // Fall back to default project
+            return com.intellij.openapi.project.ProjectManager.getInstance().getDefaultProject();
+        } catch (Exception e) {
+            HarbourLogger.log("TypedHandler", "Error getting project from document: " + e.getMessage());
+        }
+        return null;
     }
 }
