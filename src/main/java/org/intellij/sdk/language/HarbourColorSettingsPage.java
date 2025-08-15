@@ -8,7 +8,7 @@ import com.intellij.openapi.options.colors.ColorSettingsPage;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -45,12 +45,19 @@ public class HarbourColorSettingsPage implements ColorSettingsPage {
         return "// Demo code\n"
                 + "function main()\n"
                 + "local someVar = 10\n"
-                + "  if someVar > 0\n"
+                + "local aArray := {1, 2, 3}\n"
+                + "  if someVar > 0 .and. someVar < 100\n"
                 + "    ? \"Ok\"\n"
-                + "    // Call local and external functions\n"
-                + "    <local>localFunction</local>()\n"
-                + "    <external>externalFunction</external>()\n"
+                + "  elseif someVar = 0 .or. someVar < 0\n"
+                + "    ? \"Zero or negative\"\n"
                 + "  endif\n"
+                + "  // For each loop\n"
+                + "  for each item in aArray\n"
+                + "    ? item\n"
+                + "  next\n"
+                + "  // Call local and external functions\n"
+                + "  <local>localFunction</local>()\n"
+                + "  <external>externalFunction</external>()\n"
                 + "return\n"
                 + "\n"
                 + "// Local function definition\n"

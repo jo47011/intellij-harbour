@@ -22,9 +22,6 @@ public class HarbourDebuggerRunnerRegistration implements ProjectActivity {
     @Nullable
     @Override
     public Object execute(@NotNull Project project, @NotNull Continuation<? super Unit> continuation) {
-        System.out.println("🔧 HarbourDebuggerRunnerRegistration v1.0.265 - STARTUP ACTIVITY");
-        System.out.println("🔧 OS: " + System.getProperty("os.name"));
-        System.out.println("🔧 Project: " + project.getName());
         
         // Log to file for debugging
         try {
@@ -35,28 +32,21 @@ public class HarbourDebuggerRunnerRegistration implements ProjectActivity {
             fw.write("---\n");
             fw.close();
         } catch (IOException e) {
-            System.err.println("Failed to write startup activity log: " + e.getMessage());
+            // Silent failure
         }
         
         // Force load the HarbourDebuggerRunner classes on Windows
         if (System.getProperty("os.name").toLowerCase().contains("windows")) {
             try {
                 Class.forName("org.intellij.sdk.language.HarbourDebuggerRunner");
-                System.out.println("🔧 WINDOWS: HarbourDebuggerRunner class loaded successfully");
             } catch (ClassNotFoundException e) {
-                System.err.println("🔧 WINDOWS: Failed to load HarbourDebuggerRunner class: " + e.getMessage());
             }
             
             try {
                 Class.forName("org.intellij.sdk.language.HarbourDebuggerRunnerSimple");
-                System.out.println("🔧 WINDOWS: HarbourDebuggerRunnerSimple class loaded successfully");
             } catch (ClassNotFoundException e) {
-                System.err.println("🔧 WINDOWS: Failed to load HarbourDebuggerRunnerSimple class: " + e.getMessage());
             }
         }
-        
-        // Simply log that the startup activity ran
-        System.out.println("🔧 Startup activity completed - HarbourDebuggerRunner class loading attempted");
         
         return Unit.INSTANCE;
     }

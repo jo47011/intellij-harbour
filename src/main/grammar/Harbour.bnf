@@ -79,6 +79,7 @@
     CASE='case'
     OTHERWISE='otherwise'
     ENDSWITCH='endswitch'
+    ENDCASE='endcase'
     RETURN='return'
     EXIT='exit'
     LOOP='loop'

@@ -146,7 +146,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridx = 0;
         constraints.gridy = 4;
         constraints.gridwidth = 2;
-        JLabel maxNavResultsLabel = new JLabel("Max navigation results:");
+        JLabel maxNavResultsLabel = new JLabel("Max preload results:");
         generalPanel.add(maxNavResultsLabel, constraints);
         
         // Explanation below the label
@@ -160,6 +160,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridwidth = 1;
         SpinnerModel navResultsModel = new SpinnerNumberModel(20, 10, 500, 10);
         myMaxNavigationResultsSpinner = new JSpinner(navResultsModel);
+        myMaxNavigationResultsSpinner.setToolTipText("Initial results to show before 'Load All' button appears");
         generalPanel.add(myMaxNavigationResultsSpinner, constraints);
 
         // Add spacer to general panel

@@ -70,6 +70,7 @@
         <!-- Annotators -->
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourFunctionCallAnnotator"/>
         <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourIncludeAnnotator"/>
+        <annotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourKeywordAnnotator"/>
         
         <!-- External Annotator for Linting -->
         <externalAnnotator language="Harbour" implementationClass="org.intellij.sdk.language.HarbourExternalAnnotator"/>
@@ -92,12 +93,15 @@
         <!-- Breakpoint Properties Storage Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
         
-        <!-- Function Classification Service -->
+        <!-- Services -->
+        <!-- applicationService disabled to reduce startup impact, will be created on demand -->
+        <!-- <applicationService serviceImplementation="org.intellij.sdk.language.HarbourSaveListenerService"/> -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
         
-        <!-- Startup Activities -->
-        <startupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
-        <startupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
+        <!-- Startup Activities - Disabled to prevent startup hang
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
+        -->
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"
@@ -134,10 +138,6 @@
         
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
-        
-        <!-- File Save Listener for Linting -->
-        <listener class="org.intellij.sdk.language.HarbourLintOnSaveListener"
-                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </extensions>
 
     <actions>
@@ -157,5 +157,14 @@
         </action>
 
         <!-- REMOVED: HarbourTestErrorAction - obsolete since error handling now works properly -->
+        
+        <!-- Declare Local Variable Action -->
+        <action id="HarbourDeclareLocalVariableAction" class="org.intellij.sdk.language.HarbourDeclareLocalVariableAction"
+                text="Declare Local Variable" description="Declare variable under cursor as LOCAL">
+            <add-to-group group-id="CodeMenu" anchor="after" relative-to-action="IntroduceVariable"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="IntroduceVariable"/>
+            <add-to-group group-id="RefactoringMenu" anchor="after" relative-to-action="IntroduceVariable"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt L"/>
+        </action>
     </actions>
 </idea-plugin>

@@ -21,6 +21,8 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
     private JSpinner myReturnIndentSpinner;
     private JSpinner myDataIndentSpinner;
     private JSpinner myMethodIndentSpinner;
+    private JSpinner myMemvarIndentSpinner;
+    private JSpinner myPrivateIndentSpinner;
     private JCheckBox mySequenceCheckBox;
     
     protected HarbourFormattingPanel(CodeStyleSettings settings) {
@@ -73,6 +75,8 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         harbourSettings.RETURN_INDENT = (Integer) myReturnIndentSpinner.getValue();
         harbourSettings.DATA_INDENT = (Integer) myDataIndentSpinner.getValue();
         harbourSettings.METHOD_INDENT = (Integer) myMethodIndentSpinner.getValue();
+        harbourSettings.MEMVAR_INDENT = (Integer) myMemvarIndentSpinner.getValue();
+        harbourSettings.PRIVATE_INDENT = (Integer) myPrivateIndentSpinner.getValue();
         harbourSettings.SEQUENCE_LIKE_NORMAL_CODE = mySequenceCheckBox.isSelected();
     }
     
@@ -83,6 +87,8 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
                harbourSettings.RETURN_INDENT != (Integer) myReturnIndentSpinner.getValue() ||
                harbourSettings.DATA_INDENT != (Integer) myDataIndentSpinner.getValue() ||
                harbourSettings.METHOD_INDENT != (Integer) myMethodIndentSpinner.getValue() ||
+               harbourSettings.MEMVAR_INDENT != (Integer) myMemvarIndentSpinner.getValue() ||
+               harbourSettings.PRIVATE_INDENT != (Integer) myPrivateIndentSpinner.getValue() ||
                harbourSettings.SEQUENCE_LIKE_NORMAL_CODE != mySequenceCheckBox.isSelected();
     }
     
@@ -93,7 +99,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         GridBagConstraints c = new GridBagConstraints();
         c.fill = GridBagConstraints.NONE;
         c.anchor = GridBagConstraints.WEST;
-        c.insets = new Insets(20, 16, 8, 8);
+        c.insets = new Insets(10, 8, 4, 4);
         
         // Title label
         c.gridx = 0;
@@ -111,6 +117,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         
         c.gridx = 1;
         myLocalIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
+        myLocalIndentSpinner.setPreferredSize(new Dimension(60, myLocalIndentSpinner.getPreferredSize().height));
         panel.add(myLocalIndentSpinner, c);
         
         // RETURN indentation
@@ -121,6 +128,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         
         c.gridx = 1;
         myReturnIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
+        myReturnIndentSpinner.setPreferredSize(new Dimension(60, myReturnIndentSpinner.getPreferredSize().height));
         panel.add(myReturnIndentSpinner, c);
         
         // DATA indentation
@@ -131,6 +139,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         
         c.gridx = 1;
         myDataIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
+        myDataIndentSpinner.setPreferredSize(new Dimension(60, myDataIndentSpinner.getPreferredSize().height));
         panel.add(myDataIndentSpinner, c);
         
         // METHOD indentation
@@ -141,11 +150,34 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         
         c.gridx = 1;
         myMethodIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
+        myMethodIndentSpinner.setPreferredSize(new Dimension(60, myMethodIndentSpinner.getPreferredSize().height));
         panel.add(myMethodIndentSpinner, c);
+        
+        // MEMVAR indentation
+        c.gridx = 0;
+        c.gridy = 5;
+        JBLabel memvarLabel = new JBLabel("MEMVAR:");
+        panel.add(memvarLabel, c);
+        
+        c.gridx = 1;
+        myMemvarIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
+        myMemvarIndentSpinner.setPreferredSize(new Dimension(60, myMemvarIndentSpinner.getPreferredSize().height));
+        panel.add(myMemvarIndentSpinner, c);
+        
+        // PRIVATE indentation
+        c.gridx = 0;
+        c.gridy = 6;
+        JBLabel privateLabel = new JBLabel("PRIVATE:");
+        panel.add(privateLabel, c);
+        
+        c.gridx = 1;
+        myPrivateIndentSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 20, 1));
+        myPrivateIndentSpinner.setPreferredSize(new Dimension(60, myPrivateIndentSpinner.getPreferredSize().height));
+        panel.add(myPrivateIndentSpinner, c);
         
         // SEQUENCE indentation
         c.gridx = 0;
-        c.gridy = 5;
+        c.gridy = 7;
         c.gridwidth = 2;
         mySequenceCheckBox = new JCheckBox("Indent BEGIN SEQUENCE like normal code (if/endif style)");
         mySequenceCheckBox.setToolTipText("When checked, BEGIN SEQUENCE blocks indent like other control structures. When unchecked, they use custom indentation.");
@@ -156,7 +188,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         c.gridx = 2;
         c.gridy = 0;
         c.gridwidth = 1;
-        c.gridheight = 6;
+        c.gridheight = 8;
         c.weightx = 1.0;
         c.weighty = 0.0;
         c.fill = GridBagConstraints.HORIZONTAL;
@@ -164,7 +196,7 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         
         // Add vertical glue to push everything to the top
         c.gridx = 0;
-        c.gridy = 6;
+        c.gridy = 8;
         c.gridwidth = 3;
         c.gridheight = 1;
         c.weightx = 0.0;
@@ -182,6 +214,8 @@ public class HarbourFormattingPanel extends CodeStyleAbstractPanel {
         myReturnIndentSpinner.setValue(harbourSettings.RETURN_INDENT);
         myDataIndentSpinner.setValue(harbourSettings.DATA_INDENT);
         myMethodIndentSpinner.setValue(harbourSettings.METHOD_INDENT);
+        myMemvarIndentSpinner.setValue(harbourSettings.MEMVAR_INDENT);
+        myPrivateIndentSpinner.setValue(harbourSettings.PRIVATE_INDENT);
         mySequenceCheckBox.setSelected(harbourSettings.SEQUENCE_LIKE_NORMAL_CODE);
     }
 }

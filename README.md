@@ -3,7 +3,8 @@
 A comprehensive plugin for <a href="https://www.jetbrains.com/pycharm/" target="_blank">PyCharm</a> that provides
 advanced support for the <a href="https://harbour.github.io/" target="_blank">Harbour/Clipper</a> programming language.
 
-This plugin was implemented as `vibe-coding` project using <a href="https://openai.com/o1/" target="_blank">OpenAI O1</a>
+This plugin was implemented as `vibe-coding` project using <a href="https://openai.com/o1/" target="_blank">OpenAI
+O1</a>
 and <a href="https://claude.ai/" target="_blank">Claude</a>. For detailed development insights and experiences, see
 the [MAKING-OF](./MAKING_OF.md).
 
@@ -15,6 +16,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - [License](#license)
 - [VS Code Users](#vs-code-users)
 - [Roadmap](#roadmap--todos)
+- [Known Issues](#known-issues)
 
 ## Features
 
@@ -28,6 +30,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - **[Linting](#linting)** - Real-time code analysis and error detection
 - **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
 - **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
+- **[Code Helpers](#code-helpers)** - Quick actions to improve code quality and reduce typing
 
 ## Installation
 
@@ -70,6 +73,9 @@ For external harbour functions an external documentation link (configurable in t
   <em>Function navigation with external documentation links for built-in functions</em>
 </p>
 
+Same applies for procedures, classes, methods and variables. Newly added function, procedures, etc. are added to the
+index once the file is saved.
+
 ### Rename Refactoring
 
 Safely rename functions, procedures, and variables across your entire project with **Shift+F6**. All references are
@@ -105,7 +111,8 @@ positioning in settings.
 
 ### Linting
 
-Real-time code analysis provides instant feedback on syntax errors, undefined variables, and potential issues as you type. The linting engine integrates seamlessly with PyCharm's inspection framework.
+Real-time code analysis provides instant feedback on syntax errors, undefined variables, and potential issues as you
+type. The linting engine integrates seamlessly with PyCharm's inspection framework.
 
 <p align="center">
   <img src="img/linting.png" alt="Linting"/>
@@ -120,6 +127,8 @@ Configure linting settings in **Settings** → **Tools** → **Harbour** → **L
   <br>
   <em>Customizable linting rules and severity levels</em>
 </p>
+
+> **Note:** For proper linting functionality, ensure all include paths are correctly configured in your project settings. Missing include files or incorrect paths may prevent the linter from detecting syntax errors and unused variables.
 
 ## Debugging
 
@@ -205,6 +214,39 @@ RETURN NIL
 - Add `printDebugStackTrace()` to your custom error handler
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
+
+## Code Helpers
+
+The plugin provides quick actions to improve code quality and reduce repetitive typing:
+
+### Declare Local Variable (Alt+L)
+
+Quickly declare undefined variables as LOCAL with proper placement and indentation.
+
+**How to use:**
+1. Place cursor on any undefined variable in your code
+2. Press **Alt+L** 
+3. The plugin automatically:
+   - Detects the variable name under cursor
+   - Finds the containing function or procedure
+   - Adds `LOCAL variableName` declaration at the proper position
+   - Respects your LOCAL indentation settings
+
+**Example:**
+```harbour
+FUNCTION TestFunction()
+   LOCAL existingVar
+   
+   myNewVar := 10  // Place cursor on 'myNewVar' and press Alt+L
+   // Plugin will add: LOCAL myNewVar
+```
+
+**Features:**
+- Smart placement after existing LOCAL declarations
+- Validates variable names (prevents declaring keywords)
+- Checks for duplicate declarations
+- Uses indentation from code style settings
+- Shows helpful notifications for errors or success
 
 ## Building from Source
 
@@ -308,3 +350,19 @@ valuable insights into Harbour language support implementation.
 - **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
 - **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
   as well.
+- **Tests** - write tests.
+
+## Known Issues
+
+- **Ctrl+hover** should not show tooltip
+- **Ctrl-click**: sometimes on 1st click navigates to function directly instead of opening dialog. 2nd and further
+  clicks work fine.
+- most function/procedure features do not work yet for truncated keywords func/proce.
+- Internal function navigation may jump to function definition instead of showing a declaration dialog
+  if the file w/ the function definition misses some include file or if the list of usages is very long.
+  Subsequent click on function declaration itself work.
+
+
+
+
+

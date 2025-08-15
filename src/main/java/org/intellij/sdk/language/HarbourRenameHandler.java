@@ -6,10 +6,12 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.rename.PsiElementRenameHandler;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourNamedElement;
+import org.intellij.sdk.language.psi.HarbourTypes;
 import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
 import org.jetbrains.annotations.NotNull;
 
@@ -153,8 +155,6 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             if (renamableElement != null && renamableElement != element) {
                 // Verify the renamable element is still valid
                 if (isValidElement(renamableElement)) {
-                    // Set this element as the one to rename in the context
-                    dataContext = updateDataContext(dataContext, renamableElement);
                     HarbourLogger.log(COMPONENT, "Using more specific element for rename: " + renamableElement.getText());
                     element = renamableElement;
                 } else {
@@ -169,7 +169,29 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
         if (element != null) {
             HarbourLogger.log(COMPONENT, "Starting rename on: " + element.getText());
             try {
-                super.invoke(project, editor, file, dataContext);
+                // Get the current name for suggestion
+                String currentName = getCurrentElementName(element);
+                HarbourLogger.log(COMPONENT, "Current name for suggestion: " + currentName);
+                
+                // Make element final for use in lambda
+                final PsiElement finalElement = element;
+                final String finalCurrentName = currentName;
+                
+                // Create a custom data context with the suggested name
+                DataContext customContext = new DataContext() {
+                    @Override
+                    public Object getData(String dataId) {
+                        if ("rename.suggested.name".equals(dataId) && finalCurrentName != null) {
+                            return finalCurrentName;
+                        }
+                        if (PsiElementRenameHandler.DEFAULT_NAME.equals(dataId)) {
+                            return finalElement;
+                        }
+                        return dataContext.getData(dataId);
+                    }
+                };
+                
+                super.invoke(project, editor, file, customContext);
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during invoke: " + e.getMessage());
                 HarbourLogger.logStackTrace(COMPONENT, e);
@@ -188,8 +210,59 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             if (PsiElementRenameHandler.DEFAULT_NAME.equals(dataId)) {
                 return element;
             }
+            if ("rename.suggested.name".equals(dataId)) {
+                // Provide the current name as suggestion
+                String currentName = getCurrentElementName(element);
+                HarbourLogger.log(COMPONENT, "Suggesting name for rename: " + currentName);
+                return currentName;
+            }
             return dataContext.getData(dataId);
         };
+    }
+    
+    /**
+     * Gets the current name of an element for use as rename suggestion
+     */
+    private String getCurrentElementName(PsiElement element) {
+        if (element == null) return null;
+        
+        // Try to get name from named elements
+        if (element instanceof HarbourNamedElement) {
+            String name = ((HarbourNamedElement) element).getName();
+            if (name != null && !name.isEmpty()) {
+                return name;
+            }
+        }
+        
+        if (element instanceof HarbourIdElement) {
+            String name = ((HarbourIdElement) element).getName();
+            if (name != null && !name.isEmpty()) {
+                return name;
+            }
+        }
+        
+        // For function calls, extract the function name
+        if (element instanceof FunctionCallImpl) {
+            PsiElement[] children = element.getChildren();
+            for (PsiElement child : children) {
+                if (child instanceof LeafPsiElement && 
+                    ((LeafPsiElement) child).getElementType() == HarbourTypes.IDENT) {
+                    return child.getText();
+                }
+            }
+        }
+        
+        // For leaf elements, use the text directly
+        if (element instanceof LeafPsiElement) {
+            LeafPsiElement leafElement = (LeafPsiElement) element;
+            if (leafElement.getElementType() == HarbourTypes.IDENT ||
+                leafElement.getElementType().toString().contains("IDENT")) {
+                return leafElement.getText();
+            }
+        }
+        
+        // Fallback to element text
+        return element.getText();
     }
 
     @Override

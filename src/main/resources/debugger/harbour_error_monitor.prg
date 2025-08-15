@@ -16,15 +16,13 @@ STATIC s_lInRecursion := .F.  // Module-level recursion guard
 
 // Use a monitoring approach that periodically checks and wraps the error handler
 INIT PROCEDURE __HbIntelliJErrorMonitor()  // Run last
-   LOCAL bCurrentHandler
-   
    // Only install once
    IF !s_lMonitorInstalled
-      // Get whatever error handler is currently installed
-      bCurrentHandler := ErrorBlock()
+      // Get whatever error handler is currently installed and store it
+      s_bOriginalHandler := ErrorBlock()
       
       // Wrap it with our monitor
-      ErrorBlock({|oError| MonitorAndPassError(oError, bCurrentHandler)})
+      ErrorBlock({|oError| MonitorAndPassError(oError, s_bOriginalHandler)})
       s_lMonitorInstalled := .T.
    ENDIF
 RETURN

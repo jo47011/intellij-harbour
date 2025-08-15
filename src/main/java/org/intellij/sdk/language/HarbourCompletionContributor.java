@@ -1,7 +1,6 @@
 package org.intellij.sdk.language;
 
 import com.intellij.codeInsight.completion.*;
-import com.intellij.codeInsight.completion.impl.CamelHumpMatcher;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.openapi.application.ReadAction;
@@ -67,6 +66,12 @@ public class HarbourCompletionContributor extends CompletionContributor {
                                 }
                             }
 
+                            // Check if we're in a comment - if so, skip completion
+                            if (isInComment(parameters)) {
+                                HarbourLogger.log("CompletionContributor", "Skipping completion inside comment");
+                                return;
+                            }
+                            
                             // Standard completion handling proceeds
                             HarbourLogger.log("CompletionContributor", "Starting completion");
 
@@ -77,9 +82,9 @@ public class HarbourCompletionContributor extends CompletionContributor {
                                 HarbourLogger.log("CompletionContributor", "Available commands: " + String.join(", ", commands));
                             }
 
-                            // Create case-insensitive prefix matcher
-                            CompletionResultSet caseInsensitiveResult = result.withPrefixMatcher(
-                                    new CamelHumpMatcher(result.getPrefixMatcher().getPrefix(), true));
+                            // Use the original result without modifying prefix matcher
+                            // This should provide the most straightforward completion behavior
+                            CompletionResultSet caseInsensitiveResult = result;
 
                             // Get project from original file
                             Project project = parameters.getOriginalFile().getProject();
@@ -326,13 +331,15 @@ public class HarbourCompletionContributor extends CompletionContributor {
             for (int i = scope[0]; i <= Math.min(scope[1], lines.length - 1); i++) {
                 scopeText.append(lines[i]).append("\n");
             }
+            
+            // Debug logging removed - issue found and fixed
 
             // Find all LOCAL variable declarations in the current scope
             Set<String> localVariables = new HashSet<>();
             Set<String> paramSet = new HashSet<>(); // Set to track parameters separately
 
-            // Pattern for LOCAL variable declarations
-            Pattern localPattern = Pattern.compile("(?i)\\bLOCAL\\s+([\\w,\\s:=]+)");
+            // Pattern for LOCAL variable declarations - stop at end of line to avoid matching across lines
+            Pattern localPattern = Pattern.compile("(?i)^\\s*LOCAL\\s+([\\w,\\s:=]+?)\\s*$", Pattern.MULTILINE);
             Matcher localMatcher = localPattern.matcher(scopeText.toString());
 
             while (localMatcher.find()) {
@@ -343,6 +350,7 @@ public class HarbourCompletionContributor extends CompletionContributor {
 
                 // Split by commas to get individual variables
                 String[] vars = declarations.split(",");
+                
                 for (String var : vars) {
                     // Extract variable name (before any assignment or type declaration)
                     String varName = var.trim();
@@ -1134,6 +1142,66 @@ public class HarbourCompletionContributor extends CompletionContributor {
         }
     }
 
+    /**
+     * Check if the completion position is inside a comment
+     */
+    private boolean isInComment(CompletionParameters parameters) {
+        try {
+            PsiElement position = parameters.getPosition();
+            if (position == null) return false;
+            
+            // Check if the position is directly a comment element
+            if (position instanceof LeafPsiElement) {
+                LeafPsiElement leaf = (LeafPsiElement) position;
+                if (leaf.getElementType() == HarbourTypes.EOL_COMMENT ||
+                    leaf.getElementType() == HarbourTypes.BLOCK_COMMENT) {
+                    return true;
+                }
+            }
+            
+            // Check if any parent is a comment
+            PsiElement current = position.getParent();
+            while (current != null) {
+                if (current instanceof LeafPsiElement) {
+                    LeafPsiElement leaf = (LeafPsiElement) current;
+                    if (leaf.getElementType() == HarbourTypes.EOL_COMMENT ||
+                        leaf.getElementType() == HarbourTypes.BLOCK_COMMENT) {
+                        return true;
+                    }
+                }
+                current = current.getParent();
+            }
+            
+            // Also check the text context around the position
+            PsiFile file = position.getContainingFile();
+            if (file != null) {
+                String text = file.getText();
+                int offset = position.getTextOffset();
+                
+                // Look backwards for // on the same line
+                int lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+                String linePrefix = text.substring(lineStart, Math.min(offset, text.length()));
+                
+                if (linePrefix.contains("//")) {
+                    return true;
+                }
+                
+                // Look for /* */ block comments
+                int blockStart = text.lastIndexOf("/*", offset);
+                int blockEnd = text.lastIndexOf("*/", offset);
+                
+                if (blockStart >= 0 && (blockEnd < 0 || blockStart > blockEnd)) {
+                    return true;
+                }
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error checking comment context: " + e.getMessage());
+        }
+        
+        return false;
+    }
+    
     /**
      * Extract function name from a PsiElement
      */

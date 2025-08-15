@@ -33,6 +33,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             Pattern.compile("^\\s*LOCAL\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern DATA_DECLARATION_PATTERN =
             Pattern.compile("^\\s*DATA\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MEMVAR_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*MEMVAR\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PRIVATE_DECLARATION_PATTERN =
+            Pattern.compile("^\\s*PRIVATE\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern METHOD_DECLARATION_PATTERN =
             Pattern.compile("^\\s*METHOD\\s+\\w+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern METHOD_IMPLEMENTATION_PATTERN =
@@ -48,19 +52,48 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private static final Pattern STRING_START_PATTERN =
             Pattern.compile("^\\s*[\"'].*");
 
-    // New patterns for switch/case statements
+    // New patterns for switch/case statements and DO CASE statements
     private static final Pattern SWITCH_PATTERN =
             Pattern.compile("^\\s*SWITCH\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DO_CASE_PATTERN =
+            Pattern.compile("^\\s*DO\\s+CASE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern CASE_PATTERN =
             Pattern.compile("^\\s*CASE\\s+.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern OTHERWISE_PATTERN =
+            Pattern.compile("^\\s*OTHERWISE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ENDSWITCH_PATTERN =
             Pattern.compile("^\\s*ENDSWITCH.*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENDCASE_PATTERN =
+            Pattern.compile("^\\s*ENDCASE.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern LINE_CONTINUATION_PATTERN =
             Pattern.compile(".*;\\s*$");
 
     // Pattern for detecting comment-only lines
     private static final Pattern COMMENT_LINE_PATTERN =
             Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
+            
+    // Pattern for detecting array/block syntax that should not be broken
+    private static final Pattern ARRAY_BLOCK_PATTERN =
+            Pattern.compile(".*\\s*:=\\s*\\{.*\\}.*");
+    private static final Pattern CODEBLOCK_PATTERN =
+            Pattern.compile(".*\\{\\s*\\|\\|.*\\}.*");
+    
+    // Harbour keywords that should never be split across lines
+    private static final String[] HARBOUR_KEYWORDS = {
+        ".and.", ".or.", ".not.", ".t.", ".f.", ".true.", ".false."
+    };
+    
+    // Harbour regular keywords that should not be split (word boundaries)
+    private static final String[] HARBOUR_WORD_KEYWORDS = {
+        "when", "valid", "picture", "say", "get", "read"
+    };
+    
+    // Harbour constructs that should be treated carefully for line breaking
+    // Only prevent breaking very specific short constructs, allow breaking longer complex ones
+    private static final Pattern SIMPLE_GET_WHEN_PATTERN = 
+            Pattern.compile("^\\s*@\\s*\\w+\\s*get\\s+\\w+\\s+when\\s+\\w+\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SIMPLE_SAY_GET_PATTERN = 
+            Pattern.compile("^\\s*say\\s+\"[^\"]*\"\\s+get\\s+\\w+\\s*$", Pattern.CASE_INSENSITIVE);
     
     // Patterns for BEGIN SEQUENCE constructs
     private static final Pattern BEGIN_SEQUENCE_PATTERN =
@@ -179,7 +212,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int indentLevel = 0;
         boolean inFunctionBody = false;
         boolean inSwitchBlock = false;
+        boolean inDoCaseBlock = false;
         boolean inClassDefinition = false;
+        boolean inBlockComment = false; // Track if we're inside a block comment
         int indentSize = 2; // Default indentation size for Harbour
         
         // Get custom indentation settings
@@ -187,6 +222,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int returnIndent = settings.RETURN_INDENT;
         int dataIndent = settings.DATA_INDENT;
         int methodIndent = settings.METHOD_INDENT;
+        int memvarIndent = settings.MEMVAR_INDENT;
+        int privateIndent = settings.PRIVATE_INDENT;
         boolean sequenceLikeNormalCode = settings.SEQUENCE_LIKE_NORMAL_CODE;
 
         // Removed verbose logging for performance
@@ -225,11 +262,36 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             String lineWithWhitespace = lines[i];
             String line = lineWithWhitespace.trim();
+            
+            // Check for block comment start/end
+            if (line.contains("/*")) {
+                inBlockComment = true;
+            }
+            
+            // If we're in a block comment, preserve the line as-is
+            if (inBlockComment) {
+                result.append(lineWithWhitespace);
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+                // Check if this line ends the block comment
+                if (line.contains("*/")) {
+                    inBlockComment = false;
+                }
+                continue; // Skip all other processing for block comment lines
+            }
 
-            // Skip empty lines
+            // Skip empty lines, but avoid empty lines after semicolon continuations
             if (line.isEmpty()) {
-                result.append("\n");
-                continue;
+                // Check if previous non-empty line ended with semicolon for continuation
+                String lastResultLine = getLastNonEmptyLine(result.toString());
+                if (lastResultLine != null && lastResultLine.trim().endsWith(";")) {
+                    // Skip this empty line as it would break Harbour continuation syntax
+                    continue;
+                } else {
+                    result.append("\n");
+                    continue;
+                }
             }
 
             // Skip lone semicolons
@@ -249,6 +311,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 indentLevel = 0;
                 inFunctionBody = true;
                 inSwitchBlock = false;
+                inDoCaseBlock = false;
             }
 
             // Check for class start/end
@@ -267,14 +330,30 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 inSwitchBlock = true;
             }
 
+            // Check for DO CASE statement
+            boolean isDoCaseStatement = DO_CASE_PATTERN.matcher(line).matches();
+            if (isDoCaseStatement) {
+                // Found DO CASE statement
+                inDoCaseBlock = true;
+            }
+
             // Check for case statement
             boolean isCaseStatement = CASE_PATTERN.matcher(line).matches();
+            
+            // Check for otherwise statement
+            boolean isOtherwiseStatement = OTHERWISE_PATTERN.matcher(line).matches();
 
             // Check for endswitch statement
             boolean isEndSwitchStatement = ENDSWITCH_PATTERN.matcher(line).matches();
             if (isEndSwitchStatement) {
                 // Found endswitch statement
                 inSwitchBlock = false;
+            }
+            
+            // Check for endcase statement
+            boolean isEndCaseStatement = ENDCASE_PATTERN.matcher(line).matches();
+            if (isEndCaseStatement) {
+                inDoCaseBlock = false;
             }
 
             // Detect RETURN statements - all will use normal indentation now
@@ -283,6 +362,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for statement types
             boolean isLocalDeclaration = LOCAL_DECLARATION_PATTERN.matcher(line).matches();
             boolean isDataDeclaration = DATA_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isMemvarDeclaration = MEMVAR_DECLARATION_PATTERN.matcher(line).matches();
+            boolean isPrivateDeclaration = PRIVATE_DECLARATION_PATTERN.matcher(line).matches();
             boolean isMethodDeclaration = METHOD_DECLARATION_PATTERN.matcher(line).matches();
             boolean isBeginSequence = BEGIN_SEQUENCE_PATTERN.matcher(line).matches();
             boolean isRecoverUsing = RECOVER_USING_PATTERN.matcher(line).matches();
@@ -309,6 +390,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             } else if (isDataDeclaration) {
                 // Apply custom indentation for DATA declarations
                 customIndentSpaces = dataIndent;
+            } else if (isMemvarDeclaration) {
+                // Apply custom indentation for MEMVAR declarations
+                customIndentSpaces = memvarIndent;
+            } else if (isPrivateDeclaration) {
+                // Apply custom indentation for PRIVATE declarations
+                customIndentSpaces = privateIndent;
             } else if (isMethodDeclaration && inClassDefinition) {
                 // Apply custom indentation for METHOD declarations only inside CLASS/ENDCLASS
                 customIndentSpaces = methodIndent;
@@ -328,14 +415,25 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (isEndSwitchStatement || isEndClassStatement || isEndSequence) {
                 isBlockEnd = true;
             }
+            
+            // RECOVER USING should also be treated as a block ending/transition
+            if (isRecoverUsing) {
+                isBlockEnd = true;
+            }
 
-            // Adjust indentation for case statements in switch blocks and content inside them
-            if (isCaseStatement && inSwitchBlock) {
-                // Handling case statement in switch block
-                // Case statements are at the same level as switch
-                effectiveIndentLevel = indentLevel - 1;
+            // Adjust indentation for case and otherwise statements
+            if (isCaseStatement || isOtherwiseStatement) {
+                if (inSwitchBlock) {
+                    // Handling case/otherwise statement in switch block
+                    // Case/otherwise statements are at the same level as switch
+                    effectiveIndentLevel = indentLevel - 1;
+                } else if (inDoCaseBlock) {
+                    // For DO CASE blocks, CASE and OTHERWISE statements should NOT be indented further
+                    // They should be at the same level as DO CASE
+                    if (indentLevel > 0) effectiveIndentLevel = indentLevel - 1;
+                }
             } else if (inSwitchBlock && !isEndSwitchStatement) {
-                // For content inside case blocks, use switch level + 1
+                // For content inside case blocks in SWITCH, use switch level + 1
                 // This gives one level of indentation instead of two
                 effectiveIndentLevel = Math.min(effectiveIndentLevel, (indentLevel - 1) + 1);
             }
@@ -343,15 +441,23 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for else/elseif statements that need special handling
             boolean isElseStatement = lowerLine.equals("else") || lowerLine.startsWith("elseif");
             
-            // Reduce indentation for block endings
-            if (isBlockEnd) {
-                if (indentLevel > 0) indentLevel--;
-            }
-            
             // Handle else/elseif indentation - they should be at the same level as their corresponding if
             if (isElseStatement) {
                 // Temporarily decrease effectiveIndentLevel for this line only
                 if (effectiveIndentLevel > 0) effectiveIndentLevel--;
+            }
+            
+            // Special handling for SEQUENCE block terminators - they should align with BEGIN SEQUENCE
+            if (isRecoverUsing || isEndSequence) {
+                // These should be at the same level as BEGIN SEQUENCE, so reduce by 1
+                if (effectiveIndentLevel > 0) {
+                    effectiveIndentLevel = effectiveIndentLevel - 1;
+                }
+            }
+            
+            // Reduce indentation for block endings AFTER all other adjustments
+            if (isBlockEnd) {
+                if (indentLevel > 0) indentLevel--;
             }
 
             // Check if this line is a continuation of previous line
@@ -362,8 +468,21 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String newIndent;
 
             if (isCommentOnlyLine) {
-                // Comments should be indented like normal code (use previous line's actual indentation)
-                newIndent = previousLineActualIndent;
+                // Check if next line is a function/procedure declaration
+                boolean nextLineIsFunction = false;
+                if (i < lines.length - 1) {
+                    String nextLine = lines[i + 1].trim();
+                    nextLineIsFunction = FUNCTION_START_PATTERN.matcher(nextLine).matches() || 
+                                       METHOD_IMPLEMENTATION_PATTERN.matcher(nextLine).matches();
+                }
+                
+                if (nextLineIsFunction) {
+                    // Comments above functions should not be indented
+                    newIndent = "";
+                } else {
+                    // Other comments should use previous line's indentation
+                    newIndent = previousLineActualIndent;
+                }
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
@@ -468,7 +587,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         result.append("\n");
                     }
                 }
-            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000) {
+            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 && shouldBreakLine(processedLine)) {
                 // Line needs breaking (skip for very large files to improve performance)
                 List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
 
@@ -477,8 +596,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     if (j < brokenLines.size() - 1) {
                         result.append("\n");
                     } else if (i < lines.length - 1) {
-                        // Only add newline after last segment if not at end of file
-                        result.append("\n");
+                        // Check if the next line is a continuation line
+                        // If so, don't add newline to avoid empty line between continuation
+                        boolean nextLineIsContinuation = (i + 1 < lines.length) && continuationLines.contains(i + 1);
+                        if (!nextLineIsContinuation) {
+                            // Only add newline after last segment if not at end of file and next line is not a continuation
+                            result.append("\n");
+                        }
                     }
                 }
             } else {
@@ -492,11 +616,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Update indentation for next lines
-            if (lowerLine.startsWith("if ") ||
+            // Don't increase indent if this is a continuation line (part of previous statement)
+            if (!isLineContinuation && (
+                    lowerLine.startsWith("if ") ||
                     lowerLine.startsWith("while ") ||
                     lowerLine.startsWith("for ") ||
-                    lowerLine.startsWith("do ") ||
-                    (lowerLine.startsWith("case ") && !inSwitchBlock)) { // Don't increase indent for case in switch
+                    (lowerLine.startsWith("do ") && !isDoCaseStatement) || // DO but not DO CASE
+                    isDoCaseStatement || // DO CASE starts a block
+                    (lowerLine.startsWith("case ") && !inSwitchBlock && !inDoCaseBlock))) { // Don't increase indent for case in switch or DO CASE
                 indentLevel++;
             }
             
@@ -512,12 +639,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
             
             // elseif increases indent like if, but else does NOT increase indent
-            if (lowerLine.startsWith("elseif")) {
+            // Don't increase indent if this is a continuation line
+            if (!isLineContinuation && lowerLine.startsWith("elseif")) {
                 indentLevel++;
             }
 
             // Increase indent after switch statement
-            if (isSwitchStatement) {
+            // Don't increase indent if this is a continuation line
+            if (!isLineContinuation && isSwitchStatement) {
                 indentLevel++;
             }
 
@@ -627,9 +756,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 String continuationIndent = indent + " ".repeat(indentSize);
                 currentLine = continuationIndent + stringDelimiter;
             } else {
-                // Normal break
-                if (!segment.trim().endsWith(";") && !segment.trim().endsWith("+") && !segment.trim().endsWith("//")) {
-                    currentLine += segment + " ;";
+                // Normal break - be more selective about adding semicolons
+                if (shouldAddContinuationSemicolon(segment, content, pos, breakPos)) {
+                    currentLine += segment + ";";
                 } else {
                     currentLine += segment;
                 }
@@ -652,12 +781,132 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     }
 
     /**
-     * Find a good break point
+     * Determine if a line should be broken
+     * Only prevent breaking simple constructs; allow breaking complex long statements
+     */
+    private boolean shouldBreakLine(String line) {
+        String trimmed = line.trim();
+        
+        // Don't break comment lines (single-line or block comments)
+        if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*") || trimmed.endsWith("*/")) {
+            return false; // Don't break comment lines
+        }
+        
+        // Don't break text/string output lines (e.g., ? "very long string")
+        // Check if line starts with ? (output command) followed by string literal
+        if (trimmed.startsWith("?")) {
+            // Check if it contains a string literal
+            if (trimmed.contains("\"") || trimmed.contains("'")) {
+                return false; // Don't break text output lines
+            }
+        }
+        
+        // Don't break lines that are primarily string literals
+        // Pattern: lines that start with a string literal or are assignment to string literals
+        if (trimmed.matches("^[\"'].*[\"'].*$") || 
+            trimmed.matches(".*:=\\s*[\"'].*[\"'].*$")) {
+            // Check if it's primarily a string (not code with a string in it)
+            // Count quotes - if there are only 2 quotes, it's likely a single string
+            int quoteCount = 0;
+            for (char c : trimmed.toCharArray()) {
+                if (c == '"' || c == '\'') {
+                    quoteCount++;
+                }
+            }
+            // If there are 2 quotes or less, it's likely a single string - don't break
+            if (quoteCount <= 2) {
+                return false;
+            }
+        }
+        
+        // Allow breaking lines with comments - the findBreakPoint method will handle breaking before the comment
+        
+        // Don't break simple GET ... WHEN constructs (only very basic ones)
+        if (SIMPLE_GET_WHEN_PATTERN.matcher(trimmed).matches()) {
+            return false;
+        }
+        
+        // Don't break simple SAY ... GET constructs 
+        if (SIMPLE_SAY_GET_PATTERN.matcher(trimmed).matches()) {
+            return false;
+        }
+        
+        // Note: Removed array/block restrictions - user wants long lines to break
+        // The issue was incorrect semicolon placement, not that they shouldn't break
+        
+        // Allow breaking complex long lines (including complex GET statements)
+        return true;
+    }
+    
+    /**
+     * Determine if a continuation semicolon should be added
+     */
+    private boolean shouldAddContinuationSemicolon(String segment, String fullContent, int currentPos, int breakPos) {
+        String trimmedSegment = segment.trim();
+        
+        // Don't add semicolon if segment already ends with one or ends with comment
+        if (trimmedSegment.endsWith(";") || trimmedSegment.endsWith("//")) {
+            return false;
+        }
+        
+        // Check what comes after the break point - if next content starts with comment, no semicolon needed
+        String contextAfter = fullContent.substring(breakPos).trim();
+        if (contextAfter.startsWith("//") || contextAfter.startsWith("/*")) {
+            return false;
+        }
+        
+        // Don't add semicolon if we're breaking inside array/block syntax
+        String contextBefore = fullContent.substring(0, currentPos);
+        
+        // Count braces to see if we're inside a block
+        int braceCount = 0;
+        boolean inString = false;
+        char stringDelim = 0;
+        
+        for (char c : contextBefore.toCharArray()) {
+            if (!inString && (c == '"' || c == '\'')) {
+                inString = true;
+                stringDelim = c;
+            } else if (inString && c == stringDelim) {
+                inString = false;
+            } else if (!inString) {
+                if (c == '{') braceCount++;
+                else if (c == '}') braceCount--;
+            }
+        }
+        
+        // If we're inside braces, don't add semicolon
+        if (braceCount > 0) {
+            return false;
+        }
+        
+        // Check if this looks like an array assignment
+        if (contextBefore.contains(":=") && (contextBefore.contains("{") || contextAfter.contains("}"))) {
+            return false;
+        }
+        
+        // Default: add semicolon for normal line continuation
+        return true;
+    }
+
+    /**
+     * Find a good break point, avoiding splitting Harbour keywords
      */
     private int findBreakPoint(String content, int startPos, int endPos) {
         if (endPos >= content.length()) return content.length();
 
-        // Look for good break points
+        // Check if line contains // comment - if so, don't break after it
+        int commentStart = content.indexOf("//", startPos);
+        if (commentStart >= 0 && commentStart < endPos) {
+            // Line has comment, only break before the comment
+            endPos = Math.min(endPos, commentStart);
+            if (endPos <= startPos) {
+                // Can't break before comment, don't break line at all
+                return content.length();
+            }
+        }
+
+        // Look for good break points, starting from the end and working backwards
         for (int i = endPos; i > startPos; i--) {
             char c = content.charAt(i);
 
@@ -665,20 +914,110 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (i > 0 && content.charAt(i-1) == '-' && c == '>') continue;
             if (i < content.length()-1 && c == '-' && content.charAt(i+1) == '>') continue;
 
-            // Check for logical operators
-            if (c == '.') {
-                String nearby = content.substring(
-                        Math.max(0, i-4),
-                        Math.min(content.length(), i+5)
-                );
-                if (nearby.contains(".and.") || nearby.contains(".or.")) continue;
+            // Check if we're inside or at the boundary of any Harbour keyword
+            if (isWithinHarbourKeyword(content, i)) {
+                continue; // Skip this position if it would break a keyword
             }
 
-            // Good break points
-            if (c == ',' || c == ' ' || c == '.' || c == ';' || c == ')') return i + 1;
+            // Good break points (in order of preference)
+            if (c == ' ') return i + 1;        // Prefer spaces
+            if (c == ',') return i + 1;        // Then commas  
+            if (c == '+') return i + 1;        // Then plus operators
+            if (c == ';') return i + 1;        // Then semicolons
+            if (c == ')') return i + 1;        // Then closing parentheses
+            if (c == '.' && !isWithinHarbourKeyword(content, i)) return i + 1; // Dots only if not in keywords
         }
 
-        return startPos;
+        return startPos; // No good break point found
+    }
+    
+    /**
+     * Check if a position is within a Harbour keyword that should not be split
+     */
+    private boolean isWithinHarbourKeyword(String content, int position) {
+        String lowerContent = content.toLowerCase();
+        
+        // Check dotted keywords (.and., .or., etc.)
+        for (String keyword : HARBOUR_KEYWORDS) {
+            if (isPositionWithinKeyword(lowerContent, position, keyword)) {
+                return true;
+            }
+        }
+        
+        // Check word keywords (when, valid, etc.) - must be whole words
+        for (String keyword : HARBOUR_WORD_KEYWORDS) {
+            if (isPositionWithinWordKeyword(content, position, keyword)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if position is within a dotted keyword
+     */
+    private boolean isPositionWithinKeyword(String lowerContent, int position, String keyword) {
+        for (int startIdx = Math.max(0, position - keyword.length() + 1); 
+             startIdx <= Math.min(position, lowerContent.length() - keyword.length()); 
+             startIdx++) {
+            
+            int endIdx = startIdx + keyword.length();
+            if (endIdx <= lowerContent.length()) {
+                String substring = lowerContent.substring(startIdx, endIdx);
+                if (substring.equals(keyword)) {
+                    if (position >= startIdx && position < endIdx) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Check if position is within a word keyword (must be whole word)
+     */
+    private boolean isPositionWithinWordKeyword(String content, int position, String keyword) {
+        String lowerContent = content.toLowerCase();
+        
+        for (int startIdx = Math.max(0, position - keyword.length() + 1); 
+             startIdx <= Math.min(position, content.length() - keyword.length()); 
+             startIdx++) {
+            
+            int endIdx = startIdx + keyword.length();
+            if (endIdx <= content.length()) {
+                String substring = lowerContent.substring(startIdx, endIdx);
+                if (substring.equals(keyword)) {
+                    // Check word boundaries
+                    boolean validStart = (startIdx == 0 || !Character.isLetterOrDigit(content.charAt(startIdx - 1)));
+                    boolean validEnd = (endIdx >= content.length() || !Character.isLetterOrDigit(content.charAt(endIdx)));
+                    
+                    if (validStart && validEnd && position >= startIdx && position < endIdx) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get the last non-empty line from the formatted text
+     */
+    private String getLastNonEmptyLine(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        
+        String[] lines = text.split("\n", -1);
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i].trim();
+            if (!line.isEmpty()) {
+                return lines[i]; // Return with original whitespace
+            }
+        }
+        return null;
     }
 
     /**

@@ -51,21 +51,17 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
 
     @Override
     public void mouseMoved(EditorMouseEvent event) {
-        // CRITICAL: Do not update click mode on hover
-        // This prevents hover from canceling click operations
+        // CRITICAL: Do not interfere with click mode on hover events
+        // The ExternalDocumentationHandler now has its own timeout mechanism
         boolean ctrlDown = event.getMouseEvent().isControlDown();
         
         if (ctrlDown) {
-            HarbourLogger.log(COMPONENT, "Ctrl+Hover detected - click mode should remain: " + 
+            HarbourLogger.log(COMPONENT, "Ctrl+Hover detected - click mode: " + 
                 HarbourExternalDocumentationHandler.isClickMode());
         }
         
-        // Reset click mode after timeout to ensure hover events don't trigger popups
-        long timeSinceClick = System.currentTimeMillis() - lastClickTime;
-        if (timeSinceClick > CLICK_TIMEOUT && HarbourExternalDocumentationHandler.isClickMode()) {
-            HarbourLogger.log(COMPONENT, "Click timeout reached (" + timeSinceClick + "ms) - resetting click mode to FALSE");
-            HarbourExternalDocumentationHandler.setClickMode(false);
-        }
+        // No longer manage timeout here - let the ExternalDocumentationHandler handle it
+        // This prevents race conditions between mouse events and handler processing
     }
 
     @Override

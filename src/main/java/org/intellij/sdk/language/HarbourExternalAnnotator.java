@@ -21,8 +21,12 @@ import com.intellij.lang.ASTNode;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.options.ShowSettingsUtil;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -292,14 +296,24 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             
             message.append("\nLinting will continue with available syntax checks.");
             
-            NotificationGroupManager.getInstance()
+            Notification notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Harbour Application")
                 .createNotification(
                     "Missing Include Files",
                     message.toString(),
                     NotificationType.WARNING
-                )
-                .notify(project);
+                );
+            
+            // Add action to open settings
+            notification.addAction(new NotificationAction("Configure Include Paths") {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "Harbour");
+                    notification.expire();
+                }
+            });
+            
+            notification.notify(project);
         });
     }
     
@@ -920,19 +934,29 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 int actualLine = line;
                 
                 // Try to extract identifier from various error messages
+                // IMPORTANT: Skip this for syntax errors - they should be shown exactly where reported
                 String identifier = null;
-                if (message != null) {
+                boolean isSyntaxError = message != null && 
+                    (message.toLowerCase().contains("syntax error") || 
+                     (result.getErrorCode() != null && result.getErrorCode().equals("E0030")));
+                
+                if (!isSyntaxError && message != null) {
                     // Try different patterns to extract identifier
                     Pattern[] patterns = {
-                        Pattern.compile("'([^']+)'"),                    // Most common: 'IDENTIFIER'
-                        Pattern.compile("\"([^\"]+)\""),                 // Sometimes: "IDENTIFIER"
-                        Pattern.compile("\\b([A-Z_][A-Z0-9_]*)\\b")     // Fallback: uppercase identifier
+                        Pattern.compile("'([A-Za-z_][A-Za-z0-9_]*)'"),   // Valid identifier in quotes
+                        Pattern.compile("\"([A-Za-z_][A-Za-z0-9_]*)\""), // Valid identifier in double quotes
+                        Pattern.compile("\\b([A-Z_][A-Z0-9_]+)\\b")      // Fallback: uppercase identifier
                     };
                     
                     for (Pattern pattern : patterns) {
                         Matcher matcher = pattern.matcher(message);
                         if (matcher.find()) {
                             identifier = matcher.group(1);
+                            // Skip single character non-letter identifiers (like '.')
+                            if (identifier.length() == 1 && !Character.isLetter(identifier.charAt(0))) {
+                                identifier = null;
+                                continue;
+                            }
                             break;
                         }
                     }

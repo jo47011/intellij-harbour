@@ -77,7 +77,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     private String linterExclusionComment = "noqa"; // Comment text to exclude lines from linting
     
     // Navigation settings
-    private int maxNavigationResults = 20; // Maximum results to show initially in navigation popup
+    private int maxNavigationResults = 20; // Maximum results to preload initially (with "load all" button for more)
 
 
     public HarbourSettings() {
@@ -403,7 +403,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     public void setMaxNavigationResults(int maxNavigationResults) {
         this.maxNavigationResults = maxNavigationResults;
     }
-
+    
 
 
     /**

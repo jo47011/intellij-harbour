@@ -4,6 +4,7 @@ import com.intellij.extapi.psi.ASTWrapperPsiElement;
 import com.intellij.lang.ASTNode;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiNameIdentifierOwner;
+import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.PsiReference;
 import org.intellij.sdk.language.HarbourLogger;
 import org.intellij.sdk.language.psi.FunctionCall;
@@ -15,7 +16,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Mixin for function call PSI elements.
  */
-public abstract class HarbourFunctionCallMixin extends ASTWrapperPsiElement implements FunctionCall, PsiNameIdentifierOwner {
+public abstract class HarbourFunctionCallMixin extends ASTWrapperPsiElement implements FunctionCall, PsiNamedElement, PsiNameIdentifierOwner {
 
     public HarbourFunctionCallMixin(@NotNull ASTNode node) {
         super(node);

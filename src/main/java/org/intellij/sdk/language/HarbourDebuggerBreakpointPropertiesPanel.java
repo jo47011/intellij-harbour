@@ -1,6 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.ui.EditorTextField;
@@ -16,8 +15,6 @@ import java.awt.*;
  * Allows setting conditional expressions, hit conditions, and log messages.
  */
 public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomPropertiesPanel<XLineBreakpoint<HarbourDebuggerBreakpointProperties>> {
-    
-    private static final Logger LOG = Logger.getInstance(HarbourDebuggerBreakpointPropertiesPanel.class);
     
     private EditorTextField conditionTextField;
     private EditorTextField hitConditionTextField;
@@ -143,14 +140,13 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "PERSISTENCE: Stored properties in persistent storage service");
                 
                 // Debug logging
-                LOG.info("Saving breakpoint properties: condition='" + condition + 
+                HarbourLogger.log("BreakpointPanel", "Saving breakpoint properties: condition='" + condition + 
                         "', hitCondition='" + hitCondition + "', logMessage='" + logMessage + "'");
             } else {
-                LOG.warn("Properties object is still null after force creation!");
-                HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "ERROR: Properties object is still null after force creation!");
+                HarbourLogger.warning("BreakpointPanel", "Properties object is still null after force creation!");
             }
         } catch (Exception e) {
-            LOG.error("Error in saveTo: " + e.getMessage(), e);
+            HarbourLogger.error("BreakpointPanel", "Error in saveTo: " + e.getMessage());
         }
     }
 
@@ -195,10 +191,10 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "  logMessage field: '" + logMessageTextField.getText() + "'");
                 
                 // Debug logging
-                LOG.info("Loading breakpoint properties: condition='" + condition + 
+                HarbourLogger.log("BreakpointPanel", "Loading breakpoint properties: condition='" + condition + 
                         "', hitCondition='" + hitCondition + "', logMessage='" + logMessage + "'");
             } else {
-                LOG.warn("Properties object is null during load!");
+                HarbourLogger.warning("BreakpointPanel", "Properties object is null during load!");
                 HarbourLogger.log("HarbourDebuggerBreakpointPropertiesPanel", "ERROR: Properties object is null during load - no custom storage either!");
                 
                 // Initialize empty fields
@@ -207,7 +203,7 @@ public class HarbourDebuggerBreakpointPropertiesPanel extends XBreakpointCustomP
                 logMessageTextField.setText("");
             }
         } catch (Exception e) {
-            LOG.error("Error in loadFrom: " + e.getMessage(), e);
+            HarbourLogger.error("BreakpointPanel", "Error in loadFrom: " + e.getMessage());
         }
     }
 }

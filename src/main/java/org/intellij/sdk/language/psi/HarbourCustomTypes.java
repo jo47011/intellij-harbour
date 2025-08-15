@@ -71,6 +71,7 @@ public class HarbourCustomTypes {
     public static final IElementType CASE = HarbourTypes.CASE;
     public static final IElementType OTHERWISE = HarbourTypes.OTHERWISE;
     public static final IElementType ENDSWITCH = HarbourTypes.ENDSWITCH;
+    public static final IElementType ENDCASE = HarbourTypes.ENDCASE;
     public static final IElementType RETURN = HarbourTypes.RETURN;
     public static final IElementType EXIT = HarbourTypes.EXIT;
     public static final IElementType LOOP = HarbourTypes.LOOP;

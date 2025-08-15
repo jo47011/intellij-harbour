@@ -109,6 +109,8 @@ public class HarbourNavigationPopup {
         JBPopupFactory.getInstance()
                 .createListPopupBuilder(list)
                 .setTitle(title)
+                .setMovable(true)
+                .setResizable(true)
                 .setItemChoosenCallback(() -> {
                     PsiElement selected = list.getSelectedValue();
                     
@@ -151,18 +153,22 @@ public class HarbourNavigationPopup {
             return;
         }
         
-        HarbourLogger.log(COMPONENT, "Showing ALL " + targets.size() + " navigation targets");
+        HarbourLogger.log(COMPONENT, "Showing all " + targets.size() + " navigation targets");
         
         // Create the list with custom renderer showing all results
         JBList<PsiElement> list = new JBList<>(targets);
         list.setCellRenderer(new HarbourNavigationListRenderer(searchedFunctionName));
 
         // Create and show the popup with all results
+        String titleSuffix = String.format("Choose Declaration (showing all %d results)", targets.size());
+        
         JBPopupFactory.getInstance()
                 .createListPopupBuilder(list)
                 .setTitle(searchedFunctionName != null ?
-                    createHtmlTitle(searchedFunctionName, String.format("Choose Declaration (showing all %d results)", targets.size())) :
-                    String.format("Choose Declaration (showing all %d results)", targets.size()))
+                    createHtmlTitle(searchedFunctionName, titleSuffix) :
+                    titleSuffix)
+                .setMovable(true)
+                .setResizable(true)
                 .setItemChoosenCallback(() -> {
                     PsiElement selected = list.getSelectedValue();
                     if (selected instanceof Navigatable) {

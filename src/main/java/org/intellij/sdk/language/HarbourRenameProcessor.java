@@ -1,6 +1,7 @@
 package org.intellij.sdk.language;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
@@ -709,6 +710,57 @@ public class HarbourRenameProcessor extends RenamePsiElementProcessor {
     public boolean isInplaceRenameSupported() {
         HarbourLogger.log(COMPONENT, "isInplaceRenameSupported called, returning true");
         return true;
+    }
+    
+    @Override
+    public PsiElement substituteElementToRename(PsiElement element, Editor editor) {
+        HarbourLogger.log(COMPONENT, "substituteElementToRename called with: " + (element != null ? element.getText() : "null"));
+        
+        // Log the element details for debugging
+        if (element != null) {
+            HarbourLogger.log(COMPONENT, "Element class: " + element.getClass().getName());
+            HarbourLogger.log(COMPONENT, "Element text: " + element.getText());
+            
+            // Ensure the element properly implements PsiNamedElement
+            if (element instanceof HarbourIdElement) {
+                HarbourIdElement idElement = (HarbourIdElement) element;
+                String name = idElement.getName();
+                HarbourLogger.log(COMPONENT, "HarbourIdElement getName(): " + name);
+                // Return the element itself if it has a name
+                if (name != null && !name.isEmpty()) {
+                    return element;
+                }
+            } else if (element instanceof HarbourNamedElement) {
+                HarbourNamedElement namedElement = (HarbourNamedElement) element;
+                String name = namedElement.getName();
+                HarbourLogger.log(COMPONENT, "HarbourNamedElement getName(): " + name);
+                // Return the element itself if it has a name
+                if (name != null && !name.isEmpty()) {
+                    return element;
+                }
+            } else if (element instanceof FunctionCallImpl) {
+                // For function calls, try to get the name
+                String name = element.getText();
+                if (name != null && !name.isEmpty()) {
+                    // Extract just the function name (before parentheses if any)
+                    int parenIndex = name.indexOf('(');
+                    if (parenIndex > 0) {
+                        name = name.substring(0, parenIndex);
+                    }
+                    HarbourLogger.log(COMPONENT, "FunctionCall name extracted: " + name);
+                    return element;
+                }
+            } else if (element instanceof LeafPsiElement) {
+                // For leaf elements (like variable names), wrap them in a PsiNamedElement
+                String text = element.getText();
+                if (text != null && !text.isEmpty() && text.matches("\\w+")) {
+                    HarbourLogger.log(COMPONENT, "Wrapping LeafPsiElement '" + text + "' in HarbourNamedElementWrapper");
+                    return new HarbourNamedElementWrapper(element);
+                }
+            }
+        }
+        
+        return super.substituteElementToRename(element, editor);
     }
 
     /**

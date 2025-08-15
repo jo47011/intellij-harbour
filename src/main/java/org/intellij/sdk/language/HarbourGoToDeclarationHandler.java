@@ -7,6 +7,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
+import com.intellij.pom.Navigatable;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -26,6 +27,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.Collection;
 
 /**
  * Handles "Go To Declaration" for Harbour identifiers.
@@ -351,7 +353,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     HarbourLogger.log(COMPONENT, "External function detected: " + identifierName);
                     
                     // Check if this is a click event
-                    boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+                    boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
                     
                     if (isClick) {
                         // On click: Open browser documentation
@@ -511,7 +513,32 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (!isFunction) {
             isFunction = isFunctionCall(file, element, identifierName);
         }
+        
+        // Be more aggressive about treating things as functions if they look like function calls
+        // This helps with missing includes where PSI parsing might fail
+        if (!isFunction && identifierName != null && identifierName.length() > 0) {
+            // Check if this looks like a function call pattern (identifier followed by parentheses somewhere in context)
+            {
+                String contextLineText = getLineText(file, element);
+                if (contextLineText != null) {
+                    String pattern = "\\b" + Pattern.quote(identifierName) + "\\s*\\(";
+                    if (Pattern.compile(pattern, Pattern.CASE_INSENSITIVE).matcher(contextLineText).find()) {
+                        isFunction = true;
+                        HarbourLogger.log(COMPONENT, "Treating as function based on pattern match: " + identifierName);
+                    }
+                }
+            }
+        }
 
+        // Check if user clicked on a function/procedure definition  
+        boolean isFunctionDefinitionClick = false;
+        if (isFunction) {
+            isFunctionDefinitionClick = isDefinitionElement(leafElement, getElementContext(leafElement));
+            if (isFunctionDefinitionClick) {
+                HarbourLogger.log(COMPONENT, "User clicked on function/procedure definition - will show all usages");
+            }
+        }
+        
         // Use our custom finder to locate occurrences of this symbol
         Project project = element.getProject();
         HarbourReferenceService service = HarbourReferenceService.getInstance(project);
@@ -521,6 +548,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         HarbourLogger.log(COMPONENT, "Service instance: " + (service != null ? "OK" : "NULL"));
         HarbourLogger.log(COMPONENT, "Current file: " + (file != null ? file.getName() : "NULL"));
         HarbourLogger.log(COMPONENT, "isFunction: " + isFunction);
+        HarbourLogger.log(COMPONENT, "isFunctionDefinitionClick: " + isFunctionDefinitionClick);
 
         List<PsiElement> foundElements;
         if (isFunction) {
@@ -530,9 +558,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 HarbourLogger.log(COMPONENT, "Initial search result: " + foundElements.size() + " elements found");
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during initial function search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                // If we get a JobCancellationException, return null to let other handlers try
-                if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                    HarbourLogger.log(COMPONENT, "JobCancellationException detected - returning null to let other handlers try");
+                // If we get a cancellation exception, return null to let other handlers try
+                String exceptionName = e.getClass().getSimpleName();
+                if (exceptionName.contains("JobCancellation") || exceptionName.contains("ProcessCanceled") || 
+                    exceptionName.contains("CeProcessCanceled")) {
+                    HarbourLogger.log(COMPONENT, "Cancellation exception detected (" + exceptionName + ") - returning null to let other handlers try");
                     return null;
                 }
                 foundElements = new ArrayList<>();
@@ -558,9 +588,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         }
                     } catch (Exception e) {
                         HarbourLogger.log(COMPONENT, "Exception during reindex/project search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                        // If we get a JobCancellationException during reindex, return null to let other handlers try
-                        if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                            HarbourLogger.log(COMPONENT, "JobCancellationException during reindex - returning null to let other handlers try");
+                        // If we get a cancellation exception during reindex, return null to let other handlers try
+                        String exceptionName = e.getClass().getSimpleName();
+                        if (exceptionName.contains("JobCancellation") || exceptionName.contains("ProcessCanceled") || 
+                            exceptionName.contains("CeProcessCanceled")) {
+                            HarbourLogger.log(COMPONENT, "Cancellation exception during reindex (" + exceptionName + ") - returning null to let other handlers try");
                             return null;
                         }
                         // If reindexing fails, just return empty list and let it fail gracefully
@@ -579,9 +611,11 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 foundElements = findVariableInCurrentFileWithScope(element, identifierName);
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during variable search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                // If we get a JobCancellationException, return null to let other handlers try
-                if (e.getClass().getSimpleName().contains("JobCancellation")) {
-                    HarbourLogger.log(COMPONENT, "JobCancellationException during variable search - returning null to let other handlers try");
+                // If we get a cancellation exception, return null to let other handlers try
+                String exceptionName = e.getClass().getSimpleName();
+                if (exceptionName.contains("JobCancellation") || exceptionName.contains("ProcessCanceled") || 
+                    exceptionName.contains("CeProcessCanceled")) {
+                    HarbourLogger.log(COMPONENT, "Cancellation exception during variable search (" + exceptionName + ") - returning null to let other handlers try");
                     return null;
                 }
                 foundElements = new ArrayList<>();
@@ -593,6 +627,51 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             PsiElement elem = foundElements.get(i);
             HarbourLogger.log(COMPONENT, "  Element " + i + ": " + elem.getText() + " in " + 
                     (elem.getContainingFile() != null ? elem.getContainingFile().getName() : "unknown"));
+        }
+        
+        // Handle variables early to avoid JobCancellationException in complex processing
+        if (!isFunction && !foundElements.isEmpty()) {
+            // HYBRID APPROACH: Check if we have multiple results to decide on popup
+            if (foundElements.size() > 1) {
+                // Multiple results - check if this is likely a click (when user expects popup)
+                boolean isLikelyClick = isLikelyClickContext();
+                
+                if (isLikelyClick) {
+                    HarbourLogger.log(COMPONENT, "VARIABLE MULTI-RESULT CLICK: Showing custom popup for " + foundElements.size() + " elements");
+                    // Show custom popup for multiple results on click
+                    final String finalIdentifierName = identifierName;
+                    final List<PsiElement> finalFoundElements = new ArrayList<>(foundElements);
+                    
+                    // Convert to HarbourNavigationElement for nice display
+                    List<HarbourNavigationElement> navElements = new ArrayList<>();
+                    for (PsiElement elem : finalFoundElements) {
+                        try {
+                            String elementName = elem.getText();
+                            String filePath = elem.getContainingFile() != null ? 
+                                elem.getContainingFile().getVirtualFile().getPath() : "unknown";
+                            int lineNumber = HarbourLogger.calculateLineNumber(elem);
+                            
+                            HarbourNavigationElement navElement = new HarbourNavigationElement(
+                                elem, elementName, filePath, lineNumber, "Variable");
+                            navElements.add(navElement);
+                        } catch (Exception e) {
+                            HarbourLogger.log(COMPONENT, "Failed to convert element: " + e.getMessage());
+                        }
+                    }
+                    
+                    if (!navElements.isEmpty()) {
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navElements), editor, finalIdentifierName);
+                        });
+                        return null; // Prevent default popup
+                    }
+                }
+            }
+            
+            // Single result or hover - use default IntelliJ handling
+            HarbourLogger.log(COMPONENT, "VARIABLE DEFAULT: Using IntelliJ default for " + foundElements.size() + " elements");
+            PsiElement[] result = foundElements.toArray(new PsiElement[0]);
+            return result;
         }
 
         // Filter out invalid elements and deduplicate by file:line
@@ -696,17 +775,124 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        // If we have no valid elements, return empty array to prevent ANY popups
+        // If we have no valid elements, try one more fallback for functions that timeout
         if (definitionElements.isEmpty() && callElements.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - returning empty array to prevent ALL popups");
-            return PsiElement.EMPTY_ARRAY;
+            HarbourLogger.log(COMPONENT, "MAIN HANDLER: No valid navigation elements found for " + identifierName + " - trying fallback search");
+            
+            // For functions that often fail due to timeouts, try a simpler grep-like search
+            if (isFunction) {
+                HarbourLogger.log(COMPONENT, "Attempting simple pattern search for function: " + identifierName);
+                try {
+                    // Use a simple pattern to find function/procedure definitions
+                    // Allow optional whitespace and/or parentheses after function name
+                    String pattern = "(?i)^\\s*(FUNCTION|PROCEDURE)\\s+" + Pattern.quote(identifierName) + "(?:\\s*\\(|\\s|$)";
+                    Pattern funcPattern = Pattern.compile(pattern, Pattern.MULTILINE);
+                    
+                    // Search through project files quickly
+                    Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
+                        HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+                    
+                    int maxFiles = 100; // Increased limit
+                    int filesChecked = 0;
+                    boolean found = false;
+                    
+                    for (VirtualFile virtualFile : virtualFiles) {
+                        if (filesChecked++ > maxFiles) {
+                            HarbourLogger.log(COMPONENT, "Reached file limit in fallback search");
+                            break;
+                        }
+                        
+                        try {
+                            PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
+                            if (psiFile != null) {
+                                String fileText = psiFile.getText();
+                                if (fileText == null || fileText.isEmpty()) continue;
+                                
+                                Matcher matcher = funcPattern.matcher(fileText);
+                                if (matcher.find()) {
+                                    // Count line number
+                                    int lineNumber = 1;
+                                    for (int i = 0; i < matcher.start(); i++) {
+                                        if (fileText.charAt(i) == '\n') lineNumber++;
+                                    }
+                                    HarbourLogger.log(COMPONENT, "Found " + identifierName + " definition in " + 
+                                        virtualFile.getName() + " at line " + lineNumber);
+                                    
+                                    // Create a navigation element for the definition
+                                    HarbourNavigationElement navElement = new HarbourNavigationElement(
+                                        psiFile, identifierName, virtualFile.getPath(), lineNumber, "Function", true, false);
+                                    definitionElements.add(navElement);
+                                    found = true;
+                                    break; // Found definition, stop searching
+                                }
+                            }
+                        } catch (Exception ex) {
+                            HarbourLogger.log(COMPONENT, "Error checking file " + virtualFile.getName() + ": " + ex.getMessage());
+                        }
+                    }
+                    
+                    if (!found) {
+                        HarbourLogger.log(COMPONENT, "Fallback search checked " + filesChecked + " files but found no definition for " + identifierName);
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log(COMPONENT, "Fallback pattern search failed: " + e.getMessage());
+                }
+            }
+            
+            // If still no elements after fallback, create a dummy element for common functions
+            // This ensures they get underlined even if we can't find their definition
+            if (definitionElements.isEmpty() && callElements.isEmpty()) {
+                HarbourLogger.log(COMPONENT, "MAIN HANDLER: Still no elements after fallback");
+                
+                // For known internal functions, create a dummy navigation element
+                // This ensures they get underlined and clickable
+                if (isFunction && identifierName != null) {
+                    HarbourLogger.log(COMPONENT, "Creating dummy navigation element for function: " + identifierName);
+                    // Create a dummy element that at least makes the function clickable
+                    HarbourNavigationElement dummyElement = new HarbourNavigationElement(
+                        element, identifierName, "Unknown location", 1, "Function (location unknown)", false, false);
+                    
+                    // Check if this is a click event - if so, show popup
+                    boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
+                    if (isClick) {
+                        HarbourLogger.log(COMPONENT, "Click event - showing popup for dummy element");
+                        final String searchedName = identifierName;
+                        final List<PsiElement> dummyList = Collections.singletonList(dummyElement);
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            if (editor != null && !editor.isDisposed() && editor.getComponent().isShowing()) {
+                                HarbourNavigationPopup.showNavigationPopup(dummyList, editor, searchedName);
+                            }
+                        });
+                        return null; // Prevent default navigation
+                    }
+                    
+                    return new PsiElement[] { dummyElement };
+                }
+                
+                return PsiElement.EMPTY_ARRAY;
+            }
         }
 
         // If we only have calls but no definitions, show the calls (for variables, these are references)
         // Don't return null to prevent default handlers from running
         if (definitionElements.isEmpty() && !callElements.isEmpty()) {
             HarbourLogger.log(COMPONENT, "MAIN HANDLER: Only calls/references found for " + identifierName + 
-                            " (" + callElements.size() + " calls) - showing them instead of delegating to prevent default handlers");
+                            " (" + callElements.size() + " calls) - checking click/hover mode");
+            
+            // Check if this is a click event - if so, show popup instead of navigating directly
+            boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
+            if (isClick) {
+                HarbourLogger.log(COMPONENT, "Click event - showing popup for calls/references");
+                final String searchedName = identifierName;
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (editor != null && !editor.isDisposed() && editor.getComponent().isShowing()) {
+                        HarbourNavigationPopup.showNavigationPopup(callElements, editor, searchedName);
+                    }
+                });
+                return null; // Prevent default navigation
+            }
+            
+            // For hover, return the elements for default behavior
             return callElements.toArray(new PsiElement[0]);
         }
 
@@ -771,16 +957,43 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         // If we have exactly one navigation element after filtering, check for hover vs click
         if (navigationElements.size() == 1) {
-            // Check if this is an actual click event, not just hover
-            boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+            PsiElement singleElement = navigationElements.get(0);
+            boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
             HarbourLogger.log(COMPONENT, "Single target found - Click mode: " + isClick);
             
-            // Always return single target to ensure underlines work
-            // Popup prevention is handled elsewhere
+            // For external functions, show popup even for single results to maintain consistency
+            boolean isExternalFunction = false;
+            if (singleElement instanceof HarbourNavigationElement) {
+                HarbourNavigationElement navElement = (HarbourNavigationElement) singleElement;
+                String filePath = navElement.getFilePath();
+                // External functions have file paths
+                if (filePath != null && !filePath.isEmpty() && !navElement.isSeparator()) {
+                    isExternalFunction = true;
+                }
+            }
             
-            HarbourLogger.log(COMPONENT, "Single target click event - navigating directly");
+            // ALWAYS show popup on click - never navigate directly (per user requirement)
+            if (isClick) {
+                HarbourLogger.log(COMPONENT, "Click event - always showing popup (external: " + isExternalFunction + ")");
+                final String searchedFunctionName = identifierName;
+                
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    // Check if editor is still valid
+                    if (editor != null && !editor.isDisposed() && editor.getComponent().isShowing()) {
+                        HarbourNavigationPopup.showNavigationPopup(navigationElements, editor, searchedFunctionName);
+                    } else {
+                        HarbourLogger.log(COMPONENT, "Editor not valid for popup, falling back to direct navigation");
+                        if (singleElement instanceof Navigatable) {
+                            ((Navigatable) singleElement).navigate(true);
+                        }
+                    }
+                });
+                return null; // Prevent default navigation
+            }
+            
+            // For hover (not click), allow direct navigation for single target
+            HarbourLogger.log(COMPONENT, "Single target on hover - navigating directly");
             PsiElement[] singleTarget = navigationElements.toArray(new PsiElement[0]);
-            // Safety check - ensure we actually have the element
             if (singleTarget.length == 0) {
                 HarbourLogger.log(COMPONENT, "WARNING: navigationElements had size 1 but toArray returned empty - returning empty array");
                 return PsiElement.EMPTY_ARRAY;
@@ -793,7 +1006,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             HarbourLogger.log(COMPONENT, "Multiple targets found (" + navigationElements.size() + ")");
             
             // Check if this is a click event
-            boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
+            boolean isClick = HarbourExternalDocumentationHandler.shouldHandleAsClick();
             
             if (isClick) {
                 // On click: Show our custom popup with Max Navigation Results limiting
@@ -803,6 +1016,12 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                 final String searchedFunctionName = identifierName;
                 
                 ApplicationManager.getApplication().invokeLater(() -> {
+                    // Check if editor is still valid before showing popup
+                    if (editor == null || editor.isDisposed() || !editor.getComponent().isShowing()) {
+                        HarbourLogger.log(COMPONENT, "Editor not valid for popup, skipping popup display");
+                        return;
+                    }
+                    
                     List<PsiElement> targets = navigationElements.stream()
                             .filter(e -> {
                                 // Filter out navigation elements that point to empty lines or comments
@@ -852,6 +1071,26 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             HarbourLogger.log(COMPONENT, "ERROR: No navigation elements found - returning empty array to prevent ALL popups");
             HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (FAILED) ===");
             return PsiElement.EMPTY_ARRAY;
+        }
+
+        // Use custom popup for variables to add variable name to header and enhanced styling
+        if (!isFunction && !navigationElements.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "VARIABLE NAVIGATION: Using custom popup for variable: " + identifierName);
+            
+            // Show custom popup with variable name in header
+            final String finalIdentifierName = identifierName;
+            ApplicationManager.getApplication().invokeLater(() -> {
+                // Check if editor is still valid before showing popup
+                if (editor != null && !editor.isDisposed() && editor.getComponent().isShowing()) {
+                    HarbourNavigationPopup.showNavigationPopup(navigationElements, editor, finalIdentifierName);
+                } else {
+                    HarbourLogger.log(COMPONENT, "Editor not valid for variable popup, skipping popup display");
+                }
+            });
+            
+            // Return null to prevent IntelliJ's default popup
+            HarbourLogger.log(COMPONENT, "Returning null to prevent default popup - using custom popup for variables");
+            return null;
         }
         
         HarbourLogger.log(COMPONENT, "=== NAVIGATION DEBUG END (SUCCESS) ===");
@@ -2011,6 +2250,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         int scopeStart = 0;
         for (int i = clickedLineIndex; i >= 0; i--) {
             String line = lines[i].toUpperCase().trim();
+            // Skip comments - they should not be considered as function declarations
+            if (line.startsWith("//") || line.startsWith("/*")) {
+                continue;
+            }
             if (line.startsWith("FUNCTION ") || line.startsWith("PROCEDURE ") || 
                 line.startsWith("METHOD ") || line.startsWith("CLASS ")) {
                 scopeStart = i;
@@ -2022,6 +2265,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         int scopeEnd = lines.length - 1;
         for (int i = scopeStart + 1; i < lines.length; i++) {
             String line = lines[i].toUpperCase().trim();
+            // Skip comments - they should not be considered as function declarations
+            if (line.startsWith("//") || line.startsWith("/*")) {
+                continue;
+            }
             if (line.startsWith("FUNCTION ") || line.startsWith("PROCEDURE ") || 
                 line.startsWith("METHOD ") || line.startsWith("CLASS ")) {
                 scopeEnd = i - 1;
@@ -2718,6 +2965,119 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
         
         return false;
+    }
+
+    /**
+     * Check if this is likely a click context (for variables with multiple results)
+     * Uses a simpler heuristic since exact detection is difficult
+     */
+    private boolean isLikelyClickContext() {
+        try {
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            
+            // Look for clear indicators of actual navigation action (not just data collection)
+            for (StackTraceElement element : stackTrace) {
+                String className = element.getClassName();
+                String methodName = element.getMethodName();
+                
+                // These patterns indicate actual navigation/action being performed
+                if (methodName.equals("actionPerformed") ||
+                    methodName.equals("invoke") ||
+                    methodName.equals("navigate") ||
+                    className.contains("NavigateCommand") ||
+                    className.contains("NavigationAction")) {
+                    HarbourLogger.log(COMPONENT, "LIKELY CLICK: Found navigation action - " + className + "." + methodName);
+                    return true;
+                }
+                
+                // These patterns indicate just data collection for preview
+                if (className.contains("DocumentationManager") ||
+                    className.contains("QuickDoc") ||
+                    className.contains("CtrlMouseHandler") ||
+                    methodName.contains("getDocumentation")) {
+                    HarbourLogger.log(COMPONENT, "LIKELY HOVER: Found preview pattern - " + className + "." + methodName);
+                    return false;
+                }
+            }
+            
+            // Default: for multiple results, assume click if we got this far
+            HarbourLogger.log(COMPONENT, "LIKELY CLICK: Default for multiple results");
+            return true;
+            
+        } catch (Exception e) {
+            HarbourLogger.log(COMPONENT, "Error checking click context: " + e.getMessage());
+            return true; // Default to showing popup on error
+        }
+    }
+    
+    /**
+     * Detect if this is a click invocation (Ctrl+Click) vs hover by analyzing the call stack.
+     * This approach avoids the need for global state management and is more reliable.
+     */
+    private boolean isClickInvocation() {
+        try {
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            
+            // Log the full stack trace for debugging
+            HarbourLogger.log(COMPONENT, "=== STACK TRACE ANALYSIS START ===");
+            for (int i = 0; i < Math.min(stackTrace.length, 15); i++) {
+                StackTraceElement element = stackTrace[i];
+                HarbourLogger.log(COMPONENT, "Stack[" + i + "]: " + element.getClassName() + "." + element.getMethodName());
+            }
+            
+            boolean foundClick = false;
+            boolean foundHover = false;
+            
+            for (StackTraceElement element : stackTrace) {
+                String className = element.getClassName();
+                String methodName = element.getMethodName();
+                
+                // VERY SPECIFIC CLICK DETECTION - only these exact patterns indicate clicks
+                // NOTE: getCtrlMouseData is called for BOTH hover and click, so we need more specific detection
+                if ((className.contains("GotoDeclarationAction") && methodName.equals("actionPerformed")) ||
+                    (className.contains("GotoDeclarationOnlyHandler") && methodName.contains("gotoDeclaration")) ||
+                    (className.contains("GotoDeclarationOrUsageHandler") && methodName.equals("invoke"))) {
+                    HarbourLogger.log(COMPONENT, "DEFINITIVE CLICK DETECTED: " + className + "." + methodName);
+                    foundClick = true;
+                }
+                
+                // Check for getCtrlMouseData specifically to distinguish between hover/click based on deeper stack
+                if (className.contains("GotoDeclarationAction") && methodName.equals("getCtrlMouseData")) {
+                    // This method is called for BOTH hover and click
+                    // We need to look deeper in the stack to determine which one
+                    HarbourLogger.log(COMPONENT, "AMBIGUOUS: getCtrlMouseData found - checking deeper stack");
+                }
+                
+                // HOVER DETECTION - broader patterns for documentation/hint system
+                if (className.contains("DocumentationManager") ||
+                    className.contains("QuickDocUtil") ||
+                    className.contains("HintManagerImpl") ||
+                    className.contains("QuickHelpAction") ||
+                    className.contains("ShowDoc") ||
+                    className.contains("ParameterInfo") ||
+                    className.contains("LookupManager") ||
+                    methodName.contains("getDocumentation") ||
+                    methodName.contains("showQuickDoc")) {
+                    HarbourLogger.log(COMPONENT, "DEFINITIVE HOVER DETECTED: " + className + "." + methodName);
+                    foundHover = true;
+                }
+            }
+            
+            if (foundClick && !foundHover) {
+                HarbourLogger.log(COMPONENT, "=== RESULT: CLICK (only click patterns found) ===");
+                return true;
+            } else if (foundHover) {
+                HarbourLogger.log(COMPONENT, "=== RESULT: HOVER (hover patterns found) ===");
+                return false;
+            } else {
+                HarbourLogger.log(COMPONENT, "=== RESULT: HOVER (safe default - no clear patterns) ===");
+                return false;
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log(COMPONENT, "STACK TRACE ANALYSIS ERROR: " + e.getMessage() + " - defaulting to HOVER");
+            return false;
+        }
     }
 
 }

@@ -126,6 +126,7 @@ public class HarbourLineIndentProvider implements LineIndentProvider {
                 line.equals("endclass") ||
                 line.equals("else") || line.startsWith("else ") ||
                 line.equals("elseif") || line.startsWith("elseif ") ||
+                line.equals("otherwise") || line.startsWith("otherwise ") ||
                 // BEGIN SEQUENCE block support
                 line.equals("recover using") || line.startsWith("recover using ") ||
                 line.equals("end sequence") || line.startsWith("end sequence ");

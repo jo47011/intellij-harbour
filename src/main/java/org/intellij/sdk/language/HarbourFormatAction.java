@@ -23,11 +23,11 @@ import org.jetbrains.annotations.NotNull;
  */
 public class HarbourFormatAction extends AnAction {
     private static final Logger LOG = Logger.getInstance(HarbourFormatAction.class);
-    private static boolean DEBUG = true;
 
     @Override
     public @NotNull ActionUpdateThread getActionUpdateThread() {
-        debug("getActionUpdateThread called - Action ID: " + getClass().getName());
+        // Use HarbourLogger for debug logging (controlled by settings)
+        HarbourLogger.log("FormatAction", "getActionUpdateThread called - Action ID: " + getClass().getName());
         return ActionUpdateThread.BGT;
     }
 
@@ -35,7 +35,7 @@ public class HarbourFormatAction extends AnAction {
     public void update(@NotNull AnActionEvent e) {
         String actionId = e.getActionManager().getId(this);
         String place = e.getPlace();
-        debug("update() called - Action ID: " + actionId + ", Place: " + place);
+        HarbourLogger.log("FormatAction", "update() called - Action ID: " + actionId + ", Place: " + place);
 
         Project project = e.getProject();
         VirtualFile file = e.getData(CommonDataKeys.VIRTUAL_FILE);
@@ -45,43 +45,43 @@ public class HarbourFormatAction extends AnAction {
             String extension = file.getExtension();
             isHarbourFile = extension != null && (extension.equals("prg") || extension.equals("ch"));
 
-            debug("  File: " + file.getName() + ", Extension: " + extension + ", isHarbour: " + isHarbourFile);
+            HarbourLogger.log("FormatAction", "  File: " + file.getName() + ", Extension: " + extension + ", isHarbour: " + isHarbourFile);
         } else {
-            debug("  Project or file is null");
+            HarbourLogger.log("FormatAction", "  Project or file is null");
         }
 
         e.getPresentation().setEnabledAndVisible(isHarbourFile);
-        debug("  Setting enabled/visible: " + isHarbourFile);
+        HarbourLogger.log("FormatAction", "  Setting enabled/visible: " + isHarbourFile);
     }
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
         String actionId = e.getActionManager().getId(this);
         String place = e.getPlace();
-        debug("*** actionPerformed() called - Action ID: " + actionId + ", Place: " + place);
+        HarbourLogger.log("FormatAction", "*** actionPerformed() called - Action ID: " + actionId + ", Place: " + place);
 
         final Project project = e.getProject();
         final Editor editor = e.getData(CommonDataKeys.EDITOR);
         final VirtualFile virtualFile = e.getData(CommonDataKeys.VIRTUAL_FILE);
 
         if (project == null || editor == null || virtualFile == null) {
-            debug("Action performed but missing required data");
+            HarbourLogger.log("FormatAction", "Action performed but missing required data");
             return;
         }
 
-        debug("Processing file: " + virtualFile.getName());
+        HarbourLogger.log("FormatAction", "Processing file: " + virtualFile.getName());
 
         final Document document = editor.getDocument();
         final PsiFile psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document);
 
         if (psiFile == null) {
-            debug("No PSI file found for document");
+            HarbourLogger.log("FormatAction", "No PSI file found for document");
             return;
         }
 
         // Ensure we're working with a Harbour file
         if (!(psiFile instanceof HarbourFile)) {
-            debug("Not a Harbour file: " + psiFile.getClass().getName());
+            HarbourLogger.log("FormatAction", "Not a Harbour file: " + psiFile.getClass().getName());
             return;
         }
 
@@ -118,7 +118,7 @@ public class HarbourFormatAction extends AnAction {
                 }
             } catch (Exception ex) {
                 LOG.warn("Error during formatting", ex);
-                debug("Error during formatting: " + ex.getMessage());
+                HarbourLogger.log("FormatAction", "Error during formatting: " + ex.getMessage());
                 showNotification(project, "Harbour Formatting Error",
                         "Error: " + ex.getMessage(),
                         NotificationType.ERROR);
@@ -130,12 +130,5 @@ public class HarbourFormatAction extends AnAction {
         Notifications.Bus.notify(
                 new Notification("Harbour Formatter", title, content, type),
                 project);
-    }
-
-    private void debug(String message) {
-        if (!DEBUG) return;
-
-        // Use centralized logging
-        HarbourLogger.log("FormatAction", message);
     }
 }

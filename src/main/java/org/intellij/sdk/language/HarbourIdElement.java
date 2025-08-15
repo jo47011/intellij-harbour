@@ -5,6 +5,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiNameIdentifierOwner;
+import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.PsiReferenceBase;
 import com.intellij.psi.search.LocalSearchScope;
@@ -17,7 +18,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Custom PSI element for Harbour identifiers.
  */
-public class HarbourIdElement extends ASTWrapperPsiElement implements PsiNameIdentifierOwner {
+public class HarbourIdElement extends ASTWrapperPsiElement implements PsiNamedElement, PsiNameIdentifierOwner {
     private static final Logger LOG = Logger.getInstance(HarbourIdElement.class);
     private static final String COMPONENT = "IdElement";
 

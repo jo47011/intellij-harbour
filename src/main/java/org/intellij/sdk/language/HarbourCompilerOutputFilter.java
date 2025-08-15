@@ -7,8 +7,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.execution.ui.ConsoleViewContentType;
-import com.intellij.find.FindManager;
-import com.intellij.find.FindModel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,7 +34,11 @@ public class HarbourCompilerOutputFilter implements Filter {
     private static final Pattern FUNCTION_PATTERN = Pattern.compile("(\\d+):\\s+(\\w+)\\s+in\\s+([^\\s]+)\\((\\d+)\\)");
     
     // Pattern to match runtime error function references: "at FUNCTION_NAME(line)" or "Stack: FUNCTION_NAME(line) in filename"
-    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile("at\\s+(\\w+)\\((\\d+)\\)|Stack:\\s+(\\w+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
+    // Allow $ and other chars in function names for Windows compatibility (e.g. __TESTSIMPLEINIT$)
+    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile("at\\s+([\\w$]+)\\((\\d+)\\)|Stack:\\s+([\\w$]+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
+    
+    // Pattern to match runtime stacktrace file references: "at filename.prg(line)"
+    private static final Pattern RUNTIME_FILE_PATTERN = Pattern.compile("at\\s+([^\\s]+\\.prg)\\((\\d+)\\)");
     
     // Pattern to match function references in compiler warnings: "in function 'MAIN(6)'" (must be very specific to avoid conflicts)
     private static final Pattern COMPILER_FUNCTION_PATTERN = Pattern.compile("in\\s+function\\s+['\"]([A-Z_][A-Z0-9_]*)\\((\\d+)\\)['\"]");
@@ -105,6 +107,7 @@ public class HarbourCompilerOutputFilter implements Filter {
         Matcher stackTraceMatcher = STACK_TRACE_PATTERN.matcher(line);
         Matcher functionMatcher = FUNCTION_PATTERN.matcher(line);
         Matcher runtimeFunctionMatcher = RUNTIME_FUNCTION_PATTERN.matcher(line);
+        Matcher runtimeFileMatcher = RUNTIME_FILE_PATTERN.matcher(line);
         Matcher compilerFunctionMatcher = COMPILER_FUNCTION_PATTERN.matcher(line);
         Matcher warningWithFunctionMatcher = WARNING_WITH_FUNCTION_PATTERN.matcher(line);
         Matcher linkerFunctionMatcher = LINKER_FUNCTION_PATTERN.matcher(line);
@@ -187,6 +190,15 @@ public class HarbourCompilerOutputFilter implements Filter {
             if (filePath != null) {
                 result = createResult(line, entireLength, filePath, lineNumber, start, end);
             }
+        }
+        // Check for runtime file pattern: "at filename.prg(line)"
+        else if (runtimeFileMatcher.find()) {
+            String filePath = runtimeFileMatcher.group(1);
+            int lineNumber = Integer.parseInt(runtimeFileMatcher.group(2));
+
+            int start = runtimeFileMatcher.start(1);  // Start of filepath
+            int end = runtimeFileMatcher.end(2) + 1;  // End of line number including ')'
+            result = createResult(line, entireLength, filePath, lineNumber, start, end);
         }
         // Check for stack trace file references "in filepath(line)"
         else if (stackTraceMatcher.find()) {
@@ -377,6 +389,24 @@ public class HarbourCompilerOutputFilter implements Filter {
             }
         }
         
+        // If still not found, try looking in .hbmk directory (temp build directory)
+        if (vFile == null && workingDirectory != null) {
+            // Extract just the filename from the path
+            String fileName = new File(filePath).getName();
+            
+            // Try in .hbmk directory (where debug files like harbour_debug.prg are placed)
+            String hbmkPath = new File(workingDirectory, ".hbmk/" + fileName).getAbsolutePath().replace('\\', '/');
+            vFile = LocalFileSystem.getInstance().findFileByPath(hbmkPath);
+            HarbourLogger.log("CompilerOutputFilter", ".hbmk directory attempt: " + hbmkPath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
+            
+            // Also try without leading dot
+            if (vFile == null) {
+                String hbmkPathNoDot = new File(workingDirectory, "hbmk/" + fileName).getAbsolutePath().replace('\\', '/');
+                vFile = LocalFileSystem.getInstance().findFileByPath(hbmkPathNoDot);
+                HarbourLogger.log("CompilerOutputFilter", "hbmk directory attempt: " + hbmkPathNoDot + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
+            }
+        }
+        
         // Don't perform synchronous refresh under read lock - it causes deadlocks
         // The file system will be refreshed asynchronously if needed
         
@@ -520,8 +550,8 @@ public class HarbourCompilerOutputFilter implements Filter {
         HyperlinkInfo hyperlinkInfo = new HyperlinkInfo() {
             @Override
             public void navigate(Project project) {
-                // Search for function usage in the project
-                searchForFunctionUsage(project, functionName);
+                // Log function not found - no UI operations allowed
+                logFunctionNotFound(functionName);
             }
         };
         
@@ -550,7 +580,7 @@ public class HarbourCompilerOutputFilter implements Filter {
                             new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1).navigate(project);
                         } else {
                             // File doesn't exist - search for main occurrences and open find dialog
-                            openSearchForFunction(functionName);
+                            logFunctionNotFound(functionName);
                         }
                     } else {
                         // File not found - this triggers the enhanced search behavior
@@ -559,7 +589,7 @@ public class HarbourCompilerOutputFilter implements Filter {
                     }
                 } else {
                     // No function found at all - fallback to search dialog
-                    openSearchForFunction(functionName);
+                    logFunctionNotFound(functionName);
                 }
             }
         };
@@ -620,7 +650,7 @@ public class HarbourCompilerOutputFilter implements Filter {
                         // Final fallback: open search dialog
                         HarbourLogger.log("CompilerOutputFilter", "File not found anywhere, opening search dialog");
                         String searchName = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
-                        openSearchForFunction(searchName);
+                        logFunctionNotFound(searchName);
                     }
                 }
             }
@@ -642,7 +672,7 @@ public class HarbourCompilerOutputFilter implements Filter {
             @Override
             public void navigate(Project project) {
                 // For linker errors, immediately open find dialog to search for function definition
-                openSearchForFunction(functionName);
+                logFunctionNotFound(functionName);
             }
         };
         
@@ -654,53 +684,12 @@ public class HarbourCompilerOutputFilter implements Filter {
         return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
     }
     
-    /**
-     * Search for function usage in the project using IntelliJ's Find functionality.
-     */
-    private void searchForFunctionUsage(Project project, String functionName) {
-        
-        // Create find model for searching
-        FindModel findModel = new FindModel();
-        findModel.setStringToFind(functionName + "(");  // Search for function calls like "FOO("
-        findModel.setCaseSensitive(false);
-        findModel.setWholeWordsOnly(false);
-        findModel.setRegularExpressions(false);
-        findModel.setFromCursor(false);
-        findModel.setForward(true);
-        findModel.setGlobal(true);
-        findModel.setFindAll(true);
-        
-        // Use IntelliJ's Find in Files functionality
-        FindManager findManager = FindManager.getInstance(project);
-        findManager.showFindDialog(findModel, () -> {
-            // Callback after find dialog is closed
-        });
-    }
     
     /**
-     * Open search dialog with function name as fallback when function location cannot be determined.
+     * Simple fallback when function location cannot be determined - no UI operations allowed in console filter
      */
-    private void openSearchForFunction(String functionName) {
-        if (project == null) {
-            return; // Can't open search without project context
-        }
-        
-        // Create find model for searching function definitions
-        FindModel findModel = new FindModel();
-        findModel.setStringToFind(functionName + "(");  // Search for function definitions like "main("
-        findModel.setCaseSensitive(false);
-        findModel.setWholeWordsOnly(false);
-        findModel.setRegularExpressions(false);
-        findModel.setFromCursor(false);
-        findModel.setForward(true);
-        findModel.setGlobal(true);
-        findModel.setFindAll(true);
-        
-        // Open Find in Files dialog
-        FindManager findManager = FindManager.getInstance(project);
-        findManager.showFindDialog(findModel, () -> {
-            // Callback after find dialog is closed - nothing special needed
-        });
+    private void logFunctionNotFound(String functionName) {
+        HarbourLogger.log("CompilerOutputFilter", "Function not found in accessible files: " + functionName);
     }
     
     /**
@@ -764,7 +753,7 @@ public class HarbourCompilerOutputFilter implements Filter {
         
         // If no matches found, open search dialog as fallback
         if (matches.isEmpty()) {
-            openSearchForFunction(functionName);
+            logFunctionNotFound(functionName);
             return null; // No specific file to navigate to
         }
         
@@ -825,20 +814,20 @@ public class HarbourCompilerOutputFilter implements Filter {
         if (workingDirectory == null) {
             // No working directory - just open search dialog
             HarbourLogger.log("CompilerOutputFilter", "No working directory - opening search dialog");
-            openSearchForFunction(functionName);
+            logFunctionNotFound(functionName);
             return;
         }
         
         File workDir = new File(workingDirectory);
         if (!workDir.exists()) {
-            openSearchForFunction(functionName);
+            logFunctionNotFound(functionName);
             return;
         }
         
         // Get all .prg files in working directory and subdirectories
         java.util.List<File> prgFiles = findAllPrgFiles(workDir);
         if (prgFiles.isEmpty()) {
-            openSearchForFunction(functionName);
+            logFunctionNotFound(functionName);
             return;
         }
         
@@ -885,7 +874,7 @@ public class HarbourCompilerOutputFilter implements Filter {
         
         // Multiple files match or line number doesn't match any function range
         // Open prefilled find dialog as requested
-        openSearchForFunction(functionName);
+        logFunctionNotFound(functionName);
     }
     
     /**
