@@ -40,6 +40,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private final ExecutionResult executionResult;
     private final ProcessHandler processHandler;
     private final HarbourDebuggerConnection connection;
+    private final HarbourLiveDBFConnection liveDBFConnection;
     private final Map<String, HarbourDebuggerValue> variables = new ConcurrentHashMap<>();
     private final HarbourDebuggerBreakpointHandler breakpointHandler;
     private final Project project;
@@ -95,6 +96,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile long connectionStartTime = 0;
     private static final long MIN_CONNECTION_TIME = 2000; // 2 seconds minimum before allowing stop()
     
+    // Buffer for accumulating area response data (FIELDS, RECORD, SCHEMA)
+    private List<String> areaResponseBuffer = null;
+    private String areaResponseCommand = null;
+    
     public HarbourDebuggerRemoteProcess(@NotNull XDebugSession session,
                                        @NotNull ExecutionResult executionResult,
                                        int debugPort) {
@@ -131,6 +136,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Create debug connection
         this.connection = new HarbourDebuggerConnection(debugPort);
+        
+        // Create live DBF connection for workarea monitoring
+        this.liveDBFConnection = new HarbourLiveDBFConnection(project, connection);
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Created remote debugger on port " + debugPort);
         
@@ -215,6 +223,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Harbour connection established");
                         updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
                         
+                        // Start live DBF monitoring
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** VERSION 1.1.14 DEBUG - CALLING liveDBFConnection.startMonitoring()");
+                        liveDBFConnection.startMonitoring();
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** VERSION 1.1.14 DEBUG - FINISHED liveDBFConnection.startMonitoring()");
+                        
                         // Record connection start time to prevent premature shutdown
                         connectionStartTime = System.currentTimeMillis();
                         
@@ -271,10 +284,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 }
             }
             
-            String[] lines = message.split("\r\n");
+            String[] lines = message.split("\\r?\\n");  // Handle both Unix (\n) and Windows (\r\n) line endings
             if (lines.length == 0) return;
         
         String command = lines[0];
+        
+        // Add debug logging for message routing
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** MESSAGE ROUTING - command='" + command + "', lines.length=" + lines.length + ", contains colon=" + command.contains(":"));
         
         // Handle colon-separated commands like "STOP:file:line"
         if (command.contains(":")) {
@@ -347,9 +363,67 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             handleErrorStackTrace(stackLine);
                         }
                         break;
+                        
+                    case "AREA":
+                        // Check if this is a workarea info message or a detailed data request response
+                        if (parts.length >= 2 && (parts[1].equals("FIELDS") || parts[1].equals("RECORD") || parts[1].equals("SCHEMA"))) {
+                            // This is a response to AREA{n}:FIELDS/RECORD/SCHEMA request
+                            // Don't return early - let it fall through to the multi-line handler
+                            break;
+                        } else {
+                            // Handle workarea information messages (during enumeration)
+                            liveDBFConnection.processWorkareaMessage(command);
+                            break;
+                        }
+                        
+                    case "WORKAREAS":
+                        // Handle complete WORKAREAS message (fallback if routed here)
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS in first switch - redirecting to multi-line handler");
+                        // Fall through to multi-line handler below
+                        break;
                 }
             }
-            return;
+            
+            // Check if we're buffering area responses and this is data for the buffer
+            if (areaResponseBuffer != null) {
+                // Check for VALUE:, FIELD:, INFO: lines
+                if (command.startsWith("VALUE:") || command.startsWith("FIELD:") || command.startsWith("INFO:")) {
+                    // If this is a multi-line message, add ALL lines to the buffer
+                    if (lines.length > 1) {
+                        for (String line : lines) {
+                            if (!line.trim().isEmpty()) {
+                                areaResponseBuffer.add(line);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line (multi-line message): " + line);
+                            }
+                        }
+                    } else {
+                        // Single line message
+                        areaResponseBuffer.add(command);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line (single-line path): " + command);
+                    }
+                    return;
+                }
+                // Check for END markers
+                else if (command.equals("END_RECORD") || command.equals("END_FIELDS") || command.equals("END_SCHEMA")) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Area response complete (single-line path): " + areaResponseCommand + " with " + areaResponseBuffer.size() + " lines");
+                    
+                    // Process the complete buffered response
+                    String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                    liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                    
+                    // Clear the buffer
+                    areaResponseCommand = null;
+                    areaResponseBuffer = null;
+                    return;
+                }
+            }
+            
+            // Don't return early if it's WORKAREAS or AREA response - let them continue to multi-line handler
+            if (!command.equals("WORKAREAS") && 
+                !(command.startsWith("AREA") && command.contains(":") && 
+                  (command.contains("FIELDS") || command.contains("RECORD") || command.contains("SCHEMA")))) {
+                return;
+            }
         }
         
         // Handle multi-line commands (original format)
@@ -391,6 +465,78 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 handleVariables(command, varLines);
                 break;
                 
+            case "WORKAREAS":
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS CASE REACHED - lines.length=" + lines.length);
+                // Handle workarea enumeration - process all lines in the message
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** CALLING liveDBFConnection.processWorkareaMessage('" + command + "')");
+                liveDBFConnection.processWorkareaMessage(command); // Process "WORKAREAS" start
+                
+                // Process all AREA: lines and END_WORKAREAS in this message
+                for (int i = 1; i < lines.length; i++) {
+                    String line = lines[i].trim();
+                    if (!line.isEmpty()) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** CALLING liveDBFConnection.processWorkareaMessage('" + line + "')");
+                        liveDBFConnection.processWorkareaMessage(line);
+                    }
+                }
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS CASE COMPLETED");
+                break;
+                
+            default:
+                // Handle area-specific responses (AREA1:FIELDS, AREA2:RECORD, etc.)
+                if (command.startsWith("AREA") && command.contains(":")) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** AREA-SPECIFIC COMMAND: " + command);
+                    
+                    // Check if this is a multi-line area response that needs buffering
+                    String[] parts = command.split(":");
+                    if (parts.length >= 2 && (parts[1].equals("FIELDS") || parts[1].equals("RECORD") || parts[1].equals("SCHEMA"))) {
+                        // Start buffering for multi-line responses
+                        areaResponseCommand = command;
+                        areaResponseBuffer = new ArrayList<>();
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Started buffering for " + command);
+                        
+                        // Add any immediate data from this message
+                        if (lines.length > 1) {
+                            for (int i = 1; i < lines.length; i++) {
+                                if (!lines[i].trim().isEmpty()) {
+                                    areaResponseBuffer.add(lines[i]);
+                                }
+                            }
+                        }
+                    } else {
+                        // Single-line area response, process immediately
+                        liveDBFConnection.processAreaResponse(command, Arrays.copyOfRange(lines, 1, lines.length));
+                    }
+                    break;
+                }
+                
+                // Check if we're buffering area responses and this is data for the buffer
+                if (areaResponseBuffer != null) {
+                    // Check for VALUE:, FIELD:, INFO: lines
+                    if (command.startsWith("VALUE:") || command.startsWith("FIELD:") || command.startsWith("INFO:")) {
+                        areaResponseBuffer.add(command);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line: " + command);
+                        break;
+                    }
+                    // Check for END markers
+                    else if (command.equals("END_RECORD") || command.equals("END_FIELDS") || command.equals("END_SCHEMA")) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Area response complete: " + areaResponseCommand + " with " + areaResponseBuffer.size() + " lines");
+                        
+                        // Process the complete buffered response
+                        String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                        liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                        
+                        // Clear the buffer
+                        areaResponseCommand = null;
+                        areaResponseBuffer = null;
+                        break;
+                    }
+                }
+                
+                // CRITICAL FIX: Add break to prevent fallthrough to END case
+                // END_LOCALS, END_STATICS etc. should NOT trigger session end!
+                break;
+                
             case "END":
                 handleEnd();
                 break;
@@ -409,6 +555,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 if (lines.length > 1) {
                     handleConsoleOutput(lines[1]);
                 }
+                break;
+                
+            case "END_WORKAREAS":
+                // Handle end of workarea enumeration
+                liveDBFConnection.processWorkareaMessage(command);
                 break;
         }
         } finally {
@@ -440,12 +591,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             // Request variable information BEFORE notifying about position reached
             requestVariables();
             
+            // Also request updated database information when stopped at breakpoint
+            // This ensures we see all databases that may have been opened since last check
+            liveDBFConnection.requestWorkareaUpdate();
+            
             // Set a flag to indicate we're waiting for variables
             waitingForVariables = true;
             variablesExpected = 4; // LOCALS, STATICS, PRIVATES, PUBLICS
             variablesReceived = 0;
             
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables before notifying position reached");
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables and databases before notifying position reached");
             
             // TIMEOUT REMOVED: No automatic timeout that continues execution
             // However, we still need a fallback to ensure position is reached if no variables arrive
@@ -1064,6 +1219,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             debuggerState = DebuggerState.DISCONNECTED;
             isConnected = false;
             
+            // Stop live DBF monitoring
+            liveDBFConnection.stopMonitoring();
+            
             // Clear variables to prevent stale data
             variables.clear();
             
@@ -1084,6 +1242,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             isConnected = true;
                             debuggerState = DebuggerState.RUNNING;
                             connectionStartTime = System.currentTimeMillis();
+                            
+                            // Start live DBF monitoring
+                            liveDBFConnection.startMonitoring();
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                 "Debug server successfully restarted after crash recovery");
@@ -1784,6 +1945,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // 5. Clear state
         isConnected = false;
+        
+        // Stop live DBF monitoring
+        liveDBFConnection.stopMonitoring();
+        
         variables.clear();
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debugger stop sequence completed");
@@ -2074,6 +2239,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     
     
     /**
+     * Get the live DBF connection for external access
+     */
+    @NotNull
+    public HarbourLiveDBFConnection getLiveDBFConnection() {
+        return liveDBFConnection;
+    }
+    
+    /**
      * Helper method to clean up all resources - can be called from shutdown hook
      */
     private void cleanupResources() {
@@ -2083,6 +2256,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             // Signal shutdown
             shutdownRequested = true;
             isConnected = false;
+            
+            // Stop live DBF monitoring
+            liveDBFConnection.stopMonitoring();
             
             // Interrupt and cleanup command executor
             if (commandExecutor != null && commandExecutor.isAlive()) {

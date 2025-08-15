@@ -370,10 +370,14 @@ public class HarbourDebuggerConnection {
                line.equals("ERROR") || line.equals("LOG") || line.equals("END") ||
                line.equals("ACTIVATED") || line.equals("LOCALS") || line.equals("STATICS") ||
                line.equals("PRIVATES") || line.equals("PUBLICS") || line.equals("AREAS") ||
+               line.equals("WORKAREAS") || // Add WORKAREAS command recognition
+               line.startsWith("AREA") && line.contains(":") && (line.contains("FIELDS") || line.contains("RECORD") || line.contains("SCHEMA")) ||
                line.startsWith("ARRAY:") || line.startsWith("OBJECT:") ||
                line.startsWith("CONSOLE:") || // Add console output recognition
                line.equals("END_LOCALS") || line.equals("END_STATICS") || 
                line.equals("END_PRIVATES") || line.equals("END_PUBLICS") ||
+               line.equals("END_FIELDS") || line.equals("END_RECORD") || line.equals("END_SCHEMA") ||
+               line.startsWith("FIELD:") || line.startsWith("DATA:") || line.startsWith("INFO:") ||
                (line.length() == 1 && Character.isUpperCase(line.charAt(0))); // Type responses
     }
     

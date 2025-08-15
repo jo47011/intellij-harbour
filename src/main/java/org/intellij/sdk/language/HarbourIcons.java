@@ -8,4 +8,5 @@ import javax.swing.*;
  */
 public class HarbourIcons {
     public static final Icon FILE = IconLoader.getIcon("/icons/harbour_16x16.png", HarbourIcons.class);
+    public static final Icon TOOLWINDOW = IconLoader.getIcon("/icons/harbour.png", HarbourIcons.class);
 }

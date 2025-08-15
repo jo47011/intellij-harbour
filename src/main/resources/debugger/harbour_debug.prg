@@ -335,7 +335,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    LOCAL tmp, lNeedExit := .F.
    LOCAL cCurrentFile, nCurrentLine, aStack, i
    LOCAL hLog  // Keep variable for existing code compatibility
-   LOCAL nLoopCount, nMaxLoops  // Prevent infinite loops that crash GUI
+   // Timeout variables removed - debugger will wait forever as requested
    
    lStopSent := IF(Empty(lStopSent), .F., lStopSent)
    
@@ -385,15 +385,9 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    
    // Socket available - entering main loop (logging removed)
    
-   // CRITICAL FIX v1.0.350: Add timeout to prevent GUI crashes from infinite loops
-   nLoopCount := 0
-   nMaxLoops := 1000  // Variables already declared at function start
-   
-   // Loop with timeout (logging removed)
-   
-   // Main command loop with safety timeout
-   DO WHILE .T. .AND. nLoopCount < nMaxLoops
-      nLoopCount++
+   // Main command loop - wait forever (timeout removed as requested)
+   DO WHILE .T.
+      // Removed loop counter - debugger will wait forever
       
       // Main loop iteration (logging removed)
       
@@ -510,6 +504,16 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                CASE Left(tmp, 8) == "ADDBREAK"
                   IF ":" $ tmp
                      SetBreakpoint("+" + SubStr(tmp, 9))
+                  ENDIF
+                  
+               CASE Left(tmp, 9) == "WORKAREAS"
+                  // WORKAREAS command - enumerate all open database areas
+                  SendWorkAreas()
+                  
+               CASE Left(tmp, 4) == "AREA"
+                  // AREA commands for specific workarea details
+                  IF ":" $ tmp
+                     HandleAreaCommand(tmp)
                   ENDIF
                   
                CASE tmp == "DISCONNECT"
@@ -629,16 +633,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       ENDIF
    ENDDO
    
-   // CRITICAL FIX v1.0.350: Safety exit if loop limit exceeded 
-   IF nLoopCount >= nMaxLoops
-      // Timeout reached - emergency exit (logging removed)
-      // Emergency exit to prevent GUI crashes
-      oDebugInfo["socket"] := NIL
-      oDebugInfo["lRunning"] := .T.
-      oDebugInfo["aBreaks"] := {=>}
-   ELSE
-      // Normal exit from CheckSocket (logging removed)
-   ENDIF
+   // Loop ended normally - debugger will wait forever as requested
    
    END SEQUENCE
 RETURN
@@ -1067,6 +1062,154 @@ STATIC FUNCTION FormatValue(xValue)
    ENDCASE
    
 RETURN cResult
+
+// Send list of all open workareas
+STATIC PROCEDURE SendWorkAreas()
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL aAreas := {}
+   LOCAL nOldArea := Select()
+   LOCAL i, aArea
+   
+   // Enumerate all open workareas using hb_WAEval
+   hb_WAEval( {|| IIF( Used(), AAdd( aAreas, { Select(), Alias(), RecNo(), LastRec(), FCount(), IIF(IndexOrd() > 0, OrdKey(), ""), RddName() } ), NIL ) } )
+   
+   // Restore original workarea
+   dbSelectArea( nOldArea )
+   
+   // Send workarea enumeration
+   hb_inetSend(oDebugInfo["socket"], "WORKAREAS" + CRLF)
+   
+   IF Len(aAreas) > 0
+      FOR i := 1 TO Len(aAreas)
+         aArea := aAreas[i]
+         // Format: AREA:Alias:Area:fCount:recno:reccount:scope:
+         hb_inetSend(oDebugInfo["socket"], "AREA:" + ;
+                     aArea[2] + ":" + ;                    // Alias
+                     AllTrim(Str(aArea[1])) + ":" + ;      // Area number
+                     AllTrim(Str(aArea[5])) + ":" + ;      // Field count
+                     AllTrim(Str(aArea[3])) + ":" + ;      // Current record
+                     AllTrim(Str(aArea[4])) + ":" + ;      // Total records
+                     aArea[6] + ":" + CRLF)                // Index scope/key
+      NEXT
+   ENDIF
+   
+   hb_inetSend(oDebugInfo["socket"], "END_WORKAREAS" + CRLF)
+RETURN
+
+// Handle specific area commands (AREA1:FIELDS, AREA1:RECORD, etc.)
+STATIC PROCEDURE HandleAreaCommand(cCommand)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL aParams := hb_ATokens(cCommand, ":")
+   LOCAL nArea, cSubCommand, nOldArea
+   
+   IF Len(aParams) < 2
+      RETURN
+   ENDIF
+   
+   // Parse AREA{n}:{subcommand}
+   nArea := Val(SubStr(aParams[1], 5))  // Extract number from "AREA{n}"
+   cSubCommand := Upper(aParams[2])
+   
+   // Validate area number
+   IF nArea < 1 .OR. nArea > 65535
+      RETURN
+   ENDIF
+   
+   nOldArea := Select()
+   dbSelectArea( nArea )
+   
+   IF !Used()
+      dbSelectArea( nOldArea )
+      RETURN
+   ENDIF
+   
+   DO CASE
+      CASE cSubCommand == "FIELDS"
+         SendAreaFields(nArea)
+         
+      CASE cSubCommand == "RECORD"
+         SendAreaRecord(nArea)
+         
+      CASE cSubCommand == "SCHEMA"
+         SendAreaSchema(nArea)
+         
+   ENDCASE
+   
+   dbSelectArea( nOldArea )
+RETURN
+
+// Send field structure for specific workarea
+STATIC PROCEDURE SendAreaFields(nArea)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL aStruct := dbStruct()
+   LOCAL i, aField
+   
+   hb_inetSend(oDebugInfo["socket"], "AREA" + AllTrim(Str(nArea)) + ":FIELDS" + CRLF)
+   
+   FOR i := 1 TO Len(aStruct)
+      aField := aStruct[i]
+      // Format: FIELD:name:type:length:decimals:
+      hb_inetSend(oDebugInfo["socket"], "FIELD:" + ;
+                  aField[1] + ":" + ;                      // Field name
+                  aField[2] + ":" + ;                      // Field type
+                  AllTrim(Str(aField[3])) + ":" + ;        // Field length
+                  AllTrim(Str(aField[4])) + ":" + CRLF)    // Decimal places
+   NEXT
+   
+   hb_inetSend(oDebugInfo["socket"], "END_FIELDS" + CRLF)
+RETURN
+
+// Send current record data for specific workarea
+STATIC PROCEDURE SendAreaRecord(nArea)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL i, xValue, cFieldName
+   
+   hb_inetSend(oDebugInfo["socket"], "AREA" + AllTrim(Str(nArea)) + ":RECORD" + CRLF)
+   
+   FOR i := 1 TO FCount()
+      cFieldName := FieldName(i)
+      xValue := FieldGet(i)
+      
+      // Format: VALUE:fieldname:type:value:
+      hb_inetSend(oDebugInfo["socket"], "VALUE:" + ;
+                  cFieldName + ":" + ;
+                  FieldType(i) + ":" + ;
+                  FormatValue(xValue) + ":" + CRLF)
+   NEXT
+   
+   hb_inetSend(oDebugInfo["socket"], "END_RECORD" + CRLF)
+RETURN
+
+// Send complete schema information for specific workarea
+STATIC PROCEDURE SendAreaSchema(nArea)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL cAlias := Alias()
+   
+   hb_inetSend(oDebugInfo["socket"], "AREA" + AllTrim(Str(nArea)) + ":SCHEMA" + CRLF)
+   
+   // Send basic info
+   hb_inetSend(oDebugInfo["socket"], "INFO:ALIAS:" + cAlias + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:RDD:" + RddName() + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:RECCOUNT:" + AllTrim(Str(LastRec())) + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:RECNO:" + AllTrim(Str(RecNo())) + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:BOF:" + IF(Bof(), "T", "F") + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:EOF:" + IF(Eof(), "T", "F") + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:DELETED:" + IF(Deleted(), "T", "F") + CRLF)
+   hb_inetSend(oDebugInfo["socket"], "INFO:FOUND:" + IF(Found(), "T", "F") + CRLF)
+   
+   // Send filter if any
+   IF !Empty(DbFilter())
+      hb_inetSend(oDebugInfo["socket"], "INFO:FILTER:" + DbFilter() + CRLF)
+   ENDIF
+   
+   // Send index information if any
+   IF IndexOrd() > 0
+      hb_inetSend(oDebugInfo["socket"], "INFO:INDEX:" + AllTrim(Str(IndexOrd())) + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "INFO:INDEXKEY:" + OrdKey() + CRLF)
+   ENDIF
+   
+   hb_inetSend(oDebugInfo["socket"], "END_SCHEMA" + CRLF)
+RETURN
 
 #pragma BEGINDUMP
 

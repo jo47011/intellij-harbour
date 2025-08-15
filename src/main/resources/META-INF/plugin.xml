@@ -23,6 +23,7 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
+    <!-- Database plugin dependency removed - using custom implementation -->
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
@@ -138,6 +139,15 @@
         
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
+        
+        <!-- Database Support - Custom implementation for Community Edition -->
+        <!-- <com.intellij.database.dialect implementation="org.intellij.sdk.language.HarbourDBFDialect"/>
+        <com.intellij.database.dataSourceProvider implementation="org.intellij.sdk.language.HarbourDBFDataSourceProvider"/> -->
+        
+        <!-- Tool Window -->
+        <toolWindow id="Harbour DBF" secondary="true" anchor="bottom" 
+                    factoryClass="org.intellij.sdk.language.HarbourDBFToolWindow"
+                    icon="/icons/harbour.png"/>
     </extensions>
 
     <actions>
