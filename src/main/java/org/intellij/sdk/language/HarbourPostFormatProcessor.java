@@ -214,6 +214,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         boolean inSwitchBlock = false;
         boolean inDoCaseBlock = false;
         boolean inClassDefinition = false;
+        boolean inBlockComment = false; // Track if we're inside a block comment
         int indentSize = 2; // Default indentation size for Harbour
         
         // Get custom indentation settings
@@ -261,6 +262,24 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             String lineWithWhitespace = lines[i];
             String line = lineWithWhitespace.trim();
+            
+            // Check for block comment start/end
+            if (line.contains("/*")) {
+                inBlockComment = true;
+            }
+            
+            // If we're in a block comment, preserve the line as-is
+            if (inBlockComment) {
+                result.append(lineWithWhitespace);
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+                // Check if this line ends the block comment
+                if (line.contains("*/")) {
+                    inBlockComment = false;
+                }
+                continue; // Skip all other processing for block comment lines
+            }
 
             // Skip empty lines, but avoid empty lines after semicolon continuations
             if (line.isEmpty()) {
@@ -577,8 +596,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     if (j < brokenLines.size() - 1) {
                         result.append("\n");
                     } else if (i < lines.length - 1) {
-                        // Only add newline after last segment if not at end of file
-                        result.append("\n");
+                        // Check if the next line is a continuation line
+                        // If so, don't add newline to avoid empty line between continuation
+                        boolean nextLineIsContinuation = (i + 1 < lines.length) && continuationLines.contains(i + 1);
+                        if (!nextLineIsContinuation) {
+                            // Only add newline after last segment if not at end of file and next line is not a continuation
+                            result.append("\n");
+                        }
                     }
                 }
             } else {
@@ -762,6 +786,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private boolean shouldBreakLine(String line) {
         String trimmed = line.trim();
+        
+        // Don't break comment lines (single-line or block comments)
+        if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*") || trimmed.endsWith("*/")) {
+            return false; // Don't break comment lines
+        }
         
         // Don't break text/string output lines (e.g., ? "very long string")
         // Check if line starts with ? (output command) followed by string literal

@@ -438,7 +438,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         boolean isGuiProgram = isGuiProgram(runConfig);
         // USER FEEDBACK: Don't use instrumentation - debug original files only
         // The instrumented approach causes confusion and file management issues
-        boolean shouldInstrument = shouldInstrumentSource() && !isGuiProgram; // Only console programs, never GUI
+        // CRITICAL FIX: Disable ALL instrumentation to prevent altd() crashes
+        boolean shouldInstrument = false; // NEVER instrument - causes altd() crash
         File instrumentedFile = null;
         
         // Only instrument console programs, not GUI programs
@@ -599,11 +600,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         // Add debug defines only in debug mode
         if (isDebugMode) {
-            parameters.add("-D__HARBOUR_DEBUG__");
+            // CRITICAL FIX: DO NOT define __HARBOUR_DEBUG__ as it activates altd() calls in user code
+            // which causes crashes when debugger isn't properly initialized
+            // parameters.add("-D__HARBOUR_DEBUG__"); // REMOVED - causes altd() crash
             parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
             
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "DEBUG MODE: Added debug defines: -D__HARBOUR_DEBUG__ -DDBG_PORT=" + runConfig.getDebugPort());
+                    "DEBUG MODE: Added debug defines: -DDBG_PORT=" + runConfig.getDebugPort() + " (NOT defining __HARBOUR_DEBUG__ to prevent altd() crashes)");
         } else {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "RUN MODE: Skipped debug defines");

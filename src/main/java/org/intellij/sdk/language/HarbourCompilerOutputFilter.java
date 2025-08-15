@@ -389,6 +389,24 @@ public class HarbourCompilerOutputFilter implements Filter {
             }
         }
         
+        // If still not found, try looking in .hbmk directory (temp build directory)
+        if (vFile == null && workingDirectory != null) {
+            // Extract just the filename from the path
+            String fileName = new File(filePath).getName();
+            
+            // Try in .hbmk directory (where debug files like harbour_debug.prg are placed)
+            String hbmkPath = new File(workingDirectory, ".hbmk/" + fileName).getAbsolutePath().replace('\\', '/');
+            vFile = LocalFileSystem.getInstance().findFileByPath(hbmkPath);
+            HarbourLogger.log("CompilerOutputFilter", ".hbmk directory attempt: " + hbmkPath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
+            
+            // Also try without leading dot
+            if (vFile == null) {
+                String hbmkPathNoDot = new File(workingDirectory, "hbmk/" + fileName).getAbsolutePath().replace('\\', '/');
+                vFile = LocalFileSystem.getInstance().findFileByPath(hbmkPathNoDot);
+                HarbourLogger.log("CompilerOutputFilter", "hbmk directory attempt: " + hbmkPathNoDot + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
+            }
+        }
+        
         // Don't perform synchronous refresh under read lock - it causes deadlocks
         // The file system will be refreshed asynchronously if needed
         
