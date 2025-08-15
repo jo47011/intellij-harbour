@@ -355,12 +355,31 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     
                     // Accept both DATA: and VALUE: prefixes (Harbour sends VALUE:)
                     if (dataLine.startsWith("DATA:") || dataLine.startsWith("VALUE:")) {
-                        // Parse DATA/VALUE:fieldname:type:value: or VALUE:fieldname:value:
-                        String[] parts = dataLine.split(":", 4); // Split into max 4 parts to handle type and values with colons
-                        if (parts.length >= 3) {
-                            String fieldName = parts[1];
-                            // Skip type if present (parts[2]) and get value from last part
-                            String fieldValue = parts.length == 4 ? parts[3] : parts[2];
+                        // Parse VALUE:fieldname:type:value: format
+                        // Find the positions of the colons to handle values that might contain colons
+                        int firstColon = dataLine.indexOf(':');
+                        int secondColon = dataLine.indexOf(':', firstColon + 1);
+                        int thirdColon = dataLine.indexOf(':', secondColon + 1);
+                        
+                        if (firstColon > 0 && secondColon > 0 && thirdColon > 0) {
+                            String fieldName = dataLine.substring(firstColon + 1, secondColon);
+                            String fieldType = dataLine.substring(secondColon + 1, thirdColon);
+                            String fieldValue = dataLine.substring(thirdColon + 1);
+                            
+                            // Clean up the value:
+                            // 1. Remove trailing colon if present
+                            if (fieldValue.endsWith(":")) {
+                                fieldValue = fieldValue.substring(0, fieldValue.length() - 1);
+                            }
+                            
+                            // 2. For string values (type C or M), remove surrounding quotes
+                            if ((fieldType.equals("C") || fieldType.equals("M")) && 
+                                fieldValue.startsWith("\"") && fieldValue.endsWith("\"")) {
+                                fieldValue = fieldValue.substring(1, fieldValue.length() - 1);
+                            }
+                            
+                            // 3. Trim the value
+                            fieldValue = fieldValue.trim();
                             
                             data.add(new String[]{fieldName, fieldValue});
                             valueCount++;
@@ -385,15 +404,20 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Parse schema response
                 for (String schemaLine : schemaData) {
                     if (schemaLine.startsWith("INFO:")) {
-                        // Parse INFO:key:value:
+                        // Parse INFO:key:value: or INFO:key:value
                         String[] parts = schemaLine.split(":", 3);
                         if (parts.length >= 3) {
                             String infoKey = parts[1];
                             String infoValue = parts[2];
                             
+                            // Clean up the value - remove trailing colon if present
+                            if (infoValue.endsWith(":")) {
+                                infoValue = infoValue.substring(0, infoValue.length() - 1);
+                            }
+                            
                             // Format the key nicely
                             String displayKey = infoKey.substring(0, 1).toUpperCase() + infoKey.substring(1).toLowerCase();
-                            data.add(new String[]{displayKey, infoValue});
+                            data.add(new String[]{displayKey, infoValue.trim()});
                         }
                     } else if (schemaLine.startsWith("FIELD:")) {
                         // Show field structure as part of schema
