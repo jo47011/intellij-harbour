@@ -54,6 +54,14 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         
         private HarbourLiveDBFConnection liveConnection;
         
+        // Cache for storing received data per workarea
+        private static class WorkareaCache {
+            String[] fieldData = null;
+            String[] recordData = null;
+            String[] schemaData = null;
+        }
+        private final java.util.Map<String, WorkareaCache> dataCache = new java.util.HashMap<>();
+        
         public HarbourDBFToolWindowContent(@NotNull Project project) {
             this.project = project;
             
@@ -141,6 +149,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             treeModel.reload();
             tableModel.clearData();
             
+            // Clear cache
+            dataCache.clear();
+            
             updateStatus("Debugging session disconnected");
             
             HarbourLogger.log("HarbourDBFToolWindow", "Disconnected from debugging session");
@@ -180,14 +191,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             
             treeModel.reload();
             
-            // Expand root node
+            // Only expand root node, not the individual workareas
             workareaTree.expandPath(new TreePath(rootNode.getPath()));
-            
-            // Also expand each workarea node to show the child options
-            for (int i = 0; i < rootNode.getChildCount(); i++) {
-                DefaultMutableTreeNode childNode = (DefaultMutableTreeNode) rootNode.getChildAt(i);
-                workareaTree.expandPath(new TreePath(childNode.getPath()));
-            }
             
             HarbourLogger.log("HarbourDBFToolWindow", "Updated workarea tree with " + workareas.size() + " workareas");
         }
@@ -218,13 +223,38 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     HarbourLiveDBFConnection.WorkareaInfo workarea = 
                         (HarbourLiveDBFConnection.WorkareaInfo) parentNode.getUserObject();
                     String nodeText = selectedNode.getUserObject().toString();
+                    String alias = workarea.getAlias();
+                    
+                    // Get or create cache for this workarea
+                    WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
                     
                     if (nodeText.startsWith("Fields")) {
-                        liveConnection.requestFieldInfo(workarea.getAlias());
+                        if (cache.fieldData != null) {
+                            // Show cached data immediately
+                            displayFieldData(workarea, cache.fieldData);
+                        } else {
+                            // Show loading message and request data
+                            showLoadingMessage("Fields");
+                            liveConnection.requestFieldInfo(alias);
+                        }
                     } else if (nodeText.equals("Current Record")) {
-                        liveConnection.requestRecordData(workarea.getAlias());
+                        if (cache.recordData != null) {
+                            // Show cached data immediately
+                            displayRecordData(workarea, cache.recordData);
+                        } else {
+                            // Show loading message and request data
+                            showLoadingMessage("Current Record");
+                            liveConnection.requestRecordData(alias);
+                        }
                     } else if (nodeText.equals("Schema Info")) {
-                        liveConnection.requestSchemaInfo(workarea.getAlias());
+                        if (cache.schemaData != null) {
+                            // Show cached data immediately
+                            displaySchemaData(workarea, cache.schemaData);
+                        } else {
+                            // Show loading message and request data
+                            showLoadingMessage("Schema Info");
+                            liveConnection.requestSchemaInfo(alias);
+                        }
                     }
                 }
             }
@@ -234,10 +264,31 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
          * Show basic workarea details in the details table - DEFAULT: show current record data
          */
         private void showWorkareaDetails(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea) {
-            // Default behavior: show current record data when clicking on table name
-            liveConnection.requestRecordData(workarea.getAlias());
+            String alias = workarea.getAlias();
+            WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
             
-            HarbourLogger.log("HarbourDBFToolWindow", "Showing current record data for workarea: " + workarea.getAlias());
+            // Default behavior: show current record data when clicking on table name
+            if (cache.recordData != null) {
+                // Show cached data immediately
+                displayRecordData(workarea, cache.recordData);
+            } else {
+                // Show loading message and request data
+                showLoadingMessage("Current Record");
+                liveConnection.requestRecordData(alias);
+            }
+            
+            HarbourLogger.log("HarbourDBFToolWindow", "Showing current record data for workarea: " + alias);
+        }
+        
+        /**
+         * Show loading message in the details table
+         */
+        private void showLoadingMessage(@NotNull String dataType) {
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Loading " + dataType + "...", ""});
+            data.add(new String[]{"", ""});
+            data.add(new String[]{"Collecting data. Please wait...", ""});
+            tableModel.setData(data);
         }
         
         /**
@@ -312,30 +363,43 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         
         @Override
         public void onFieldsReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] fieldData) {
+            // Cache the data
+            String alias = workarea.getAlias();
+            WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
+            cache.fieldData = fieldData;
+            
+            // Display immediately
             ApplicationManager.getApplication().invokeLater(() -> {
-                List<String[]> data = new ArrayList<>();
-                data.add(new String[]{"Field Information for " + workarea.getAlias(), ""});
-                data.add(new String[]{"", ""});
-                
-                for (String fieldLine : fieldData) {
-                    if (fieldLine.startsWith("FIELD:")) {
-                        // Parse FIELD:name:type:length:decimals:
-                        String[] parts = fieldLine.split(":");
-                        if (parts.length >= 5) {
-                            String fieldName = parts[1];
-                            String fieldType = parts[2];
-                            String fieldLength = parts[3];
-                            String fieldDecimals = parts[4];
-                            
-                            data.add(new String[]{fieldName, fieldType + "(" + fieldLength + 
-                                (Integer.parseInt(fieldDecimals) > 0 ? "," + fieldDecimals : "") + ")"});
-                        }
+                displayFieldData(workarea, fieldData);
+            });
+        }
+        
+        /**
+         * Display field data in the table
+         */
+        private void displayFieldData(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] fieldData) {
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Field Information for " + workarea.getAlias(), ""});
+            data.add(new String[]{"", ""});
+            
+            for (String fieldLine : fieldData) {
+                if (fieldLine.startsWith("FIELD:")) {
+                    // Parse FIELD:name:type:length:decimals:
+                    String[] parts = fieldLine.split(":");
+                    if (parts.length >= 5) {
+                        String fieldName = parts[1];
+                        String fieldType = parts[2];
+                        String fieldLength = parts[3];
+                        String fieldDecimals = parts[4];
+                        
+                        data.add(new String[]{fieldName, fieldType + "(" + fieldLength + 
+                            (Integer.parseInt(fieldDecimals) > 0 ? "," + fieldDecimals : "") + ")"});
                     }
                 }
-                
-                tableModel.setData(data);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displayed field information for " + workarea.getAlias());
-            });
+            }
+            
+            tableModel.setData(data);
+            HarbourLogger.log("HarbourDBFToolWindow", "Displayed field information for " + workarea.getAlias());
         }
         
         @Override 
@@ -343,101 +407,124 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             HarbourLogger.log("HarbourDBFToolWindow", 
                 "onRecordDataReceived called for " + workarea.getAlias() + " with " + recordData.length + " lines");
             
+            // Cache the data
+            String alias = workarea.getAlias();
+            WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
+            cache.recordData = recordData;
+            
+            // Display immediately
             ApplicationManager.getApplication().invokeLater(() -> {
-                List<String[]> data = new ArrayList<>();
-                data.add(new String[]{"Current Record Data for " + workarea.getAlias(), ""});
-                data.add(new String[]{"Record " + workarea.getCurrentRecord() + " of " + workarea.getTotalRecords(), ""});
-                data.add(new String[]{"", ""});
-                
-                int valueCount = 0;
-                for (String dataLine : recordData) {
-                    HarbourLogger.log("HarbourDBFToolWindow", "Record data line: " + dataLine);
+                displayRecordData(workarea, recordData);
+            });
+        }
+        
+        /**
+         * Display record data in the table
+         */
+        private void displayRecordData(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordData) {
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Current Record Data for " + workarea.getAlias(), ""});
+            data.add(new String[]{"Record " + workarea.getCurrentRecord() + " of " + workarea.getTotalRecords(), ""});
+            data.add(new String[]{"", ""});
+            
+            int valueCount = 0;
+            for (String dataLine : recordData) {
+                // Accept both DATA: and VALUE: prefixes (Harbour sends VALUE:)
+                if (dataLine.startsWith("DATA:") || dataLine.startsWith("VALUE:")) {
+                    // Parse VALUE:fieldname:type:value: format
+                    // Find the positions of the colons to handle values that might contain colons
+                    int firstColon = dataLine.indexOf(':');
+                    int secondColon = dataLine.indexOf(':', firstColon + 1);
+                    int thirdColon = dataLine.indexOf(':', secondColon + 1);
                     
-                    // Accept both DATA: and VALUE: prefixes (Harbour sends VALUE:)
-                    if (dataLine.startsWith("DATA:") || dataLine.startsWith("VALUE:")) {
-                        // Parse VALUE:fieldname:type:value: format
-                        // Find the positions of the colons to handle values that might contain colons
-                        int firstColon = dataLine.indexOf(':');
-                        int secondColon = dataLine.indexOf(':', firstColon + 1);
-                        int thirdColon = dataLine.indexOf(':', secondColon + 1);
+                    if (firstColon > 0 && secondColon > 0 && thirdColon > 0) {
+                        String fieldName = dataLine.substring(firstColon + 1, secondColon);
+                        String fieldType = dataLine.substring(secondColon + 1, thirdColon);
+                        String fieldValue = dataLine.substring(thirdColon + 1);
                         
-                        if (firstColon > 0 && secondColon > 0 && thirdColon > 0) {
-                            String fieldName = dataLine.substring(firstColon + 1, secondColon);
-                            String fieldType = dataLine.substring(secondColon + 1, thirdColon);
-                            String fieldValue = dataLine.substring(thirdColon + 1);
-                            
-                            // Clean up the value:
-                            // 1. Remove trailing colon if present
-                            if (fieldValue.endsWith(":")) {
-                                fieldValue = fieldValue.substring(0, fieldValue.length() - 1);
-                            }
-                            
-                            // 2. For string values (type C or M), remove surrounding quotes
-                            if ((fieldType.equals("C") || fieldType.equals("M")) && 
-                                fieldValue.startsWith("\"") && fieldValue.endsWith("\"")) {
-                                fieldValue = fieldValue.substring(1, fieldValue.length() - 1);
-                            }
-                            
-                            // 3. Trim the value
-                            fieldValue = fieldValue.trim();
-                            
-                            data.add(new String[]{fieldName, fieldValue});
-                            valueCount++;
+                        // Clean up the value:
+                        // 1. Remove trailing colon if present
+                        if (fieldValue.endsWith(":")) {
+                            fieldValue = fieldValue.substring(0, fieldValue.length() - 1);
                         }
+                        
+                        // 2. For string values (type C or M), remove surrounding quotes
+                        if ((fieldType.equals("C") || fieldType.equals("M")) && 
+                            fieldValue.startsWith("\"") && fieldValue.endsWith("\"")) {
+                            fieldValue = fieldValue.substring(1, fieldValue.length() - 1);
+                        }
+                        
+                        // 3. Trim the value
+                        fieldValue = fieldValue.trim();
+                        
+                        data.add(new String[]{fieldName, fieldValue});
+                        valueCount++;
                     }
                 }
-                
-                HarbourLogger.log("HarbourDBFToolWindow", "Added " + valueCount + " field values to display");
-                
-                tableModel.setData(data);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displayed current record data for " + workarea.getAlias());
-            });
+            }
+            
+            HarbourLogger.log("HarbourDBFToolWindow", "Added " + valueCount + " field values to display");
+            tableModel.setData(data);
+            HarbourLogger.log("HarbourDBFToolWindow", "Displayed current record data for " + workarea.getAlias());
         }
         
         @Override
         public void onSchemaInfoReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] schemaData) {
+            // Cache the data
+            String alias = workarea.getAlias();
+            WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
+            cache.schemaData = schemaData;
+            
+            // Display immediately
             ApplicationManager.getApplication().invokeLater(() -> {
-                List<String[]> data = new ArrayList<>();
-                data.add(new String[]{"Schema Information for " + workarea.getAlias(), ""});
-                data.add(new String[]{"", ""});
-                
-                // Parse schema response
-                for (String schemaLine : schemaData) {
-                    if (schemaLine.startsWith("INFO:")) {
-                        // Parse INFO:key:value: or INFO:key:value
-                        String[] parts = schemaLine.split(":", 3);
-                        if (parts.length >= 3) {
-                            String infoKey = parts[1];
-                            String infoValue = parts[2];
-                            
-                            // Clean up the value - remove trailing colon if present
-                            if (infoValue.endsWith(":")) {
-                                infoValue = infoValue.substring(0, infoValue.length() - 1);
-                            }
-                            
-                            // Format the key nicely
-                            String displayKey = infoKey.substring(0, 1).toUpperCase() + infoKey.substring(1).toLowerCase();
-                            data.add(new String[]{displayKey, infoValue.trim()});
+                displaySchemaData(workarea, schemaData);
+            });
+        }
+        
+        /**
+         * Display schema data in the table
+         */
+        private void displaySchemaData(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] schemaData) {
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Schema Information for " + workarea.getAlias(), ""});
+            data.add(new String[]{"", ""});
+            
+            // Parse schema response
+            for (String schemaLine : schemaData) {
+                if (schemaLine.startsWith("INFO:")) {
+                    // Parse INFO:key:value: or INFO:key:value
+                    String[] parts = schemaLine.split(":", 3);
+                    if (parts.length >= 3) {
+                        String infoKey = parts[1];
+                        String infoValue = parts[2];
+                        
+                        // Clean up the value - remove trailing colon if present
+                        if (infoValue.endsWith(":")) {
+                            infoValue = infoValue.substring(0, infoValue.length() - 1);
                         }
-                    } else if (schemaLine.startsWith("FIELD:")) {
-                        // Show field structure as part of schema
-                        String[] parts = schemaLine.split(":");
-                        if (parts.length >= 5) {
-                            String fieldName = parts[1];
-                            String fieldType = parts[2]; 
-                            String fieldLength = parts[3];
-                            String fieldDecimals = parts[4];
-                            
-                            data.add(new String[]{"Field: " + fieldName, 
-                                fieldType + "(" + fieldLength + 
-                                (Integer.parseInt(fieldDecimals) > 0 ? "," + fieldDecimals : "") + ")"});
-                        }
+                        
+                        // Format the key nicely
+                        String displayKey = infoKey.substring(0, 1).toUpperCase() + infoKey.substring(1).toLowerCase();
+                        data.add(new String[]{displayKey, infoValue.trim()});
+                    }
+                } else if (schemaLine.startsWith("FIELD:")) {
+                    // Show field structure as part of schema
+                    String[] parts = schemaLine.split(":");
+                    if (parts.length >= 5) {
+                        String fieldName = parts[1];
+                        String fieldType = parts[2]; 
+                        String fieldLength = parts[3];
+                        String fieldDecimals = parts[4];
+                        
+                        data.add(new String[]{"Field: " + fieldName, 
+                            fieldType + "(" + fieldLength + 
+                            (Integer.parseInt(fieldDecimals) > 0 ? "," + fieldDecimals : "") + ")"});
                     }
                 }
-                
-                tableModel.setData(data);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displayed schema information for " + workarea.getAlias());
-            });
+            }
+            
+            tableModel.setData(data);
+            HarbourLogger.log("HarbourDBFToolWindow", "Displayed schema information for " + workarea.getAlias());
         }
     }
     
