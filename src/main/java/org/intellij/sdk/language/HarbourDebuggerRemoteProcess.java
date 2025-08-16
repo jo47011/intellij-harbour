@@ -576,6 +576,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stopped at " + file + ":" + line + " (state: SUSPENDED, pendingStep=false)");
         
+        // Auto-refresh DBF workareas when stopping at breakpoint
+        if (liveDBFConnection != null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Auto-refreshing DBF workareas at breakpoint");
+            liveDBFConnection.requestWorkareaUpdate();
+        }
+        
         VirtualFile vFile = findSourceFile(file);
         if (vFile != null) {
             XSourcePosition position = XDebuggerUtil.getInstance()

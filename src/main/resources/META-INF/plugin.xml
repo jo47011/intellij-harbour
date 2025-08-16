@@ -28,7 +28,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
         <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
-                  fieldName="INSTANCE" language="Harbour" extensions="prg;ch"/>
+                  fieldName="INSTANCE" language="Harbour" extensions="prg;ch;dbf"/>
 
         <!-- Language -->
         <lang.parserDefinition language="Harbour"
@@ -158,6 +158,13 @@
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ReformatCode"/>
             <add-to-group group-id="RefactoringMenu" anchor="after" relative-to-action="IntroduceVariable"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift L"/>
+        </action>
+        
+        <!-- DBF File Action -->
+        <action id="HarbourOpenDBFTool" class="org.intellij.sdk.language.HarbourDBFFileAction"
+                text="Open in DBF Tool" description="Open DBF file in Harbour DBF tool window">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
 
         <!-- Next Error Action -->

@@ -265,8 +265,15 @@ public class HarbourLiveDBFConnection implements Disposable {
         }
         
         if (workarea == null) {
-            HarbourLogger.log("HarbourLiveDBFConnection", "Workarea " + areaNumber + " not found");
-            return;
+            HarbourLogger.log("HarbourLiveDBFConnection", 
+                "WARNING: Workarea " + areaNumber + " not found in map. Available workareas: " + 
+                workareas.keySet() + " (total: " + workareas.size() + ")");
+            
+            // Try to create a temporary workarea info for display
+            // This can happen if we receive data before workarea enumeration
+            workarea = new WorkareaInfo("AREA" + areaNumber, areaNumber, 0, 0, 0, "");
+            HarbourLogger.log("HarbourLiveDBFConnection", 
+                "Created temporary workarea info for area " + areaNumber);
         }
         
         // Notify listeners with the response data
