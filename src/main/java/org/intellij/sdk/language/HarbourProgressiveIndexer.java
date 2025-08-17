@@ -12,10 +12,15 @@ import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.intellij.sdk.language.psi.HarbourFile;
+import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
+import org.intellij.sdk.language.psi.ClassDeclaration;
+import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -55,6 +60,20 @@ public class HarbourProgressiveIndexer {
                                             HarbourFileType.INSTANCE,
                                             GlobalSearchScope.projectScope(project))
                             );
+
+                            LOG.info("Starting indexing of " + harbourFiles.size() + " Harbour files");
+                            HarbourLogger.log("Indexer", "Starting indexing of " + harbourFiles.size() + " Harbour files");
+                            
+                            // Check cache status
+                            HarbourSettings settings = HarbourSettings.getInstance(project);
+                            if (settings.isIndexCacheEnabled()) {
+                                HarbourIndexCache cache = HarbourIndexCache.getInstance(project);
+                                if (cache != null) {
+                                    LOG.info("Cache enabled. Has data: " + cache.hasCachedData() + ", Loaded: " + cache.isCacheLoaded());
+                                } else {
+                                    LOG.error("Cache service is null despite being enabled!");
+                                }
+                            }
 
                             // Skip indexing if only a few files
                             if (harbourFiles.size() <= MAX_INITIAL_FILES) {
@@ -97,6 +116,18 @@ public class HarbourProgressiveIndexer {
                             indexFilesInBackground(project, remainingFiles);
                         } finally {
                             INDEXING_IN_PROGRESS.set(false);
+                            
+                            // Force save the cache after indexing completes
+                            HarbourSettings settings = HarbourSettings.getInstance(project);
+                            if (settings.isIndexCacheEnabled()) {
+                                HarbourIndexCache cache = HarbourIndexCache.getInstance(project);
+                                if (cache != null) {
+                                    cache.forceSave();
+                                    LOG.info("Forced cache save after indexing");
+                                } else {
+                                    LOG.error("Cannot save - cache service is null!");
+                                }
+                            }
                         }
                     }
                 });
@@ -160,6 +191,10 @@ public class HarbourProgressiveIndexer {
             if (HarbourPerformanceOptimizer.isShuttingDown() || project.isDisposed()) {
                 return;
             }
+            
+            String fullPath = file.getPath();
+            LOG.info("Processing file " + processed.get() + "/" + totalFiles + ": " + file.getName() + " (" + fullPath + ")");
+            HarbourLogger.log("Indexer", "Processing file " + processed.get() + "/" + totalFiles + ": " + file.getName());
 
             try {
                 // Must use ReadAction for file operations
@@ -167,14 +202,60 @@ public class HarbourProgressiveIndexer {
                     try {
                         // Check file isn't excluded first
                         if (referenceService.isExcluded(file)) {
+                            HarbourLogger.log("Indexer", "Skipping excluded file: " + file.getName());
                             return;
+                        }
+                        
+                        // Skip binary files
+                        if (file.getFileType().isBinary()) {
+                            HarbourLogger.log("Indexer", "Skipping binary file: " + file.getName());
+                            return;
+                        }
+                        
+                        // Skip very large files
+                        if (file.getLength() > 2 * 1024 * 1024) { // 2MB
+                            HarbourLogger.warning("Indexer", "Skipping very large file (" + file.getLength() + " bytes): " + file.getName());
+                            return;
+                        }
+
+                        // Check if file is already in cache and unchanged
+                        HarbourSettings settings = HarbourSettings.getInstance(project);
+                        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+                        
+                        if (indexCache != null && settings.isIndexCacheEnabled() && indexCache.hasCachedData() && !indexCache.isFileModified(file)) {
+                            // File is cached and unchanged - skip indexing
+                            LOG.info("Skipping cached file: " + file.getName());
+                            return;
+                        } else if (indexCache != null) {
+                            LOG.info("Indexing file: " + file.getName() + " (cache enabled=" + settings.isIndexCacheEnabled() + 
+                                    ", has data=" + indexCache.hasCachedData() + ", modified=" + 
+                                    (indexCache.hasCachedData() ? indexCache.isFileModified(file) : "N/A") + ")");
+                        } else {
+                            LOG.info("Indexing file: " + file.getName() + " (cache service is null)");
                         }
 
                         // Get PSI and register functions
                         com.intellij.psi.PsiFile psiFile = psiManager.findFile(file);
                         if (psiFile instanceof HarbourFile harbourFile) {
+                            // Add timeout protection for registration
+                            long startTime = System.currentTimeMillis();
+                            
+                            // Register in runtime cache
+                            HarbourLogger.log("Indexer", "Registering functions for: " + file.getName());
                             referenceService.registerFunctions(harbourFile);
+                            
+                            long elapsed = System.currentTimeMillis() - startTime;
+                            if (elapsed > 1000) {
+                                HarbourLogger.warning("Indexer", "Slow function registration (" + elapsed + "ms) for: " + file.getName());
+                            }
+                            
+                            HarbourLogger.log("Indexer", "Registering procedures for: " + file.getName());
                             referenceService.registerProcedures(harbourFile);
+                            
+                            // Update persistent cache if enabled
+                            if (settings.isIndexCacheEnabled() && indexCache != null) {
+                                updatePersistentCache(harbourFile, file, indexCache);
+                            }
                         }
                     } catch (Exception e) {
                         LOG.warn("Error processing file in read action: " + file.getName(), e);
@@ -225,6 +306,14 @@ public class HarbourProgressiveIndexer {
         int batchIndex = processedBatches.getAndIncrement();
         if (batchIndex >= totalBatches) {
             LOG.info("Background indexing completed");
+            
+            // Force save the cache after all background indexing completes
+            HarbourSettings settings = HarbourSettings.getInstance(project);
+            if (settings.isIndexCacheEnabled()) {
+                HarbourIndexCache cache = HarbourIndexCache.getInstance(project);
+                cache.forceSave();
+                LOG.info("Forced cache save after background indexing completed");
+            }
             return;
         }
 
@@ -248,10 +337,25 @@ public class HarbourProgressiveIndexer {
                     ReadAction.run(() -> {
                         try {
                             if (!referenceService.isExcluded(file)) {
+                                // Check if file is already in cache and unchanged
+                                HarbourSettings settings = HarbourSettings.getInstance(project);
+                                HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+                                
+                                if (settings.isIndexCacheEnabled() && indexCache.hasCachedData() && !indexCache.isFileModified(file)) {
+                                    // File is cached and unchanged - skip indexing
+                                    return;
+                                }
+                                
                                 com.intellij.psi.PsiFile psiFile = psiManager.findFile(file);
                                 if (psiFile instanceof HarbourFile harbourFile) {
+                                    // Register in runtime cache
                                     referenceService.registerFunctions(harbourFile);
                                     referenceService.registerProcedures(harbourFile);
+                                    
+                                    // Update persistent cache if enabled
+                                    if (settings.isIndexCacheEnabled()) {
+                                        updatePersistentCache(harbourFile, file, indexCache);
+                                    }
                                 }
                             }
                         } catch (Exception e) {
@@ -288,6 +392,16 @@ public class HarbourProgressiveIndexer {
             return;
         }
 
+        // Check cache to see if file actually changed
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        if (settings.isIndexCacheEnabled()) {
+            HarbourIndexCache cache = HarbourIndexCache.getInstance(project);
+            if (cache.hasCachedData() && !cache.isFileModified(file)) {
+                LOG.info("File not modified, skipping reindex: " + file.getName());
+                return;
+            }
+        }
+
         LOG.info("Reindexing Harbour file: " + file.getName());
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
@@ -304,10 +418,14 @@ public class HarbourProgressiveIndexer {
 
                         // Make sure the file isn't excluded
                         if (!referenceService.isExcluded(file)) {
-                            // Register declarations
+                            // Register declarations in runtime cache
                             referenceService.registerFunctions(harbourFile);
                             referenceService.registerProcedures(harbourFile);
                             referenceService.registerClasses(harbourFile);
+
+                            // Update persistent cache
+                            HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+                            updatePersistentCache(harbourFile, file, indexCache);
 
                             // Ensure token-based references are processed
                             HarbourTokenTypeExtension.processFile(psiFile);
@@ -320,5 +438,64 @@ public class HarbourProgressiveIndexer {
                 LOG.warn("Error reindexing file: " + file.getName(), e);
             }
         });
+    }
+    
+    /**
+     * Update persistent cache with declarations from a file.
+     */
+    private static void updatePersistentCache(@NotNull HarbourFile harbourFile, @NotNull VirtualFile file, @NotNull HarbourIndexCache cache) {
+        try {
+            List<HarbourIndexCache.CacheEntry> entries = new ArrayList<>();
+            
+            // Extract functions
+            Collection<HarbourFunctionDeclaration> functions = PsiTreeUtil.findChildrenOfType(harbourFile, HarbourFunctionDeclaration.class);
+            for (HarbourFunctionDeclaration function : functions) {
+                String name = function.getName();
+                if (name != null && !name.isEmpty()) {
+                    com.intellij.openapi.editor.Document document = com.intellij.psi.PsiDocumentManager.getInstance(harbourFile.getProject()).getDocument(harbourFile);
+                    if (document != null) {
+                        int lineNumber = document.getLineNumber(function.getTextOffset()) + 1;
+                        String signature = function.getText().split("\\n")[0]; // First line as signature
+                        entries.add(new HarbourIndexCache.CacheEntry(
+                            name,
+                            file.getPath(),
+                            lineNumber,
+                            signature,
+                            function.getText().toUpperCase().startsWith("PROCEDURE") ? 
+                                HarbourIndexCache.EntryType.PROCEDURE : 
+                                HarbourIndexCache.EntryType.FUNCTION
+                        ));
+                    }
+                }
+            }
+            
+            // Extract classes
+            Collection<ClassDeclaration> classes = PsiTreeUtil.findChildrenOfType(harbourFile, ClassDeclaration.class);
+            for (ClassDeclaration classDecl : classes) {
+                String name = classDecl.getName();
+                if (name != null && !name.isEmpty()) {
+                    com.intellij.openapi.editor.Document document = com.intellij.psi.PsiDocumentManager.getInstance(harbourFile.getProject()).getDocument(harbourFile);
+                    if (document != null) {
+                        int lineNumber = document.getLineNumber(classDecl.getTextOffset()) + 1;
+                        String signature = classDecl.getText().split("\\n")[0]; // First line as signature
+                        entries.add(new HarbourIndexCache.CacheEntry(
+                            name,
+                            file.getPath(),
+                            lineNumber,
+                            signature,
+                            HarbourIndexCache.EntryType.CLASS
+                        ));
+                    }
+                }
+            }
+            
+            // Update cache
+            if (!entries.isEmpty()) {
+                cache.updateFileCache(file, entries);
+                LOG.info("Updated persistent cache for file: " + file.getName() + " with " + entries.size() + " entries");
+            }
+        } catch (Exception e) {
+            LOG.warn("Error updating persistent cache for file: " + file.getName(), e);
+        }
     }
 }

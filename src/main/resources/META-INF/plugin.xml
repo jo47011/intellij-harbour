@@ -91,6 +91,9 @@
         <!-- Settings Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourSettings"/>
         
+        <!-- Index Cache Service for persistent caching -->
+        <projectService serviceImplementation="org.intellij.sdk.language.HarbourIndexCache" preload="true"/>
+        
         <!-- Breakpoint Properties Storage Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
         
@@ -103,6 +106,9 @@
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
         -->
+        
+        <!-- Cache Initializer to ensure cache service starts early -->
+        <postStartupActivity implementation="org.intellij.sdk.language.HarbourCacheInitializer"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"

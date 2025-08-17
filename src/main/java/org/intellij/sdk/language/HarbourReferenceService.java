@@ -9,6 +9,7 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
@@ -86,19 +87,32 @@ public final class HarbourReferenceService {
     public List<PsiElement> findFunctions(String functionName) {
         HarbourLogger.log("ReferenceService", "Searching for all occurrences of function: " + functionName);
 
-        // Log cache state
-        if (functionCaches.containsKey(functionName.toLowerCase())) {
-            HarbourLogger.log("ReferenceService", "Found in cache: " + functionName + " with " +
-                    functionCaches.get(functionName.toLowerCase()).size() + " results");
-        } else {
-            HarbourLogger.log("ReferenceService", "Not in cache: " + functionName);
-        }
-
         if (functionName == null || functionName.isEmpty()) {
             return Collections.emptyList();
         }
 
-        // Check cache first
+        // First check persistent cache if available
+        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+        if (indexCache != null && indexCache.isCacheLoaded()) {
+            List<HarbourIndexCache.CacheEntry> cachedEntries = indexCache.getCachedFunctions(functionName);
+            if (cachedEntries != null && !cachedEntries.isEmpty()) {
+                List<PsiElement> results = convertCacheEntriesToPsiElements(cachedEntries);
+                if (!results.isEmpty()) {
+                    HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for: " + functionName);
+                    return results;
+                }
+            }
+        }
+
+        // Log runtime cache state
+        if (functionCaches.containsKey(functionName.toLowerCase())) {
+            HarbourLogger.log("ReferenceService", "Found in runtime cache: " + functionName + " with " +
+                    functionCaches.get(functionName.toLowerCase()).size() + " results");
+        } else {
+            HarbourLogger.log("ReferenceService", "Not in runtime cache: " + functionName);
+        }
+
+        // Check runtime cache
         String functionKey = functionName.toLowerCase();
         if (functionCaches.containsKey(functionKey)) {
             List<PsiElement> cachedResults = functionCaches.get(functionKey);
@@ -138,7 +152,10 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // Check cache first
+        // Note: Variables are typically local and not persisted in cache
+        // We only use runtime cache for variables
+        
+        // Check runtime cache first
         String variableKey = variableName.toLowerCase();
         if (variableCaches.containsKey(variableKey)) {
             List<PsiElement> cachedResults = variableCaches.get(variableKey);
@@ -173,7 +190,36 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // Check cache first
+        // First check persistent cache for functions, procedures, and classes
+        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+        if (indexCache.isCacheLoaded()) {
+            List<PsiElement> results = new ArrayList<>();
+            
+            // Check functions
+            List<HarbourIndexCache.CacheEntry> cachedFunctions = indexCache.getCachedFunctions(symbolName);
+            if (cachedFunctions != null && !cachedFunctions.isEmpty()) {
+                results.addAll(convertCacheEntriesToPsiElements(cachedFunctions));
+            }
+            
+            // Check procedures
+            List<HarbourIndexCache.CacheEntry> cachedProcedures = indexCache.getCachedProcedures(symbolName);
+            if (cachedProcedures != null && !cachedProcedures.isEmpty()) {
+                results.addAll(convertCacheEntriesToPsiElements(cachedProcedures));
+            }
+            
+            // Check classes
+            List<HarbourIndexCache.CacheEntry> cachedClasses = indexCache.getCachedClasses(symbolName);
+            if (cachedClasses != null && !cachedClasses.isEmpty()) {
+                results.addAll(convertCacheEntriesToPsiElements(cachedClasses));
+            }
+            
+            if (!results.isEmpty()) {
+                HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for symbol: " + symbolName);
+                return results;
+            }
+        }
+
+        // Check runtime cache
         String symbolKey = symbolName.toLowerCase();
         if (symbolCaches.containsKey(symbolKey)) {
             List<PsiElement> cachedResults = symbolCaches.get(symbolKey);
@@ -228,7 +274,20 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // Check cache first
+        // First check persistent cache if available
+        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+        if (indexCache.isCacheLoaded()) {
+            List<HarbourIndexCache.CacheEntry> cachedEntries = indexCache.getCachedClasses(className);
+            if (cachedEntries != null && !cachedEntries.isEmpty()) {
+                List<PsiElement> results = convertCacheEntriesToPsiElements(cachedEntries);
+                if (!results.isEmpty()) {
+                    HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for class: " + className);
+                    return results;
+                }
+            }
+        }
+
+        // Check runtime cache
         String classKey = className.toLowerCase();
         if (classCaches.containsKey(classKey)) {
             List<PsiElement> cachedResults = classCaches.get(classKey);
@@ -244,6 +303,54 @@ public final class HarbourReferenceService {
         if (!result.isEmpty()) {
             classCaches.put(classKey, new ArrayList<>(result));
             HarbourLogger.log("ReferenceService", "Direct search found " + result.size() + " results for class: " + className);
+        }
+
+        return result;
+    }
+
+    /**
+     * Find all procedure declarations with the given name.
+     *
+     * @param procedureName The name of the procedure to find
+     * @return A list of PSI elements for the procedure declarations
+     */
+    public List<PsiElement> findProcedures(String procedureName) {
+        HarbourLogger.log("ReferenceService", "Searching for all occurrences of procedure: " + procedureName);
+
+        if (procedureName == null || procedureName.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // First check persistent cache if available
+        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+        if (indexCache.isCacheLoaded()) {
+            List<HarbourIndexCache.CacheEntry> cachedEntries = indexCache.getCachedProcedures(procedureName);
+            if (cachedEntries != null && !cachedEntries.isEmpty()) {
+                List<PsiElement> results = convertCacheEntriesToPsiElements(cachedEntries);
+                if (!results.isEmpty()) {
+                    HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for procedure: " + procedureName);
+                    return results;
+                }
+            }
+        }
+
+        // For now, procedures are indexed the same as functions
+        // in the runtime cache
+        String procedureKey = procedureName.toLowerCase();
+        if (functionCaches.containsKey(procedureKey)) {
+            List<PsiElement> cachedResults = functionCaches.get(procedureKey);
+            HarbourLogger.log("ReferenceService", "Found " + cachedResults.size() + " procedure results in cache for: " + procedureName);
+            return new ArrayList<>(cachedResults);
+        }
+
+        // Do a direct search
+        HarbourLogger.log("ReferenceService", "Procedure not found in cache, trying direct search for: " + procedureName);
+        List<PsiElement> result = directSearch(procedureName, true);
+
+        // Cache the result
+        if (!result.isEmpty()) {
+            functionCaches.put(procedureKey, new ArrayList<>(result));
+            HarbourLogger.log("ReferenceService", "Direct search found " + result.size() + " results for procedure: " + procedureName);
         }
 
         return result;
@@ -1134,17 +1241,42 @@ public final class HarbourReferenceService {
      */
     public void registerFunctions(HarbourFile file) {
         HarbourLogger.log("ReferenceService", "Registering functions from file: " + file.getName());
-
-        // Implementation would scan the file for function declarations
-        // and add them to the cache. Simplified version for now.
-        Collection<HarbourFunctionDeclaration> declarations = PsiTreeUtil.findChildrenOfType(file, HarbourFunctionDeclaration.class);
-        for (HarbourFunctionDeclaration declaration : declarations) {
-            String name = declaration.getName();
-            if (name != null && !name.isEmpty()) {
-                List<PsiElement> elements = new ArrayList<>();
-                elements.add(declaration);
-                updateCache(name, elements);
+        
+        try {
+            // Check file size to avoid hanging on huge files
+            VirtualFile vFile = file.getVirtualFile();
+            if (vFile != null && vFile.getLength() > 1024 * 1024) { // Skip files > 1MB
+                HarbourLogger.warning("ReferenceService", "Skipping large file (" + vFile.getLength() + " bytes): " + file.getName());
+                return;
             }
+            
+            long startTime = System.currentTimeMillis();
+            
+            // Implementation would scan the file for function declarations
+            // and add them to the cache. Simplified version for now.
+            Collection<HarbourFunctionDeclaration> declarations = PsiTreeUtil.findChildrenOfType(file, HarbourFunctionDeclaration.class);
+            
+            long scanTime = System.currentTimeMillis() - startTime;
+            if (scanTime > 500) {
+                HarbourLogger.warning("ReferenceService", "Slow PSI scan (" + scanTime + "ms) for: " + file.getName() + " found " + declarations.size() + " functions");
+            }
+            
+            int count = 0;
+            for (HarbourFunctionDeclaration declaration : declarations) {
+                String name = declaration.getName();
+                if (name != null && !name.isEmpty()) {
+                    List<PsiElement> elements = new ArrayList<>();
+                    elements.add(declaration);
+                    updateCache(name, elements);
+                    count++;
+                }
+            }
+            
+            if (count > 0) {
+                HarbourLogger.log("ReferenceService", "Registered " + count + " functions from: " + file.getName());
+            }
+        } catch (Exception e) {
+            HarbourLogger.error("ReferenceService", "Error registering functions from " + file.getName() + ": " + e.getMessage());
         }
     }
 
@@ -1255,6 +1387,42 @@ public final class HarbourReferenceService {
         }
 
         HarbourLogger.log("ReferenceService", "Loaded " + excludedFilenames.size() + " excluded files from settings");
+    }
+
+    /**
+     * Convert cache entries to PSI elements.
+     */
+    private List<PsiElement> convertCacheEntriesToPsiElements(List<HarbourIndexCache.CacheEntry> entries) {
+        // For now, return empty list to avoid file modification errors during resolution
+        // The cache lookup is causing issues with PSI modification during read actions
+        HarbourLogger.log("ReferenceService", "Cache lookup disabled temporarily - " + entries.size() + " entries skipped");
+        return Collections.emptyList();
+    }
+    
+    /**
+     * Find element at specific line number.
+     */
+    private PsiElement findElementAtLine(PsiFile file, int lineNumber, String name) {
+        com.intellij.openapi.editor.Document document = PsiDocumentManager.getInstance(project).getDocument(file);
+        if (document == null || lineNumber <= 0) return null;
+        
+        int lineStartOffset = document.getLineStartOffset(Math.min(lineNumber - 1, document.getLineCount() - 1));
+        PsiElement element = file.findElementAt(lineStartOffset);
+        
+        // Search for the named element near this line
+        while (element != null && element.getTextOffset() < lineStartOffset + 500) {
+            if (element instanceof HarbourFunctionDeclaration || 
+                element instanceof ClassDeclaration) {
+                if (name.equalsIgnoreCase(element.getText()) || 
+                    (element instanceof com.intellij.psi.PsiNamedElement && 
+                     name.equalsIgnoreCase(((com.intellij.psi.PsiNamedElement) element).getName()))) {
+                    return element;
+                }
+            }
+            element = element.getNextSibling();
+        }
+        
+        return null;
     }
 
     /**
