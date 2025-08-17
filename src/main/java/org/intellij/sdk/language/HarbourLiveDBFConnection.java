@@ -211,6 +211,7 @@ public class HarbourLiveDBFConnection implements Disposable {
         WorkareaInfo workarea = workareas.get(alias);
         if (workarea != null && debuggerConnection.isConnected()) {
             String command = "AREA" + workarea.getAreaNumber() + ":FIELDS";
+            HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING COMMAND: " + command + " for alias: " + alias);
             debuggerConnection.sendCommand(command);
         }
     }
@@ -222,6 +223,7 @@ public class HarbourLiveDBFConnection implements Disposable {
         WorkareaInfo workarea = workareas.get(alias);
         if (workarea != null && debuggerConnection.isConnected()) {
             String command = "AREA" + workarea.getAreaNumber() + ":RECORD";
+            HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING COMMAND: " + command + " for alias: " + alias);
             debuggerConnection.sendCommand(command);
         }
     }
@@ -233,6 +235,7 @@ public class HarbourLiveDBFConnection implements Disposable {
         WorkareaInfo workarea = workareas.get(alias);
         if (workarea != null && debuggerConnection.isConnected()) {
             String command = "AREA" + workarea.getAreaNumber() + ":SCHEMA";
+            HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING COMMAND: " + command + " for alias: " + alias);
             debuggerConnection.sendCommand(command);
         }
     }

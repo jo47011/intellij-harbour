@@ -368,6 +368,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         // Check if this is a workarea info message or a detailed data request response
                         if (parts.length >= 2 && (parts[1].equals("FIELDS") || parts[1].equals("RECORD") || parts[1].equals("SCHEMA"))) {
                             // This is a response to AREA{n}:FIELDS/RECORD/SCHEMA request
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", ">>> AREA RESPONSE DETECTED in single-line path: " + command);
                             // Don't return early - let it fall through to the multi-line handler
                             break;
                         } else {
@@ -401,11 +402,20 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         areaResponseBuffer.add(command);
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line (single-line path): " + command);
                     }
+                    
+                    // Send the data immediately, don't wait for END marker
+                    // This ensures the UI updates as soon as data arrives
+                    if (areaResponseBuffer != null && areaResponseCommand != null) {
+                        String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                        liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sent partial data to UI: " + areaResponseBuffer.size() + " lines");
+                    }
+                    
                     return;
                 }
                 // Check for END markers
                 else if (command.equals("END_RECORD") || command.equals("END_FIELDS") || command.equals("END_SCHEMA")) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Area response complete (single-line path): " + areaResponseCommand + " with " + areaResponseBuffer.size() + " lines");
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", ">>> END MARKER RECEIVED: " + command + " for buffered command: " + areaResponseCommand + " with " + areaResponseBuffer.size() + " lines");
                     
                     // Process the complete buffered response
                     String[] responseData = areaResponseBuffer.toArray(new String[0]);
@@ -485,7 +495,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             default:
                 // Handle area-specific responses (AREA1:FIELDS, AREA2:RECORD, etc.)
                 if (command.startsWith("AREA") && command.contains(":")) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** AREA-SPECIFIC COMMAND: " + command);
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** AREA-SPECIFIC COMMAND RECEIVED: " + command);
                     
                     // Check if this is a multi-line area response that needs buffering
                     String[] parts = command.split(":");
@@ -493,7 +503,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         // Start buffering for multi-line responses
                         areaResponseCommand = command;
                         areaResponseBuffer = new ArrayList<>();
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Started buffering for " + command);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", ">>> BUFFERING STARTED for command: " + command + " (type: " + parts[1] + ")");
                         
                         // Add any immediate data from this message
                         if (lines.length > 1) {
@@ -516,6 +526,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     if (command.startsWith("VALUE:") || command.startsWith("FIELD:") || command.startsWith("INFO:")) {
                         areaResponseBuffer.add(command);
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line: " + command);
+                        
+                        // Send the data immediately, don't wait for END marker
+                        // This ensures the UI updates as soon as data arrives
+                        String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                        liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sent partial data to UI: " + areaResponseBuffer.size() + " lines");
+                        
                         break;
                     }
                     // Check for END markers

@@ -130,6 +130,13 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private String waitingForWorkarea = null;
         private String waitingForDataType = null;
         
+        // Track all pending requests so we can display them when they arrive
+        // Key: workarea:datatype, Value: timestamp
+        private final java.util.Map<String, Long> pendingRequests = new java.util.HashMap<>();
+        
+        // Flag to prevent selection events during tree updates
+        private boolean updatingTree = false;
+        
         public HarbourDBFToolWindowContent(@NotNull Project project) {
             this.project = project;
             
@@ -194,10 +201,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 liveConnection.removeWorkareaUpdateListener(this);
             }
             
-            // Clear cache when connecting to new session
+            // Clear cache and pending requests when connecting to new session
             dataCache.clear();
             waitingForWorkarea = null;
             waitingForDataType = null;
+            pendingRequests.clear();
             
             this.liveConnection = connection;
             connection.addWorkareaUpdateListener(this);
@@ -222,10 +230,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             treeModel.reload();
             tableModel.clearData();
             
-            // Clear cache and waiting state
+            // Clear cache, waiting state, and pending requests
             dataCache.clear();
             waitingForWorkarea = null;
             waitingForDataType = null;
+            pendingRequests.clear();
             
             updateStatus("Debugging session disconnected");
             
@@ -251,6 +260,40 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
          * Update the workarea tree with new data
          */
         private void updateWorkareaTree(@NotNull Collection<HarbourLiveDBFConnection.WorkareaInfo> workareas) {
+            // Set flag to prevent selection events during update
+            updatingTree = true;
+            
+            // Save current selection info
+            String selectedWorkarea = null;
+            String selectedDataType = null;
+            TreePath selectionPath = workareaTree.getSelectionPath();
+            if (selectionPath != null) {
+                DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+                
+                // Check if a workarea is selected
+                if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                    HarbourLiveDBFConnection.WorkareaInfo info = (HarbourLiveDBFConnection.WorkareaInfo) selectedNode.getUserObject();
+                    selectedWorkarea = info.getAlias();
+                    selectedDataType = null; // Direct workarea selection
+                }
+                // Check if a data type under a workarea is selected
+                else if (selectedNode.getParent() != null) {
+                    DefaultMutableTreeNode parentNode = (DefaultMutableTreeNode) selectedNode.getParent();
+                    if (parentNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                        HarbourLiveDBFConnection.WorkareaInfo info = (HarbourLiveDBFConnection.WorkareaInfo) parentNode.getUserObject();
+                        selectedWorkarea = info.getAlias();
+                        String nodeText = selectedNode.getUserObject().toString();
+                        if (nodeText.startsWith("Fields")) {
+                            selectedDataType = "Fields";
+                        } else if (nodeText.equals("Current Record")) {
+                            selectedDataType = "Record";
+                        } else if (nodeText.equals("Schema Info")) {
+                            selectedDataType = "Schema";
+                        }
+                    }
+                }
+            }
+            
             // Save expansion state
             java.util.Set<String> expandedWorkareas = new java.util.HashSet<>();
             DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) treeModel.getRoot();
@@ -293,13 +336,27 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 }
             }
             
-            HarbourLogger.log("HarbourDBFToolWindow", "Updated workarea tree with " + workareas.size() + " workareas");
+            // Don't restore selection - it causes unwanted event triggering
+            // The user's waiting state is preserved, so when data arrives it will display correctly
+            
+            HarbourLogger.log("HarbourDBFToolWindow", "Updated workarea tree with " + workareas.size() + " workareas" +
+                (selectedWorkarea != null ? ", had selection: " + selectedWorkarea + 
+                 (selectedDataType != null ? "/" + selectedDataType : "") : "") +
+                ", waiting for: " + waitingForWorkarea + "/" + waitingForDataType);
+            
+            // Clear the updating flag
+            updatingTree = false;
         }
         
         /**
          * Handle workarea selection in tree
          */
         private void onWorkareaSelected() {
+            // Ignore selection events during tree updates
+            if (updatingTree) {
+                return;
+            }
+            
             TreePath selectionPath = workareaTree.getSelectionPath();
             if (selectionPath == null || liveConnection == null) {
                 return;
@@ -337,6 +394,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             showLoadingMessage("Fields");
                             waitingForWorkarea = alias;
                             waitingForDataType = "Fields";
+                            pendingRequests.put(alias + ":Fields", System.currentTimeMillis());
                             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 273] Requesting fields for " + alias + ", waiting state set");
                             liveConnection.requestFieldInfo(alias);
                         }
@@ -350,6 +408,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             showLoadingMessage("Current Record");
                             waitingForWorkarea = alias;
                             waitingForDataType = "Record";
+                            pendingRequests.put(alias + ":Record", System.currentTimeMillis());
                             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 286] Requesting record for " + alias + ", waiting state set");
                             liveConnection.requestRecordData(alias);
                         }
@@ -363,6 +422,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             showLoadingMessage("Schema Info");
                             waitingForWorkarea = alias;
                             waitingForDataType = "Schema";
+                            pendingRequests.put(alias + ":Schema", System.currentTimeMillis());
                             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 299] Requesting schema for " + alias + ", waiting state set");
                             liveConnection.requestSchemaInfo(alias);
                         }
@@ -388,6 +448,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 showLoadingMessage("Current Record");
                 waitingForWorkarea = alias;
                 waitingForDataType = "Record";
+                pendingRequests.put(alias + ":Record", System.currentTimeMillis());
                 HarbourLogger.log("HarbourDBFToolWindow", "[LINE 324] Requesting record for workarea: " + alias + ", waiting state set");
                 liveConnection.requestRecordData(alias);
             }
@@ -418,8 +479,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (liveConnection != null) {
                 // Don't clear cache - keep existing data until new data arrives
                 // This prevents data loss when switching panels
-                waitingForWorkarea = null;
-                waitingForDataType = null;
+                // Also don't clear waiting state - we might be waiting for data
+                // waitingForWorkarea = null;  // REMOVED - don't clear waiting state
+                // waitingForDataType = null;   // REMOVED - don't clear waiting state
                 liveConnection.requestWorkareaUpdate();
                 updateStatus("Refreshing workarea information...");
             } else {
@@ -488,26 +550,32 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 424] onFieldsReceived for " + alias + 
                 ", waiting for: " + waitingForWorkarea + "/" + waitingForDataType);
             
-            // Display if we're waiting for this data OR if it's currently selected
-            ApplicationManager.getApplication().invokeLater(() -> {
-                boolean shouldDisplay = false;
+            // Check if we should display this data
+            boolean shouldDisplay = false;
+            String requestKey = alias + ":Fields";
+            
+            // Check if we have a pending request for this data
+            if (pendingRequests.containsKey(requestKey)) {
+                shouldDisplay = true;
+                pendingRequests.remove(requestKey);
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying fields for " + alias + " (pending request fulfilled)");
                 
-                // Check if we're waiting for this specific data
+                // Also clear waiting state if it matches
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Fields".equals(waitingForDataType)) {
-                    shouldDisplay = true;
-                    // Clear waiting state
                     waitingForWorkarea = null;
                     waitingForDataType = null;
                 }
-                // Or if it's currently selected
-                else if (isCurrentlySelected(alias, "Fields")) {
-                    shouldDisplay = true;
-                }
-                
-                if (shouldDisplay) {
-                    displayFieldData(workarea, fieldData);
-                }
-            });
+            }
+            // Or if it's currently selected
+            else if (isCurrentlySelected(alias, "Fields")) {
+                shouldDisplay = true;
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying fields for " + alias + " (currently selected)");
+            }
+            
+            if (shouldDisplay) {
+                // Display the data - displayFieldData will handle EDT properly
+                displayFieldData(workarea, fieldData);
+            }
         }
         
         /**
@@ -546,6 +614,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             }
             
             tableModel.setData(data);
+            
+            // Force table to repaint
+            detailsTable.repaint();
+            detailsTable.revalidate();
+            
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 502] Displayed " + fieldCount + " fields for " + workarea.getAlias());
         }
         
@@ -560,26 +633,32 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
             cache.setRecordData(recordData);
             
-            // Display if we're waiting for this data OR if it's currently selected
-            ApplicationManager.getApplication().invokeLater(() -> {
-                boolean shouldDisplay = false;
+            // Check if we should display this data
+            boolean shouldDisplay = false;
+            String requestKey = alias + ":Record";
+            
+            // Check if we have a pending request for this data
+            if (pendingRequests.containsKey(requestKey)) {
+                shouldDisplay = true;
+                pendingRequests.remove(requestKey);
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying record for " + alias + " (pending request fulfilled)");
                 
-                // Check if we're waiting for this specific data
+                // Also clear waiting state if it matches
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Record".equals(waitingForDataType)) {
-                    shouldDisplay = true;
-                    // Clear waiting state
                     waitingForWorkarea = null;
                     waitingForDataType = null;
                 }
-                // Or if it's currently selected
-                else if (isCurrentlySelected(alias, "Record")) {
-                    shouldDisplay = true;
-                }
-                
-                if (shouldDisplay) {
-                    displayRecordData(workarea, recordData);
-                }
-            });
+            }
+            // Or if it's currently selected
+            else if (isCurrentlySelected(alias, "Record")) {
+                shouldDisplay = true;
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying record for " + alias + " (currently selected)");
+            }
+            
+            if (shouldDisplay) {
+                // Display the data - displayRecordData will handle EDT properly
+                displayRecordData(workarea, recordData);
+            }
         }
         
         /**
@@ -640,6 +719,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 585] Added " + valueCount + " field values to display");
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 586] Total rows in data list: " + data.size());
             tableModel.setData(data);
+            
+            // Force table to repaint
+            detailsTable.repaint();
+            detailsTable.revalidate();
+            
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 588] Set data in table model for " + workarea.getAlias() + 
                 ", table now has " + tableModel.getRowCount() + " rows");
         }
@@ -654,26 +738,32 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 493] onSchemaInfoReceived for " + alias + 
                 ", waiting for: " + waitingForWorkarea + "/" + waitingForDataType);
             
-            // Display if we're waiting for this data OR if it's currently selected
-            ApplicationManager.getApplication().invokeLater(() -> {
-                boolean shouldDisplay = false;
+            // Check if we should display this data
+            boolean shouldDisplay = false;
+            String requestKey = alias + ":Schema";
+            
+            // Check if we have a pending request for this data
+            if (pendingRequests.containsKey(requestKey)) {
+                shouldDisplay = true;
+                pendingRequests.remove(requestKey);
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying schema for " + alias + " (pending request fulfilled)");
                 
-                // Check if we're waiting for this specific data
+                // Also clear waiting state if it matches
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Schema".equals(waitingForDataType)) {
-                    shouldDisplay = true;
-                    // Clear waiting state
                     waitingForWorkarea = null;
                     waitingForDataType = null;
                 }
-                // Or if it's currently selected
-                else if (isCurrentlySelected(alias, "Schema")) {
-                    shouldDisplay = true;
-                }
-                
-                if (shouldDisplay) {
-                    displaySchemaData(workarea, schemaData);
-                }
-            });
+            }
+            // Or if it's currently selected
+            else if (isCurrentlySelected(alias, "Schema")) {
+                shouldDisplay = true;
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying schema for " + alias + " (currently selected)");
+            }
+            
+            if (shouldDisplay) {
+                // Display the data - displaySchemaData will handle EDT properly
+                displaySchemaData(workarea, schemaData);
+            }
         }
         
         /**
@@ -774,6 +864,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             }
             
             tableModel.setData(data);
+            
+            // Force table to repaint
+            detailsTable.repaint();
+            detailsTable.revalidate();
+            
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 707] Displayed " + itemCount + " schema items for " + workarea.getAlias());
         }
     }
