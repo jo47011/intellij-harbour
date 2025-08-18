@@ -2260,7 +2260,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         File file = new File(workingDir, fileName);
         HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying workingDir path: " + file.getAbsolutePath() + ", exists=" + file.exists());
         if (file.exists()) {
-            VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+            VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, false);
             HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file in workingDir: " + (vf != null ? vf.getPath() : "null"));
             return vf;
         }
@@ -2269,7 +2269,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         file = new File(fileName);
         HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying as absolute path: " + file.getAbsolutePath() + ", exists=" + file.exists());
         if (file.exists() && file.isAbsolute()) {
-            VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+            VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, false);
             HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file as absolute: " + (vf != null ? vf.getPath() : "null"));
             return vf;
         }
@@ -2280,7 +2280,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             file = new File(basePath, fileName);
             HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying project base path: " + file.getAbsolutePath() + ", exists=" + file.exists());
             if (file.exists()) {
-                VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+                VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, false);
                 HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file in project base: " + (vf != null ? vf.getPath() : "null"));
                 return vf;
             }
@@ -2291,7 +2291,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             file = new File(runConfig.getWorkingDirectory(), fileName);
             HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying config workingDir: " + file.getAbsolutePath() + ", exists=" + file.exists());
             if (file.exists()) {
-                VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, true);
+                VirtualFile vf = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(file, false);
                 HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Found file in config workingDir: " + (vf != null ? vf.getPath() : "null"));
                 return vf;
             }

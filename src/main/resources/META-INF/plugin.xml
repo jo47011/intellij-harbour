@@ -28,7 +28,7 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
         <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
-                  fieldName="INSTANCE" language="Harbour" extensions="prg;ch;dbf"/>
+                  fieldName="INSTANCE" language="Harbour" extensions="prg;ch"/>
 
         <!-- Language -->
         <lang.parserDefinition language="Harbour"
@@ -108,7 +108,7 @@
         -->
         
         <!-- Cache Initializer to ensure cache service starts early -->
-        <postStartupActivity implementation="org.intellij.sdk.language.HarbourCacheInitializer"/>
+        <projectActivity implementation="org.intellij.sdk.language.HarbourCacheInitializer"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"

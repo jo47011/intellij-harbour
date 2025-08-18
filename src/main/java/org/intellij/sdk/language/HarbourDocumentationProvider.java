@@ -3,6 +3,7 @@ package org.intellij.sdk.language;
 import com.intellij.lang.documentation.AbstractDocumentationProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.ide.BrowserUtil;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.jetbrains.annotations.Nullable;
@@ -18,16 +19,8 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
 
     @Override
     public @Nullable String getQuickNavigateInfo(PsiElement element, PsiElement originalElement) {
-        
-        // Check if we're in hover mode
-        boolean isClick = HarbourExternalDocumentationHandler.isClickMode();
-        
-        if (!isClick) {
-            // During hover, return null to prevent popup
-            return null;
-        }
-        
-        // During click, generate documentation
+        // Always generate documentation for quick navigate
+        // The platform will handle when to show it (Ctrl+Q or navigation)
         return generateDocumentation(element);
     }
 
@@ -37,20 +30,77 @@ public class HarbourDocumentationProvider extends AbstractDocumentationProvider 
     }
 
     private String generateDocumentation(PsiElement element) {
+        // Get proper function/procedure context
+        HarbourFunctionDeclaration function = null;
+        
         // Handle if element is the identifier inside a function declaration
         if (element.getParent() instanceof HarbourFunctionDeclaration) {
-            HarbourFunctionDeclaration function = (HarbourFunctionDeclaration) element.getParent();
-            String doc = "Function: " + function.getName();
-            return doc;
+            function = (HarbourFunctionDeclaration) element.getParent();
         }
-
         // Handle if element is the function declaration itself
-        if (element instanceof HarbourFunctionDeclaration) {
-            HarbourFunctionDeclaration function = (HarbourFunctionDeclaration) element;
-            String doc = "Function: " + function.getName();
-            return doc;
+        else if (element instanceof HarbourFunctionDeclaration) {
+            function = (HarbourFunctionDeclaration) element;
+        }
+        
+        if (function != null) {
+            // Build formatted documentation with HTML for better presentation
+            StringBuilder doc = new StringBuilder();
+            doc.append("<html><body>");
+            doc.append("<b>").append(function.getName()).append("</b><br>");
+            
+            // Add file location
+            PsiFile file = function.getContainingFile();
+            if (file != null) {
+                doc.append("<i>").append(file.getName()).append("</i><br>");
+            }
+            
+            // Add line number
+            int lineNumber = HarbourLogger.calculateLineNumber(function);
+            doc.append("Line: ").append(lineNumber + 1).append("<br>");
+            
+            // Add function text preview (first line)
+            String text = function.getText();
+            if (text != null && !text.isEmpty()) {
+                String firstLine = text.split("\n")[0];
+                if (firstLine.length() > 100) {
+                    firstLine = firstLine.substring(0, 100) + "...";
+                }
+                doc.append("<br><code>").append(firstLine).append("</code>");
+            }
+            
+            doc.append("</body></html>");
+            return doc.toString();
         }
 
+        // For other elements (including external functions), provide enhanced info
+        if (element != null) {
+            String elementText = element.getText();
+            StringBuilder doc = new StringBuilder();
+            doc.append("<html><body>");
+            doc.append("<b>").append(elementText).append("</b><br>");
+            
+            // Check if this looks like a function call
+            if (elementText != null && !elementText.isEmpty()) {
+                // Check if it's likely an external/system function
+                HarbourFunctionClassificationService classifier = element.getProject().getService(HarbourFunctionClassificationService.class);
+                if (classifier != null && classifier.isExternalFunction(elementText)) {
+                    doc.append("<i>External Function</i><br>");
+                    doc.append("<br>No local declaration found.<br>");
+                    doc.append("This function may be a built-in Harbour function<br>");
+                    doc.append("or defined in an external library.");
+                } else {
+                    // It's an internal element without a declaration context
+                    PsiFile file = element.getContainingFile();
+                    if (file != null) {
+                        doc.append("<i>").append(file.getName()).append("</i><br>");
+                    }
+                }
+            }
+            
+            doc.append("</body></html>");
+            return doc.toString();
+        }
+        
         return null;
     }
 

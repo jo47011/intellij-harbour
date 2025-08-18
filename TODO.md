@@ -38,3 +38,9 @@ pls explain where it should show up.
 ----
 
 harbour dbf icon -> always to "Bottom right"
+
+---
+
+check:
+
+fyi the files defined as excluded in the harbour settings should also be discarded from indexing

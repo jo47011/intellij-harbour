@@ -14,6 +14,9 @@ import com.intellij.psi.search.GlobalSearchScope;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.intellij.sdk.language.psi.ClassDeclaration;
+import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.PsiWhiteSpace;
+import org.intellij.sdk.language.psi.HarbourTypes;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
 
@@ -63,6 +66,20 @@ public class HarbourProgressiveIndexer {
 
                             LOG.info("Starting indexing of " + harbourFiles.size() + " Harbour files");
                             HarbourLogger.log("Indexer", "Starting indexing of " + harbourFiles.size() + " Harbour files");
+                            
+                            // Log the list of files to be indexed
+                            StringBuilder fileList = new StringBuilder("Files to index:\n");
+                            int fileCount = 0;
+                            for (VirtualFile file : harbourFiles) {
+                                fileCount++;
+                                fileList.append("  ").append(fileCount).append(". ").append(file.getName())
+                                       .append(" (").append(file.getPath()).append(")\n");
+                                if (fileCount >= 20) {
+                                    fileList.append("  ... and ").append(harbourFiles.size() - 20).append(" more files\n");
+                                    break;
+                                }
+                            }
+                            HarbourLogger.log("Indexer", fileList.toString());
                             
                             // Check cache status
                             HarbourSettings settings = HarbourSettings.getInstance(project);
@@ -193,8 +210,9 @@ public class HarbourProgressiveIndexer {
             }
             
             String fullPath = file.getPath();
-            LOG.info("Processing file " + processed.get() + "/" + totalFiles + ": " + file.getName() + " (" + fullPath + ")");
-            HarbourLogger.log("Indexer", "Processing file " + processed.get() + "/" + totalFiles + ": " + file.getName());
+            int currentFileNum = processed.get() + 1; // Show 1-based numbering
+            LOG.info("Processing file " + currentFileNum + "/" + totalFiles + ": " + file.getName() + " (" + fullPath + ")");
+            HarbourLogger.log("Indexer", "Processing file " + currentFileNum + "/" + totalFiles + ": " + file.getName() + " at " + fullPath);
 
             try {
                 // Must use ReadAction for file operations
@@ -209,12 +227,6 @@ public class HarbourProgressiveIndexer {
                         // Skip binary files
                         if (file.getFileType().isBinary()) {
                             HarbourLogger.log("Indexer", "Skipping binary file: " + file.getName());
-                            return;
-                        }
-                        
-                        // Skip very large files
-                        if (file.getLength() > 2 * 1024 * 1024) { // 2MB
-                            HarbourLogger.warning("Indexer", "Skipping very large file (" + file.getLength() + " bytes): " + file.getName());
                             return;
                         }
 
@@ -235,27 +247,49 @@ public class HarbourProgressiveIndexer {
                         }
 
                         // Get PSI and register functions
+                        HarbourLogger.log("Indexer", "Getting PSI for: " + file.getName());
                         com.intellij.psi.PsiFile psiFile = psiManager.findFile(file);
+                        
                         if (psiFile instanceof HarbourFile harbourFile) {
                             // Add timeout protection for registration
                             long startTime = System.currentTimeMillis();
                             
                             // Register in runtime cache
-                            HarbourLogger.log("Indexer", "Registering functions for: " + file.getName());
-                            referenceService.registerFunctions(harbourFile);
+                            try {
+                                long funcStart = System.currentTimeMillis();
+                                referenceService.registerFunctions(harbourFile);
+                                long funcElapsed = System.currentTimeMillis() - funcStart;
+                                if (funcElapsed > 500) {
+                                    HarbourLogger.warning("Indexer", "SLOW: Function registration took " + funcElapsed + "ms for: " + file.getName());
+                                }
+                                
+                                long procStart = System.currentTimeMillis();
+                                referenceService.registerProcedures(harbourFile);
+                                long procElapsed = System.currentTimeMillis() - procStart;
+                                if (procElapsed > 500) {
+                                    HarbourLogger.warning("Indexer", "SLOW: Procedure registration took " + procElapsed + "ms for: " + file.getName());
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.error("Indexer", "Failed to register for " + file.getName() + ": " + e.getMessage());
+                            }
                             
                             long elapsed = System.currentTimeMillis() - startTime;
                             if (elapsed > 1000) {
-                                HarbourLogger.warning("Indexer", "Slow function registration (" + elapsed + "ms) for: " + file.getName());
+                                HarbourLogger.warning("Indexer", "SLOW: Total registration took " + elapsed + "ms for: " + file.getName());
                             }
-                            
-                            HarbourLogger.log("Indexer", "Registering procedures for: " + file.getName());
-                            referenceService.registerProcedures(harbourFile);
                             
                             // Update persistent cache if enabled
                             if (settings.isIndexCacheEnabled() && indexCache != null) {
-                                updatePersistentCache(harbourFile, file, indexCache);
+                                HarbourLogger.log("Indexer", "Updating cache for: " + file.getName());
+                                try {
+                                    updatePersistentCache(harbourFile, file, indexCache);
+                                    HarbourLogger.log("Indexer", "Cache updated for: " + file.getName());
+                                } catch (Exception e) {
+                                    HarbourLogger.error("Indexer", "Failed to update cache for " + file.getName() + ": " + e.getMessage());
+                                }
                             }
+                        } else {
+                            HarbourLogger.log("Indexer", "File is not a HarbourFile: " + file.getName());
                         }
                     } catch (Exception e) {
                         LOG.warn("Error processing file in read action: " + file.getName(), e);
@@ -266,6 +300,13 @@ public class HarbourProgressiveIndexer {
                 int count = processed.incrementAndGet();
                 indicator.setFraction((double) count / totalFiles);
                 indicator.setText2("Processing " + file.getName() + " (" + count + "/" + totalFiles + ")");
+                
+                // Log progress every 10 files or at important milestones
+                if (count % 10 == 0 || count == 1 || count == totalFiles) {
+                    HarbourLogger.log("Indexer", "Progress: " + count + "/" + totalFiles + " files indexed");
+                }
+                
+                HarbourLogger.log("Indexer", "Completed processing file " + (count) + "/" + totalFiles + ": " + file.getName());
 
             } catch (Exception e) {
                 LOG.warn("Error indexing file: " + file.getName(), e);
@@ -423,9 +464,13 @@ public class HarbourProgressiveIndexer {
                             referenceService.registerProcedures(harbourFile);
                             referenceService.registerClasses(harbourFile);
 
-                            // Update persistent cache
-                            HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
-                            updatePersistentCache(harbourFile, file, indexCache);
+                            // Update persistent cache if enabled (settings already defined above)
+                            if (settings.isIndexCacheEnabled()) {
+                                HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+                                if (indexCache != null) {
+                                    updatePersistentCache(harbourFile, file, indexCache);
+                                }
+                            }
 
                             // Ensure token-based references are processed
                             HarbourTokenTypeExtension.processFile(psiFile);
@@ -447,55 +492,223 @@ public class HarbourProgressiveIndexer {
         try {
             List<HarbourIndexCache.CacheEntry> entries = new ArrayList<>();
             
-            // Extract functions
-            Collection<HarbourFunctionDeclaration> functions = PsiTreeUtil.findChildrenOfType(harbourFile, HarbourFunctionDeclaration.class);
-            for (HarbourFunctionDeclaration function : functions) {
-                String name = function.getName();
-                if (name != null && !name.isEmpty()) {
-                    com.intellij.openapi.editor.Document document = com.intellij.psi.PsiDocumentManager.getInstance(harbourFile.getProject()).getDocument(harbourFile);
-                    if (document != null) {
-                        int lineNumber = document.getLineNumber(function.getTextOffset()) + 1;
-                        String signature = function.getText().split("\\n")[0]; // First line as signature
+            // Log what we're looking for
+            HarbourLogger.log("Indexer", "Looking for functions in " + file.getName());
+            
+            // Since PSI classes aren't generated, scan for FUNCTION/PROCEDURE tokens directly
+            com.intellij.openapi.editor.Document document = com.intellij.psi.PsiDocumentManager.getInstance(harbourFile.getProject()).getDocument(harbourFile);
+            if (document == null) {
+                HarbourLogger.log("Indexer", "No document found for " + file.getName());
+                return;
+            }
+            
+            // Parse file text to find functions and procedures
+            String text = harbourFile.getText();
+            String[] lines = text.split("\n");
+            
+            boolean inBlockComment = false;
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
+                String trimmedLine = line.trim();
+                
+                // Skip empty lines
+                if (trimmedLine.isEmpty()) {
+                    continue;
+                }
+                
+                // Check for block comment start/end
+                if (trimmedLine.contains("/*")) {
+                    inBlockComment = true;
+                }
+                if (inBlockComment) {
+                    if (trimmedLine.contains("*/")) {
+                        inBlockComment = false;
+                    }
+                    continue;
+                }
+                
+                // Skip line comments (// or * at start of line or &&)
+                if (trimmedLine.startsWith("//") || trimmedLine.startsWith("*") || trimmedLine.startsWith("&&")) {
+                    continue;
+                }
+                
+                // Skip preprocessor directives
+                if (trimmedLine.startsWith("#")) {
+                    continue;
+                }
+                
+                // Remove inline comments before processing
+                int commentPos = trimmedLine.indexOf("//");
+                if (commentPos == -1) {
+                    commentPos = trimmedLine.indexOf("&&");
+                }
+                if (commentPos > 0) {
+                    trimmedLine = trimmedLine.substring(0, commentPos).trim();
+                }
+                
+                // Skip if line is within string literals (simple check)
+                // Count quotes - if odd number, we're likely in a string
+                long quoteCount = trimmedLine.chars().filter(ch -> ch == '"' || ch == '\'').count();
+                if (quoteCount % 2 != 0) {
+                    continue;
+                }
+                
+                String upperLine = trimmedLine.toUpperCase();
+                
+                // Check for FUNCTION declaration (must be at start of line)
+                if (upperLine.startsWith("FUNCTION ") || upperLine.startsWith("STATIC FUNCTION ")) {
+                    String name = extractFunctionName(trimmedLine);
+                    if (name != null && isValidIdentifier(name)) {
                         entries.add(new HarbourIndexCache.CacheEntry(
                             name,
                             file.getPath(),
-                            lineNumber,
-                            signature,
-                            function.getText().toUpperCase().startsWith("PROCEDURE") ? 
-                                HarbourIndexCache.EntryType.PROCEDURE : 
-                                HarbourIndexCache.EntryType.FUNCTION
+                            i + 1, // Line number (1-based)
+                            trimmedLine,
+                            HarbourIndexCache.EntryType.FUNCTION
                         ));
+                        HarbourLogger.log("Indexer", "Found function: " + name + " at line " + (i + 1));
+                    }
+                }
+                // Check for PROCEDURE declaration (must be at start of line)
+                else if (upperLine.startsWith("PROCEDURE ") || upperLine.startsWith("STATIC PROCEDURE ")) {
+                    String name = extractProcedureName(trimmedLine);
+                    if (name != null && isValidIdentifier(name)) {
+                        entries.add(new HarbourIndexCache.CacheEntry(
+                            name,
+                            file.getPath(),
+                            i + 1, // Line number (1-based)
+                            trimmedLine,
+                            HarbourIndexCache.EntryType.PROCEDURE
+                        ));
+                        HarbourLogger.log("Indexer", "Found procedure: " + name + " at line " + (i + 1));
+                    }
+                }
+                // Check for CLASS declaration (must be at start of line)
+                else if (upperLine.startsWith("CLASS ") || upperLine.startsWith("CREATE CLASS ")) {
+                    String name = extractClassName(trimmedLine);
+                    if (name != null && isValidIdentifier(name)) {
+                        entries.add(new HarbourIndexCache.CacheEntry(
+                            name,
+                            file.getPath(),
+                            i + 1, // Line number (1-based)
+                            trimmedLine,
+                            HarbourIndexCache.EntryType.CLASS
+                        ));
+                        HarbourLogger.log("Indexer", "Found class: " + name + " at line " + (i + 1));
                     }
                 }
             }
             
-            // Extract classes
-            Collection<ClassDeclaration> classes = PsiTreeUtil.findChildrenOfType(harbourFile, ClassDeclaration.class);
-            for (ClassDeclaration classDecl : classes) {
-                String name = classDecl.getName();
-                if (name != null && !name.isEmpty()) {
-                    com.intellij.openapi.editor.Document document = com.intellij.psi.PsiDocumentManager.getInstance(harbourFile.getProject()).getDocument(harbourFile);
-                    if (document != null) {
-                        int lineNumber = document.getLineNumber(classDecl.getTextOffset()) + 1;
-                        String signature = classDecl.getText().split("\\n")[0]; // First line as signature
-                        entries.add(new HarbourIndexCache.CacheEntry(
-                            name,
-                            file.getPath(),
-                            lineNumber,
-                            signature,
-                            HarbourIndexCache.EntryType.CLASS
-                        ));
-                    }
-                }
-            }
+            HarbourLogger.log("Indexer", "Total entries found: " + entries.size());
             
             // Update cache
             if (!entries.isEmpty()) {
                 cache.updateFileCache(file, entries);
                 LOG.info("Updated persistent cache for file: " + file.getName() + " with " + entries.size() + " entries");
+                HarbourLogger.log("Indexer", "Added " + entries.size() + " entries to cache for " + file.getName());
+            } else {
+                HarbourLogger.log("Indexer", "No entries found to cache for " + file.getName());
             }
         } catch (Exception e) {
             LOG.warn("Error updating persistent cache for file: " + file.getName(), e);
         }
+    }
+    
+    /**
+     * Extract function name from a line containing FUNCTION declaration.
+     */
+    private static String extractFunctionName(String line) {
+        String[] parts = line.split("\\s+");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].equalsIgnoreCase("FUNCTION") && i + 1 < parts.length) {
+                String name = parts[i + 1];
+                // Remove parentheses and parameters if present
+                int parenIndex = name.indexOf('(');
+                if (parenIndex > 0) {
+                    name = name.substring(0, parenIndex);
+                }
+                return name;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Extract procedure name from a line containing PROCEDURE declaration.
+     */
+    private static String extractProcedureName(String line) {
+        String[] parts = line.split("\\s+");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].equalsIgnoreCase("PROCEDURE") && i + 1 < parts.length) {
+                String name = parts[i + 1];
+                // Remove parentheses and parameters if present
+                int parenIndex = name.indexOf('(');
+                if (parenIndex > 0) {
+                    name = name.substring(0, parenIndex);
+                }
+                return name;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Extract class name from a line containing CLASS declaration.
+     */
+    private static String extractClassName(String line) {
+        String[] parts = line.split("\\s+");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].equalsIgnoreCase("CLASS") && i + 1 < parts.length) {
+                String name = parts[i + 1];
+                // Remove INHERIT or other keywords if present
+                String[] nameTokens = name.split("\\s+");
+                if (nameTokens.length > 0) {
+                    name = nameTokens[0];
+                }
+                // Handle cases like "CLASS MyClass INHERIT BaseClass"
+                if (name.equalsIgnoreCase("INHERIT") || name.equalsIgnoreCase("FROM")) {
+                    return null;
+                }
+                return name;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Check if a name is a valid Harbour identifier.
+     * Valid identifiers start with letter or underscore, followed by letters, digits, or underscores.
+     */
+    private static boolean isValidIdentifier(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        
+        // Check first character
+        char firstChar = name.charAt(0);
+        if (!Character.isLetter(firstChar) && firstChar != '_') {
+            return false;
+        }
+        
+        // Check remaining characters
+        for (int i = 1; i < name.length(); i++) {
+            char ch = name.charAt(i);
+            if (!Character.isLetterOrDigit(ch) && ch != '_') {
+                return false;
+            }
+        }
+        
+        // Reject if it's a Harbour keyword
+        String upper = name.toUpperCase();
+        if (upper.equals("IF") || upper.equals("ELSE") || upper.equals("ENDIF") || 
+            upper.equals("DO") || upper.equals("WHILE") || upper.equals("FOR") ||
+            upper.equals("NEXT") || upper.equals("RETURN") || upper.equals("LOCAL") ||
+            upper.equals("STATIC") || upper.equals("PRIVATE") || upper.equals("PUBLIC") ||
+            upper.equals("NIL") || upper.equals("END") || upper.equals("CASE") ||
+            upper.equals("OTHERWISE") || upper.equals("SWITCH") || upper.equals("EXIT")) {
+            return false;
+        }
+        
+        return true;
     }
 }

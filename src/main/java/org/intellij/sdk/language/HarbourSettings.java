@@ -80,7 +80,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     private int maxNavigationResults = 20; // Maximum results to preload initially (with "load all" button for more)
     
     // Index cache settings
-    private boolean indexCacheEnabled = true; // Enable persistent index cache
+    private boolean indexCacheEnabled = true; // Enable persistent index cache for performance
     private int indexCacheMaxSizeMB = 10; // Maximum cache size in MB
     private boolean indexCacheAutoCleanup = true; // Enable automatic cache cleanup
 

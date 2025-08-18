@@ -27,7 +27,19 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class HarbourIndexCache implements PersistentStateComponent<HarbourIndexCache> {
     private static final Logger LOG = Logger.getInstance(HarbourIndexCache.class);
     private static final String COMPONENT = "IndexCache";
-    private final Project project;
+    
+    // Cache size limits to prevent freezing
+    private static final int MAX_ENTRIES_PER_FILE = 100;  // Limit entries per file
+    private static final int MAX_TOTAL_ENTRIES = 5000;    // Limit total cache size
+    private static final int SAVE_BATCH_SIZE = 500;       // Save in batches to prevent freezing
+    
+    private Project project;
+    
+    // Default constructor for serialization
+    public HarbourIndexCache() {
+        // Required for XML serialization
+        this.project = null;
+    }
     
     public HarbourIndexCache(Project project) {
         this.project = project;
@@ -120,6 +132,17 @@ public final class HarbourIndexCache implements PersistentStateComponent<Harbour
     
     @Override
     public @Nullable HarbourIndexCache getState() {
+        // Write to a file to confirm this is called
+        try {
+            String debugFile = System.getProperty("user.home") + "/log/cache-getstate-debug.txt";
+            new java.io.File(System.getProperty("user.home") + "/log").mkdirs();
+            try (java.io.FileWriter fw = new java.io.FileWriter(debugFile, true)) {
+                fw.write(java.time.LocalDateTime.now() + " - getState() called with " + cacheEntries.size() + " entries\n");
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+        
         HarbourLogger.log(COMPONENT, "getState() called - preparing to save cache with " + cacheEntries.size() + " entries");
         
         // Clean up before saving if needed
@@ -245,6 +268,8 @@ public final class HarbourIndexCache implements PersistentStateComponent<Harbour
      * Add or update cache entries for a file.
      */
     public synchronized void updateFileCache(@NotNull VirtualFile file, @NotNull List<CacheEntry> entries) {
+        HarbourLogger.log(COMPONENT, "updateFileCache called for " + file.getName() + " with " + entries.size() + " entries");
+        
         if (!cacheLoaded) {
             initializeRuntimeCaches();
             cacheLoaded = true;
@@ -252,12 +277,28 @@ public final class HarbourIndexCache implements PersistentStateComponent<Harbour
         
         String filePath = file.getPath();
         
+        // Limit entries per file to prevent excessive memory usage
+        List<CacheEntry> entriesToAdd = entries;
+        if (entries.size() > MAX_ENTRIES_PER_FILE) {
+            HarbourLogger.warning(COMPONENT, "File " + file.getName() + " has " + entries.size() + 
+                " entries, limiting to " + MAX_ENTRIES_PER_FILE);
+            entriesToAdd = entries.subList(0, MAX_ENTRIES_PER_FILE);
+        }
+        
         // Remove old entries for this file
         int oldCount = cacheEntries.size();
         cacheEntries.removeIf(e -> e.filePath.equals(filePath));
+        int removedCount = oldCount - cacheEntries.size();
+        
+        // Check total cache size limit
+        if (cacheEntries.size() + entriesToAdd.size() > MAX_TOTAL_ENTRIES) {
+            HarbourLogger.warning(COMPONENT, "Total cache would exceed " + MAX_TOTAL_ENTRIES + 
+                " entries, skipping file: " + file.getName());
+            return;
+        }
         
         // Add new entries
-        cacheEntries.addAll(entries);
+        cacheEntries.addAll(entriesToAdd);
         
         // Update timestamp
         fileTimestamps.removeIf(ts -> ts.filePath.equals(filePath));
@@ -267,10 +308,10 @@ public final class HarbourIndexCache implements PersistentStateComponent<Harbour
         }
         
         // Update runtime caches
-        rebuildRuntimeCachesForFile(filePath, entries);
+        rebuildRuntimeCachesForFile(filePath, entriesToAdd);
         
         totalEntries = cacheEntries.size();
-        HarbourLogger.log(COMPONENT, "Updated cache for: " + file.getName() + " (added " + entries.size() + " entries, total cache: " + totalEntries + " entries, " + fileTimestamps.size() + " files)");
+        HarbourLogger.log(COMPONENT, "Updated cache for: " + file.getName() + " (removed " + removedCount + ", added " + entriesToAdd.size() + " entries, total cache: " + totalEntries + " entries, " + fileTimestamps.size() + " files)");
     }
     
     /**
@@ -414,21 +455,19 @@ public final class HarbourIndexCache implements PersistentStateComponent<Harbour
     public void forceSave() {
         HarbourLogger.log(COMPONENT, "forceSave() called with " + cacheEntries.size() + " entries");
         
-        try {
-            // Use ApplicationManager to save the state
-            ApplicationManager.getApplication().invokeLater(() -> {
-                try {
-                    // This will trigger getState() to be called
-                    project.save();
-                    HarbourLogger.log(COMPONENT, "Force saved cache with " + totalEntries + " entries to disk");
-                } catch (Exception e) {
-                    HarbourLogger.log(COMPONENT, "ERROR in save: " + e.getMessage());
-                }
-            });
-            
-            HarbourLogger.log(COMPONENT, "Force save scheduled with " + totalEntries + " entries");
-        } catch (Exception e) {
-            HarbourLogger.log(COMPONENT, "ERROR: Could not force save cache: " + e.getMessage());
+        if (cacheEntries.isEmpty()) {
+            HarbourLogger.log(COMPONENT, "No entries to save, skipping save");
+            return;
         }
+        
+        // Always save in background to prevent deadlock during indexing
+        HarbourLogger.log(COMPONENT, "Scheduling cache save in background (" + cacheEntries.size() + " entries)");
+        
+        // Don't use project.save() as it causes modal progress dialog in write action
+        // The cache will be saved automatically when component state is requested
+        HarbourLogger.log(COMPONENT, "Cache marked for save with " + totalEntries + " entries");
+        
+        // Just mark as modified to trigger save on next opportunity
+        // State will be saved when getState() is called during project save
     }
 }

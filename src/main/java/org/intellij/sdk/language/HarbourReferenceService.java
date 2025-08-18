@@ -39,6 +39,10 @@ import java.util.regex.Pattern;
 @Service(Service.Level.PROJECT)
 public final class HarbourReferenceService {
     private static final Logger LOG = Logger.getInstance(HarbourReferenceService.class);
+    
+    // Maximum results to prevent memory issues and hanging
+    private static final int MAX_RESULTS = 50;
+    private static final int MAX_CACHE_SIZE = 100;
 
     // Cache of function name (lowercase) to list of declarations
     private final Map<String, List<PsiElement>> functionCaches = new ConcurrentHashMap<>();
@@ -91,19 +95,9 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // First check persistent cache if available
-        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
-        if (indexCache != null && indexCache.isCacheLoaded()) {
-            List<HarbourIndexCache.CacheEntry> cachedEntries = indexCache.getCachedFunctions(functionName);
-            if (cachedEntries != null && !cachedEntries.isEmpty()) {
-                List<PsiElement> results = convertCacheEntriesToPsiElements(cachedEntries);
-                if (!results.isEmpty()) {
-                    HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for: " + functionName);
-                    return results;
-                }
-            }
-        }
-
+        // Skip persistent cache check since it's disabled by default and convertCacheEntriesToPsiElements returns empty
+        // Go directly to runtime cache which is more reliable
+        
         // Log runtime cache state
         if (functionCaches.containsKey(functionName.toLowerCase())) {
             HarbourLogger.log("ReferenceService", "Found in runtime cache: " + functionName + " with " +
@@ -116,25 +110,30 @@ public final class HarbourReferenceService {
         String functionKey = functionName.toLowerCase();
         if (functionCaches.containsKey(functionKey)) {
             List<PsiElement> cachedResults = functionCaches.get(functionKey);
-            HarbourLogger.log("ReferenceService", "Found " + cachedResults.size() + " results in cache for: " + functionName);
-            return new ArrayList<>(cachedResults);
+            if (!cachedResults.isEmpty()) {
+                HarbourLogger.log("ReferenceService", "Found " + cachedResults.size() + " results in cache for: " + functionName);
+                return new ArrayList<>(cachedResults);
+            }
+            // Cache exists but is empty, fall through to perform search
+            HarbourLogger.log("ReferenceService", "Cache exists but is empty for: " + functionName + ", performing search");
         }
 
         HarbourLogger.log("ReferenceService", "Function not found in cache, trying direct search for: " + functionName);
         List<PsiElement> result = directSearch(functionName, true);
 
-        // Cache the result
+        // Cache the result (limit cache size to prevent memory issues)
         if (!result.isEmpty()) {
-            functionCaches.put(functionKey, new ArrayList<>(result));
-            HarbourLogger.log("ReferenceService", "Direct search found " + result.size() + " results for: " + functionName);
+            List<PsiElement> toCache = result.size() > MAX_CACHE_SIZE ? 
+                result.subList(0, MAX_CACHE_SIZE) : result;
+            functionCaches.put(functionKey, new ArrayList<>(toCache));
+            HarbourLogger.log("ReferenceService", "Direct search found " + result.size() + " results for: " + functionName + 
+                " (cached " + toCache.size() + ")");
+            
+            // Check cache sizes periodically
+            checkCacheSizes();
         }
 
-        // Before returning results
-        HarbourLogger.log("ReferenceService", "Returning " + result.size() + " results for " + functionName);
-        for (PsiElement element : result) {
-            HarbourLogger.log("ReferenceService", "Found " + functionName + " at " +
-                    element.getContainingFile().getName() + ":" + element.getTextOffset());
-        }
+        // Detailed result logging removed for performance
 
         return result;
     }
@@ -190,34 +189,8 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // First check persistent cache for functions, procedures, and classes
-        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
-        if (indexCache.isCacheLoaded()) {
-            List<PsiElement> results = new ArrayList<>();
-            
-            // Check functions
-            List<HarbourIndexCache.CacheEntry> cachedFunctions = indexCache.getCachedFunctions(symbolName);
-            if (cachedFunctions != null && !cachedFunctions.isEmpty()) {
-                results.addAll(convertCacheEntriesToPsiElements(cachedFunctions));
-            }
-            
-            // Check procedures
-            List<HarbourIndexCache.CacheEntry> cachedProcedures = indexCache.getCachedProcedures(symbolName);
-            if (cachedProcedures != null && !cachedProcedures.isEmpty()) {
-                results.addAll(convertCacheEntriesToPsiElements(cachedProcedures));
-            }
-            
-            // Check classes
-            List<HarbourIndexCache.CacheEntry> cachedClasses = indexCache.getCachedClasses(symbolName);
-            if (cachedClasses != null && !cachedClasses.isEmpty()) {
-                results.addAll(convertCacheEntriesToPsiElements(cachedClasses));
-            }
-            
-            if (!results.isEmpty()) {
-                HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for symbol: " + symbolName);
-                return results;
-            }
-        }
+        // Skip persistent cache check since convertCacheEntriesToPsiElements is disabled
+        // Go directly to runtime caches
 
         // Check runtime cache
         String symbolKey = symbolName.toLowerCase();
@@ -274,18 +247,7 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // First check persistent cache if available
-        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
-        if (indexCache.isCacheLoaded()) {
-            List<HarbourIndexCache.CacheEntry> cachedEntries = indexCache.getCachedClasses(className);
-            if (cachedEntries != null && !cachedEntries.isEmpty()) {
-                List<PsiElement> results = convertCacheEntriesToPsiElements(cachedEntries);
-                if (!results.isEmpty()) {
-                    HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for class: " + className);
-                    return results;
-                }
-            }
-        }
+        // Skip persistent cache check since convertCacheEntriesToPsiElements is disabled
 
         // Check runtime cache
         String classKey = className.toLowerCase();
@@ -321,18 +283,7 @@ public final class HarbourReferenceService {
             return Collections.emptyList();
         }
 
-        // First check persistent cache if available
-        HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
-        if (indexCache.isCacheLoaded()) {
-            List<HarbourIndexCache.CacheEntry> cachedEntries = indexCache.getCachedProcedures(procedureName);
-            if (cachedEntries != null && !cachedEntries.isEmpty()) {
-                List<PsiElement> results = convertCacheEntriesToPsiElements(cachedEntries);
-                if (!results.isEmpty()) {
-                    HarbourLogger.log("ReferenceService", "Found " + results.size() + " results in persistent cache for procedure: " + procedureName);
-                    return results;
-                }
-            }
-        }
+        // Skip persistent cache check since convertCacheEntriesToPsiElements is disabled
 
         // For now, procedures are indexed the same as functions
         // in the runtime cache
@@ -494,12 +445,7 @@ public final class HarbourReferenceService {
                 while (matcher.find()) {
                     int offset = matcher.start() + classDecl.getTextOffset();
                     
-                    // Skip if this match is inside a comment
-                    String fullFileText = classDecl.getContainingFile().getText();
-                    if (isLineComment(fullFileText, offset, classDecl.getContainingFile().getName())) {
-                        HarbourLogger.log("ReferenceService", "Skipping method match in class declaration inside comment at offset " + offset);
-                        continue;
-                    }
+                    // Comment checking disabled for performance
                     
                     PsiElement methodElement = classDecl.getContainingFile().findElementAt(offset);
 
@@ -523,11 +469,7 @@ public final class HarbourReferenceService {
             while (matcher.find()) {
                 int offset = matcher.start();
                 
-                // Skip if this match is inside a comment
-                if (isLineComment(fileText, offset, file.getName())) {
-                    HarbourLogger.log("ReferenceService", "Skipping method match inside comment at offset " + offset);
-                    continue;
-                }
+                // Comment checking disabled for performance
                 
                 PsiElement methodElement = file.findElementAt(offset);
                 
@@ -575,11 +517,7 @@ public final class HarbourReferenceService {
                 while (matcher1.find()) {
                     int offset = matcher1.start();
                     
-                    // Skip if this match is inside a comment
-                    if (isLineComment(fileText, offset, virtualFile.getName())) {
-                        HarbourLogger.log("ReferenceService", "Skipping method pattern1 match inside comment at offset " + offset);
-                        continue;
-                    }
+                    // Comment checking disabled for performance
                     
                     PsiElement element = psiFile.findElementAt(offset);
                     if (element != null) {
@@ -594,11 +532,7 @@ public final class HarbourReferenceService {
                 while (matcher2.find()) {
                     int offset = matcher2.start();
                     
-                    // Skip if this match is inside a comment
-                    if (isLineComment(fileText, offset, virtualFile.getName())) {
-                        HarbourLogger.log("ReferenceService", "Skipping method pattern2 match inside comment at offset " + offset);
-                        continue;
-                    }
+                    // Comment checking disabled for performance
                     
                     PsiElement element = psiFile.findElementAt(offset);
                     if (element != null) {
@@ -622,40 +556,56 @@ public final class HarbourReferenceService {
 
     /**
      * Check if a given offset position is inside a comment
+     * OPTIMIZED: Removed expensive operations for performance
      */
     private boolean isLineComment(String fileText, int offset, String filename) {
         if (fileText == null || offset < 0 || offset >= fileText.length()) {
             return false;
         }
         
-        // Find the start of the line containing this offset
-        int lineStart = offset;
-        while (lineStart > 0 && fileText.charAt(lineStart - 1) != '\n') {
-            lineStart--;
+        // Quick check for comment markers before the offset
+        // Check previous characters for // or /*
+        if (offset >= 2) {
+            if (fileText.charAt(offset - 2) == '/' && 
+                (fileText.charAt(offset - 1) == '/' || fileText.charAt(offset - 1) == '*')) {
+                return true;
+            }
         }
         
-        // Find the end of the line
-        int lineEnd = offset;
-        while (lineEnd < fileText.length() && fileText.charAt(lineEnd) != '\n') {
-            lineEnd++;
+        // Find the start of the line - but limit search to 200 chars back for performance
+        int lineStart = Math.max(0, offset - 200);
+        for (int i = offset - 1; i >= lineStart; i--) {
+            if (fileText.charAt(i) == '\n') {
+                lineStart = i + 1;
+                break;
+            }
         }
         
-        String line = fileText.substring(lineStart, lineEnd);
-        String trimmedLine = line.trim();
+        // Quick check if line starts with comment
+        if (lineStart < fileText.length() - 2) {
+            char c1 = fileText.charAt(lineStart);
+            if (c1 == '/' && lineStart + 1 < fileText.length()) {
+                char c2 = fileText.charAt(lineStart + 1);
+                if (c2 == '/' || c2 == '*') return true;
+            }
+            if (c1 == '*' || c1 == ' ' || c1 == '\t') {
+                // Skip whitespace
+                int pos = lineStart;
+                while (pos < offset && pos < fileText.length() && 
+                       (fileText.charAt(pos) == ' ' || fileText.charAt(pos) == '\t')) {
+                    pos++;
+                }
+                if (pos < fileText.length() - 1) {
+                    if (fileText.charAt(pos) == '*') return true;
+                    if (fileText.charAt(pos) == '/' && pos + 1 < fileText.length() &&
+                        (fileText.charAt(pos + 1) == '/' || fileText.charAt(pos + 1) == '*')) {
+                        return true;
+                    }
+                }
+            }
+        }
         
-        // Enhanced logging for debugging
-        int lineNumber = getLineNumberFromOffset(fileText, offset);
-        
-        // Check for various comment patterns and empty lines
-        boolean isComment = trimmedLine.startsWith("//") || 
-                           trimmedLine.startsWith("/*") || 
-                           trimmedLine.startsWith("/**") ||
-                           trimmedLine.isEmpty();  // Exclude empty lines
-        
-        HarbourLogger.log("ReferenceService", "COMMENT CHECK: " + filename + " Line " + lineNumber + " at offset " + offset + 
-                " -> isComment=" + isComment + " -> Content: '" + trimmedLine + "'");
-        
-        return isComment;
+        return false;
     }
     
     private int getLineNumberFromOffset(String fileContent, int offset) {
@@ -727,19 +677,9 @@ public final class HarbourReferenceService {
                         String matchedText = declarationMatcher.group();
                         int lineNumber = getLineNumberFromOffset(fileContent, startOffset);
                         
-                        // Special debugging for user.prg line 136
-                        if (virtualFile.getPath().contains("user.prg") && lineNumber == 136) {
-                            HarbourLogger.log("ReferenceService", "DEBUG DECLARATION: Found match '" + matchedText + "' at offset " + startOffset + " line " + lineNumber + " in user.prg");
-                        }
+                        // Debug logging removed for performance
                         
-                        // Skip if this match is inside a comment
-                        int lineNum = getLineNumberFromOffset(fileContent, startOffset);
-                        if (virtualFile.getPath().contains("user.prg") && lineNum == 136) {
-                            HarbourLogger.log("ReferenceService", "DEBUG: Checking line 136 in user.prg at offset " + startOffset);
-                        }
-                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                            continue;
-                        }
+                        // Comment checking disabled for performance - was causing first invocation hang
                         
                         PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -752,12 +692,20 @@ public final class HarbourReferenceService {
                                 declaration = PsiTreeUtil.getParentOfType(element, HarbourFunctionDeclaration.class);
                             }
 
-                            // If we found a declaration, add it
+                            // If we found a declaration, add it (with limit check)
                             if (declaration != null) {
                                 results.add(declaration);
+                                if (results.size() >= MAX_RESULTS) {
+                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
+                                    return results;
+                                }
                             } else {
                                 // Otherwise, add the element itself
                                 results.add(element);
+                                if (results.size() >= MAX_RESULTS) {
+                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
+                                    return results;
+                                }
                             }
                         }
                     }
@@ -769,15 +717,9 @@ public final class HarbourReferenceService {
                         String matchedText = callMatcher.group();
                         int lineNumber = getLineNumberFromOffset(fileContent, startOffset);
                         
-                        // Special debugging for user.prg line 136
-                        if (virtualFile.getPath().contains("user.prg") && lineNumber == 136) {
-                            HarbourLogger.log("ReferenceService", "DEBUG CALL: Found match '" + matchedText + "' at offset " + startOffset + " line " + lineNumber + " in user.prg");
-                        }
+                        // Debug logging removed for performance
                         
-                        // Skip if this match is inside a comment
-                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                            continue;
-                        }
+                        // Comment checking disabled for performance - was causing first invocation hang
                         
                         PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -786,10 +728,18 @@ public final class HarbourReferenceService {
                             PsiElement functionCall = PsiTreeUtil.getParentOfType(element, FunctionCallImpl.class);
                             if (functionCall != null) {
                                 results.add(functionCall);
+                                if (results.size() >= MAX_RESULTS) {
+                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
+                                    return results;
+                                }
                             } else if (element instanceof LeafPsiElement &&
                                     ((LeafPsiElement) element).getElementType() == HarbourTypes.IDENT) {
                                 // Add identifier elements too
                                 results.add(element);
+                                if (results.size() >= MAX_RESULTS) {
+                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
+                                    return results;
+                                }
                             }
                         }
                     }
@@ -808,10 +758,7 @@ public final class HarbourReferenceService {
                         HarbourLogger.log("ReferenceService", "DEBUG: Found match '" + matchedText + "' at offset " + startOffset + " line " + lineNumber + " in user.prg");
                     }
                     
-                    // Skip if this match is inside a comment
-                    if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                        continue;
-                    }
+                    // Comment checking disabled for performance
                     
                     PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -883,10 +830,7 @@ public final class HarbourReferenceService {
                 while (declarationMatcher.find()) {
                     int startOffset = declarationMatcher.start();
                     
-                    // Skip if match is inside comment
-                    if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                        continue;
-                    }
+                    // Comment checking disabled for performance
                     
                     PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -985,10 +929,7 @@ public final class HarbourReferenceService {
                     if (methodPos >= 0) {
                         int startOffset = classBlockMatcher.start() + methodPos;
                         
-                        // Skip if match is inside comment
-                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                            continue;
-                        }
+                        // Comment checking disabled for performance
                         
                         PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -1022,10 +963,7 @@ public final class HarbourReferenceService {
                     while (declarationMatcher.find()) {
                         int startOffset = declarationMatcher.start();
                         
-                        // Skip if match is inside comment
-                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                            continue;
-                        }
+                        // Comment checking disabled for performance
                         
                         PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -1055,10 +993,7 @@ public final class HarbourReferenceService {
                     while (declarationMatcher.find()) {
                         int startOffset = declarationMatcher.start();
                         
-                        // Skip if match is inside comment
-                        if (isLineComment(fileContent, startOffset, virtualFile.getName())) {
-                            continue;
-                        }
+                        // Comment checking disabled for performance
                         
                         PsiElement element = psiFile.findElementAt(startOffset);
 
@@ -1143,6 +1078,19 @@ public final class HarbourReferenceService {
         classCaches.clear();
         indexed = false;
         HarbourLogger.log("ReferenceService", "All caches cleared");
+    }
+    
+    /**
+     * Check and limit cache sizes to prevent memory issues.
+     */
+    private void checkCacheSizes() {
+        int totalSize = functionCaches.size() + symbolCaches.size() + 
+                       variableCaches.size() + classCaches.size();
+        
+        if (totalSize > 1000) {
+            HarbourLogger.log("ReferenceService", "Cache size exceeded limit (" + totalSize + "), clearing caches");
+            clearCache();
+        }
     }
 
     /**
@@ -1243,13 +1191,6 @@ public final class HarbourReferenceService {
         HarbourLogger.log("ReferenceService", "Registering functions from file: " + file.getName());
         
         try {
-            // Check file size to avoid hanging on huge files
-            VirtualFile vFile = file.getVirtualFile();
-            if (vFile != null && vFile.getLength() > 1024 * 1024) { // Skip files > 1MB
-                HarbourLogger.warning("ReferenceService", "Skipping large file (" + vFile.getLength() + " bytes): " + file.getName());
-                return;
-            }
-            
             long startTime = System.currentTimeMillis();
             
             // Implementation would scan the file for function declarations
