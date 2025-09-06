@@ -1,6 +1,7 @@
 package org.intellij.sdk.language;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.*;
 import org.jetbrains.annotations.NotNull;
@@ -18,11 +19,14 @@ public class HarbourDebuggerValue extends XValue {
     private final String type;
     private final String value;
     private final List<HarbourDebuggerValue> children;
-    private String scope;  // For arrays: store scope (LOCALS, STATICS, etc.)
+    private String scope;  // For arrays/hashes: store scope (LOCALS, STATICS, etc.)
     private String arrayName;  // For arrays: store the array variable name
     private int arraySize;  // For arrays: store the size
+    private String hashName;  // For hashes: store the hash variable name
+    private int hashSize;  // For hashes: store the size
     private boolean isArrayElement = false;  // Flag to indicate if this is an array element
-    private HarbourDebuggerBaseProcess debugProcess;  // Reference to debug process for array expansion
+    private boolean isHashElement = false;  // Flag to indicate if this is a hash element
+    private HarbourDebuggerBaseProcess debugProcess;  // Reference to debug process for array/hash expansion
     private XCompositeNode pendingNode = null;  // Store node for async update
     private boolean childrenRequested = false;  // Track if we've already requested children
 
@@ -62,6 +66,18 @@ public class HarbourDebuggerValue extends XValue {
         this.isArrayElement = isElement;
     }
     
+    // Set hash info for expandable hashes
+    public void setHashInfo(String scope, String hashName, int hashSize) {
+        this.scope = scope;
+        this.hashName = hashName;
+        this.hashSize = hashSize;
+    }
+    
+    // Mark this value as a hash element
+    public void setIsHashElement(boolean isElement) {
+        this.isHashElement = isElement;
+    }
+    
     // Getter methods for debugging
     public String getName() { return name; }
     public String getType() { return type; }
@@ -85,13 +101,17 @@ public class HarbourDebuggerValue extends XValue {
             icon = AllIcons.Debugger.Value;
         }
 
-        // For arrays, indicate they have children even if not loaded yet
-        boolean hasChildren = !children.isEmpty() || ("A".equals(type) && arraySize > 0);
+        // For arrays and hashes, indicate they have children even if not loaded yet
+        boolean hasChildren = !children.isEmpty() || ("A".equals(type) && arraySize > 0) || ("H".equals(type) && hashSize > 0);
         node.setPresentation(icon, type, value, hasChildren);
     }
 
     @Override
     public void computeChildren(@NotNull XCompositeNode node) {
+        HarbourLogger.log("HarbourDebuggerValue", 
+            "=== computeChildren called for " + name + " (type=" + type + ", arraySize=" + arraySize + 
+            ", hashSize=" + hashSize + ", hasDebugProcess=" + (debugProcess != null) + ") ===");
+        
         // If this is an array with no children loaded yet, request them
         if ("A".equals(type) && arraySize > 0 && debugProcess != null) {
             if (!children.isEmpty()) {
@@ -101,7 +121,7 @@ public class HarbourDebuggerValue extends XValue {
                     childrenList.add(child.name, child);
                 }
                 node.addChildren(childrenList, arraySize > children.size());
-            } else if (!childrenRequested) {
+            } else if (!childrenRequested || pendingNode == null) {
                 // Request array elements from the debugger
                 HarbourLogger.log("HarbourDebuggerValue", 
                     "Requesting array elements for " + name + " (scope: " + scope + ", size: " + arraySize + ")");
@@ -128,6 +148,58 @@ public class HarbourDebuggerValue extends XValue {
                 // Already requested, wait for response
                 // Don't show loading message - it will be replaced when data arrives
             }
+        } else if ("H".equals(type) && hashSize > 0 && debugProcess != null) {
+            HarbourLogger.log("HarbourDebuggerValue", 
+                "computeChildren called for hash " + name + " - children.isEmpty()=" + children.isEmpty() + 
+                ", childrenRequested=" + childrenRequested + ", pendingNode=" + (pendingNode != null));
+            
+            // Handle hash expansion similar to arrays
+            if (!children.isEmpty()) {
+                // Children already loaded, display them
+                HarbourLogger.log("HarbourDebuggerValue", 
+                    "Hash " + name + " already has " + children.size() + " children loaded, displaying them");
+                XValueChildrenList childrenList = new XValueChildrenList();
+                for (HarbourDebuggerValue child : children) {
+                    childrenList.add(child.name, child);
+                }
+                node.addChildren(childrenList, hashSize > children.size());
+            } else if (!childrenRequested || pendingNode == null) {
+                // Request hash elements from the debugger
+                HarbourLogger.log("HarbourDebuggerValue", 
+                    "Requesting hash elements for " + name + " (scope: " + scope + ", size: " + hashSize + ")");
+                
+                // Store the node for later update
+                pendingNode = node;
+                childrenRequested = true;
+                
+                if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                    HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                    // Request hash elements - this will trigger an async response
+                    remoteProcess.requestHashElements(scope, hashName);
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "Hash request sent for " + name + ", waiting for response");
+                    
+                    // Don't show loading message - just wait for real data
+                } else {
+                    // No debug process available
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "No debug process available for hash " + name);
+                    super.computeChildren(node);
+                }
+            } else {
+                // Already requested, wait for response
+                HarbourLogger.log("HarbourDebuggerValue", 
+                    "Hash " + name + " already requested, waiting for response (pendingNode=" + (pendingNode != null) + ")");
+                
+                // If we get here and pendingNode is null, it means the update was lost
+                // This could happen if computeChildren is called again after update
+                if (pendingNode == null && childrenRequested) {
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "WARNING: pendingNode is null but childrenRequested is true for " + name + 
+                        " - update may have been lost. Storing new node.");
+                    pendingNode = node;
+                }
+            }
         } else if (!children.isEmpty()) {
             // Non-array with children
             XValueChildrenList childrenList = new XValueChildrenList();
@@ -140,28 +212,51 @@ public class HarbourDebuggerValue extends XValue {
         }
     }
     
-    // Method to update children when array response arrives
+    // Method to update children when array/hash response arrives
     public void updateChildren() {
         if (pendingNode != null) {
+            // Determine if this is an array or hash for logging
+            String childType = "H".equals(type) ? "hash" : "array";
             HarbourLogger.log("HarbourDebuggerValue", 
-                "Updating array children for " + name + " with " + children.size() + " elements");
+                "Updating " + childType + " children for " + name + " with " + children.size() + " elements");
             
+            // Store the node reference locally to avoid race conditions
+            final XCompositeNode nodeToUpdate = pendingNode;
+            pendingNode = null;  // Clear immediately to prevent double updates
+            
+            // Create the children list before dispatching to EDT
+            final XValueChildrenList childrenList;
             if (!children.isEmpty()) {
-                // Create new children list with actual array elements
-                XValueChildrenList childrenList = new XValueChildrenList();
+                childrenList = new XValueChildrenList();
                 for (HarbourDebuggerValue child : children) {
                     childrenList.add(child.name, child);
                 }
-                
-                // Add all children at once
-                // The 'true' parameter indicates all children have been added
-                pendingNode.addChildren(childrenList, true);
             } else {
-                // No children - mark as complete with empty list
-                pendingNode.addChildren(XValueChildrenList.EMPTY, true);
+                childrenList = XValueChildrenList.EMPTY;
             }
             
-            pendingNode = null;  // Clear the reference
+            // Update UI on the Event Dispatch Thread
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    if (!children.isEmpty()) {
+                        nodeToUpdate.addChildren(childrenList, true);
+                        HarbourLogger.log("HarbourDebuggerValue", 
+                            "Successfully updated " + childType + " children for " + name);
+                    } else {
+                        nodeToUpdate.addChildren(XValueChildrenList.EMPTY, true);
+                        HarbourLogger.log("HarbourDebuggerValue", 
+                            "Successfully updated empty " + childType + " children for " + name);
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "Error updating children for " + name + ": " + e.getMessage());
+                    // Reset state on error so it can be retried
+                    childrenRequested = false;
+                }
+            });
+        } else {
+            HarbourLogger.log("HarbourDebuggerValue", 
+                "updateChildren called but pendingNode is null for " + name);
         }
     }
 

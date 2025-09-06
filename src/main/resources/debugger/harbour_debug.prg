@@ -516,6 +516,12 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                      SendArrayElements(SubStr(tmp, 7))  // ARRAY: = 6 chars, so 7 gets after colon
                   ENDIF
                   
+               CASE Left(tmp, 4) == "HASH"
+                  // HASH command - send hash key-value pairs
+                  IF ":" $ tmp
+                     SendHashElements(SubStr(tmp, 6))  // HASH: = 5 chars, so 6 gets after colon
+                  ENDIF
+                  
                CASE Left(tmp, 4) == "AREA"
                   // AREA commands for specific workarea details
                   IF ":" $ tmp
@@ -1081,7 +1087,6 @@ STATIC PROCEDURE SendArrayElements(cParams)
    
    oDebugInfo := __DEBUGITEM()
    vmStack := oDebugInfo["vmStack"]
-   aStack := oDebugInfo["aStack"]
    
    // Parse parameters: scope:arrayName:start:count
    aParams := hb_ATokens(cParams, ":")
@@ -1096,7 +1101,7 @@ STATIC PROCEDURE SendArrayElements(cParams)
    nStart := IF(Len(aParams) >= 3, Val(aParams[3]), 1)
    nCount := IF(Len(aParams) >= 4, Val(aParams[4]), 100)
    
-   // Handle nested array notation (e.g., "FOO[2]" or "FOO[2][3]")
+   // Handle nested array notation (e.g., "FOO[2]" or "FOO[2][3]" or hash "GAGA[\"Bar\"]")
    cBaseName := cArrayName
    aIndices := {}
    
@@ -1111,7 +1116,14 @@ STATIC PROCEDURE SendArrayElements(cParams)
          cIndex := SubStr(cIndex, nPos + 1)
          nPos := At("]", cIndex)
          IF nPos > 0
-            AAdd(aIndices, Val(Left(cIndex, nPos - 1)))
+            // Check if it's a hash key (starts with quote) or array index
+            IF Left(cIndex, 1) == '"'
+               // Hash key - extract string between quotes
+               AAdd(aIndices, SubStr(cIndex, 2, nPos - 3))  // Skip quotes
+            ELSE
+               // Array index - convert to number
+               AAdd(aIndices, Val(Left(cIndex, nPos - 1)))
+            ENDIF
             cIndex := SubStr(cIndex, nPos + 1)
          ELSE
             EXIT
@@ -1126,13 +1138,12 @@ STATIC PROCEDURE SendArrayElements(cParams)
       CASE cScope == "LOCALS"
          // Get local variable by name
          IF vmStack != NIL .AND. Len(vmStack) > 0
-            // Find the appropriate stack frame
-            nStackIndex := 1  // Use first frame for now
+            // Use the top stack frame (same as in SendLocals)
+            nStackIndex := 1  // Use first frame 
             IF nStackIndex > 0 .AND. nStackIndex <= Len(vmStack)
                // Search for the variable in locals
                FOR i := 1 TO Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
                   tmp := vmStack[nStackIndex, HB_DBG_CS_LOCALS, i]
-                  vName := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
                   IF Upper(tmp[HB_DBG_VAR_NAME]) == Upper(cBaseName)
                      xArray := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
                      EXIT
@@ -1169,14 +1180,25 @@ STATIC PROCEDURE SendArrayElements(cParams)
          xArray := NIL
    ENDCASE
    
-   // Navigate through nested array indices if any
+   // Navigate through nested array/hash indices if any
    IF xArray != NIL .AND. Len(aIndices) > 0
       FOR i := 1 TO Len(aIndices)
-         IF ValType(xArray) == "A" .AND. aIndices[i] > 0 .AND. aIndices[i] <= Len(xArray)
-            xArray := xArray[aIndices[i]]
+         IF ValType(aIndices[i]) == "C"
+            // String index - it's a hash key
+            IF ValType(xArray) == "H" .AND. aIndices[i] $ xArray
+               xArray := xArray[aIndices[i]]
+            ELSE
+               xArray := NIL
+               EXIT
+            ENDIF
          ELSE
-            xArray := NIL
-            EXIT
+            // Numeric index - it's an array index
+            IF ValType(xArray) == "A" .AND. aIndices[i] > 0 .AND. aIndices[i] <= Len(xArray)
+               xArray := xArray[aIndices[i]]
+            ELSE
+               xArray := NIL
+               EXIT
+            ENDIF
          ENDIF
       NEXT
    ENDIF
@@ -1198,6 +1220,141 @@ STATIC PROCEDURE SendArrayElements(cParams)
    ENDIF
    
    hb_inetSend(oDebugInfo["socket"], "END_ARRAY" + CRLF)
+RETURN
+
+// Send hash elements for a specific hash variable
+STATIC PROCEDURE SendHashElements(cParams)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL aParams, cScope, cHashName
+   LOCAL xHash, cKey, xValue, cType
+   LOCAL vmStack
+   LOCAL nStackIndex
+   LOCAL tmp, vName, nPrivates, nPublics, cName
+   LOCAL cBaseName, aIndices, nPos, cIndex
+   LOCAL aKeys, i
+   
+   oDebugInfo := __DEBUGITEM()
+   vmStack := oDebugInfo["vmStack"]
+   
+   // Parse parameters: scope:hashName
+   aParams := hb_ATokens(cParams, ":")
+   IF Len(aParams) < 2
+      hb_inetSend(oDebugInfo["socket"], "HASH" + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "ERROR:Invalid hash parameters" + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "END_HASH" + CRLF)
+      RETURN
+   ENDIF
+   
+   cScope := aParams[1]
+   cHashName := aParams[2]
+   
+   // Initialize xHash to NIL
+   xHash := NIL
+   
+   // Handle nested hash notation like "MYHASH[\"key1\"]"
+   IF "[" $ cHashName
+      // Extract base name and indices
+      nPos := At("[", cHashName)
+      cBaseName := Left(cHashName, nPos - 1)
+      aIndices := {}
+      cIndex := SubStr(cHashName, nPos)
+      
+      // Parse hash keys from notation like "[\"key1\"][\"key2\"]"
+      DO WHILE "[" $ cIndex
+         nPos := At("]", cIndex)
+         IF nPos > 0
+            // Extract key between [" and "]
+            tmp := SubStr(cIndex, 3, nPos - 4)  // Skip [" and "]
+            AAdd(aIndices, tmp)
+            cIndex := SubStr(cIndex, nPos + 1)
+         ELSE
+            EXIT
+         ENDIF
+      ENDDO
+      
+      cHashName := cBaseName
+   ELSE
+      aIndices := {}
+   ENDIF
+   
+   // Find the hash variable based on scope
+   DO CASE
+   CASE cScope == "LOCALS"
+      // Search in local variables (same as arrays)
+      IF vmStack != NIL .AND. Len(vmStack) > 0
+         nStackIndex := 1  // Use first frame
+         IF nStackIndex > 0 .AND. nStackIndex <= Len(vmStack)
+            // Search for the variable in locals
+            FOR i := 1 TO Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
+               tmp := vmStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == Upper(cHashName)
+                  xHash := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                  EXIT
+               ENDIF
+            NEXT
+         ENDIF
+      ENDIF
+      
+   CASE cScope == "STATICS"
+      // Search in static variables
+      IF Type(cHashName) != "U"
+         xHash := &(cHashName)
+      ENDIF
+      
+   CASE cScope == "PRIVATES"
+      // Search in private variables
+      nPrivates := __mvDbgInfo(HB_MV_PRIVATE)
+      FOR tmp := 1 TO nPrivates
+         vName := __mvDbgInfo(HB_MV_PRIVATE, tmp, @xValue)
+         IF vName == cHashName
+            xHash := xValue
+            EXIT
+         ENDIF
+      NEXT
+      
+   CASE cScope == "PUBLICS"
+      // Search in public variables
+      nPublics := __mvDbgInfo(HB_MV_PUBLIC)
+      FOR tmp := 1 TO nPublics
+         vName := __mvDbgInfo(HB_MV_PUBLIC, tmp, @xValue)
+         IF vName == cHashName
+            xHash := xValue
+            EXIT
+         ENDIF
+      NEXT
+   ENDCASE
+   
+   // Navigate through nested hashes using indices
+   IF Len(aIndices) > 0 .AND. xHash != NIL
+      FOR i := 1 TO Len(aIndices)
+         IF ValType(xHash) == "H" .AND. aIndices[i] $ xHash
+            xHash := xHash[aIndices[i]]
+         ELSE
+            xHash := NIL
+            EXIT
+         ENDIF
+      NEXT
+   ENDIF
+   
+   // Send hash elements
+   hb_inetSend(oDebugInfo["socket"], "HASH" + CRLF)
+   hb_inetSend(oDebugInfo["socket"], cScope + ":" + cHashName + CRLF)
+   
+   IF ValType(xHash) == "H"
+      // Get all hash keys
+      aKeys := hb_HKeys(xHash)
+      
+      // Send each key-value pair
+      FOR i := 1 TO Len(aKeys)
+         cKey := aKeys[i]
+         xValue := xHash[cKey]
+         cType := ValType(xValue)
+         hb_inetSend(oDebugInfo["socket"], ;
+            cKey + ":" + cType + ":" + FormatValue(xValue) + CRLF)
+      NEXT
+   ENDIF
+   
+   hb_inetSend(oDebugInfo["socket"], "END_HASH" + CRLF)
 RETURN
 
 // Send list of all open workareas

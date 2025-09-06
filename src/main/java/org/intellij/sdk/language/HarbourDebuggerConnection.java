@@ -346,6 +346,12 @@ public class HarbourDebuggerConnection {
                             processMessage(messageBuilder.toString());
                             messageBuilder.setLength(0);
                         }
+                        
+                        // Check if this is the end of a HASH message
+                        if (line.equals("END_HASH") && messageBuilder.toString().startsWith("HASH")) {
+                            processMessage(messageBuilder.toString());
+                            messageBuilder.setLength(0);
+                        }
                     }
                 }
             } catch (IOException e) {
@@ -379,10 +385,12 @@ public class HarbourDebuggerConnection {
                line.equals("WORKAREAS") || // Add WORKAREAS command recognition
                line.startsWith("AREA") && line.contains(":") && (line.contains("FIELDS") || line.contains("RECORD") || line.contains("SCHEMA")) ||
                line.equals("ARRAY") || line.startsWith("ARRAY:") || line.startsWith("OBJECT:") || // Fixed: added line.equals("ARRAY")
+               line.equals("HASH") || line.startsWith("HASH:") || // Add HASH command recognition
                line.startsWith("CONSOLE:") || // Add console output recognition
                line.equals("END_LOCALS") || line.equals("END_STATICS") || 
                line.equals("END_PRIVATES") || line.equals("END_PUBLICS") ||
                line.equals("END_FIELDS") || line.equals("END_RECORD") || line.equals("END_SCHEMA") ||
+               line.equals("END_HASH") || line.equals("END_ARRAY") || // Add END_HASH and END_ARRAY
                line.startsWith("FIELD:") || line.startsWith("DATA:") || line.startsWith("INFO:") ||
                (line.length() == 1 && Character.isUpperCase(line.charAt(0))); // Type responses
     }

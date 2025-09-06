@@ -287,12 +287,17 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             String[] lines = message.split("\\r?\\n");  // Handle both Unix (\n) and Windows (\r\n) line endings
             if (lines.length == 0) return;
         
-        // Check if message contains multiple commands (e.g., END_PUBLICS followed by ARRAY)
+        // Check if message contains multiple commands (e.g., END_PUBLICS followed by ARRAY or HASH)
         // This can happen when responses are buffered together
         int arrayStartIndex = -1;
+        int hashStartIndex = -1;
         for (int i = 0; i < lines.length; i++) {
             if ("ARRAY".equals(lines[i])) {
                 arrayStartIndex = i;
+                break;
+            }
+            if ("HASH".equals(lines[i])) {
+                hashStartIndex = i;
                 break;
             }
         }
@@ -311,6 +316,23 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             String[] arrayCommandLines = Arrays.copyOfRange(lines, arrayStartIndex, lines.length);
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing ARRAY command with " + arrayCommandLines.length + " lines");
             processCommand("ARRAY", arrayCommandLines);
+            return;
+        }
+        
+        // If HASH command found in the message, process it separately
+        if (hashStartIndex >= 0) {
+            // First, process any command before HASH if present
+            if (hashStartIndex > 0) {
+                String firstCommand = lines[0];
+                String[] firstCommandLines = Arrays.copyOfRange(lines, 0, hashStartIndex);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing first command: " + firstCommand);
+                processCommand(firstCommand, firstCommandLines);
+            }
+            
+            // Then process the HASH command
+            String[] hashCommandLines = Arrays.copyOfRange(lines, hashStartIndex, lines.length);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing HASH command with " + hashCommandLines.length + " lines");
+            processCommand("HASH", hashCommandLines);
             return;
         }
         
@@ -516,6 +538,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                     "ARRAY response with " + arrayLines.length + " element lines");
                 handleArrayElements(arrayLines);
+                break;
+                
+            case "HASH":
+                // Handle hash elements response
+                String[] hashLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "HASH response with " + hashLines.length + " element lines");
+                handleHashElements(hashLines);
                 break;
                 
             case "WORKAREAS":
@@ -773,6 +803,123 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         return null;
     }
     
+    private void handleHashElements(String[] hashLines) {
+        // Handle hash elements response
+        // Format expected: scope:hashName followed by key:type:value lines
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Processing hash elements: " + hashLines.length + " lines");
+        
+        if (hashLines.length == 0) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "No hash element data received");
+            return;
+        }
+        
+        // First line should contain hash info: scope:name
+        String[] info = hashLines[0].split(":", 2);
+        if (info.length < 2) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid hash info format: " + hashLines[0]);
+            return;
+        }
+        
+        String scope = info[0];
+        String hashName = info[1];
+        String hashKey = scope + "." + hashName;
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Hash elements for " + hashKey);
+        
+        // Get the hash variable from our map (similar to arrays)
+        HarbourDebuggerValue hashVar = variables.get(hashKey);
+        
+        // If not found directly, it might be a nested hash element
+        if (hashVar == null && hashName.contains("[")) {
+            // Parse nested path similar to arrays
+            int bracketIndex = hashName.indexOf("[");
+            String parentName = hashName.substring(0, bracketIndex);
+            String parentKey = scope + "." + parentName;
+            
+            HarbourDebuggerValue parentVar = variables.get(parentKey);
+            if (parentVar != null) {
+                String indices = hashName.substring(bracketIndex);
+                hashVar = findNestedArray(parentVar, indices);  // Reuse for nested structures
+                
+                if (hashVar != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Found nested hash: " + hashName);
+                }
+            }
+        }
+        
+        if (hashVar == null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Hash variable not found: " + hashKey);
+            return;
+        }
+        
+        // Clear any existing children
+        hashVar.clearChildren();
+        
+        // Process element lines
+        for (int i = 1; i < hashLines.length; i++) {
+            String line = hashLines[i];
+            if (line.equals("END_HASH")) {
+                break;
+            }
+            
+            // Parse element: key:type:value
+            String[] parts = line.split(":", 3);
+            if (parts.length >= 3) {
+                String key = parts[0];
+                String type = parts[1];
+                String value = parts[2];
+                
+                // Create child value for hash element
+                HarbourDebuggerValue elementValue = new HarbourDebuggerValue(
+                    "[\"" + key + "\"]", type, value);
+                elementValue.setIsHashElement(true);
+                
+                // If element is also a hash, set it up for expansion
+                if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(5, value.length() - 1);
+                        int hashSize = Integer.parseInt(sizeStr);
+                        // Use composite key for nested hashes
+                        elementValue.setHashInfo(scope, hashName + "[\"" + key + "\"]", hashSize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse nested hash size from: " + value);
+                    }
+                }
+                // If element is an array, set it up for expansion
+                else if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(6, value.length() - 1);
+                        int arraySize = Integer.parseInt(sizeStr);
+                        elementValue.setArrayInfo(scope, hashName + "[\"" + key + "\"]", arraySize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse array size from hash value: " + value);
+                    }
+                }
+                
+                hashVar.addChild(elementValue);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Hash element [\"" + key + "\"] = " + value + " (" + type + ")");
+            }
+        }
+        
+        // Trigger UI update
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Hash " + hashKey + " now has " + hashVar.getChildren().size() + " elements loaded");
+        
+        // Update the UI with the loaded children
+        hashVar.updateChildren();
+    }
+    
     private void handleArrayElements(String[] arrayLines) {
         // Handle array elements response
         // Format expected: scope:arrayName:index:type:value
@@ -972,6 +1119,21 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                 } catch (Exception e) {
                                     HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                         "Failed to parse array size from: " + value);
+                                }
+                            }
+                            // Parse hash info if it's a hash type
+                            else if ("H".equals(type.trim()) && value.startsWith("Hash(") && value.endsWith(")")) {
+                                // Extract hash size from "Hash(n)" format
+                                try {
+                                    String sizeStr = value.substring(5, value.length() - 1);
+                                    int hashSize = Integer.parseInt(sizeStr);
+                                    debugValue.setHashInfo(scope, name.trim(), hashSize);
+                                    debugValue.setDebugProcess(this);  // Set reference to this debug process
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Hash detected: " + name.trim() + " with size " + hashSize);
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Failed to parse hash size from: " + value);
                                 }
                             }
                             
@@ -2511,5 +2673,19 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Send command to debugger to get array elements
         // Format: ARRAY:scope:name:start:count
         sendCommand("ARRAY", scope + ":" + arrayName + ":" + start + ":" + count);
+    }
+    
+    /**
+     * Request hash elements for a specific hash variable
+     * @param scope The variable scope (LOCALS, STATICS, etc.)
+     * @param hashName The name of the hash variable
+     */
+    public void requestHashElements(String scope, String hashName) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting hash elements for " + scope + "." + hashName);
+        
+        // Send command to debugger to get hash key-value pairs
+        // Format: HASH:scope:name
+        sendCommand("HASH", scope + ":" + hashName);
     }
 }

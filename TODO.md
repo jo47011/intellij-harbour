@@ -3,7 +3,6 @@
 - when typing endif it is not unindented after return
 
 - debugger:
-  - arrays should be unfoldable in var view
   - Expression evaluation not yet implemented for: aentry[1] same for aMaxRech:rechNr
   - can we somehow mark bp w/ a condition so you see it may not always stop
   - need one altd() before it stops at bp, can we avoid that?
