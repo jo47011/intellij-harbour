@@ -1,18 +1,16 @@
 # TODOs
 
-- add database viewer
-
 - when typing endif it is not unindented after return
-
-  if foo
-    qout(Bla)
-    endif <RETURN>   <= should be unindented after return
 
 - debugger:
   - arrays should be unfoldable in var view
   - Expression evaluation not yet implemented for: aentry[1] same for aMaxRech:rechNr
   - can we somehow mark bp w/ a condition so you see it may not always stop
   - need one altd() before it stops at bp, can we avoid that?
+
+  While examining the VS Code extension, I noticed they also support:
+  - Hash tables (similar expandable behavior)
+  - Objects with properties
 
 - startup: scanning harbour project files hangs at 8/111 or so
 

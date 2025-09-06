@@ -287,11 +287,46 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             String[] lines = message.split("\\r?\\n");  // Handle both Unix (\n) and Windows (\r\n) line endings
             if (lines.length == 0) return;
         
+        // Check if message contains multiple commands (e.g., END_PUBLICS followed by ARRAY)
+        // This can happen when responses are buffered together
+        int arrayStartIndex = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if ("ARRAY".equals(lines[i])) {
+                arrayStartIndex = i;
+                break;
+            }
+        }
+        
+        // If ARRAY command found in the message, process it separately
+        if (arrayStartIndex >= 0) {
+            // First, process any command before ARRAY if present
+            if (arrayStartIndex > 0) {
+                String firstCommand = lines[0];
+                String[] firstCommandLines = Arrays.copyOfRange(lines, 0, arrayStartIndex);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing first command: " + firstCommand);
+                processCommand(firstCommand, firstCommandLines);
+            }
+            
+            // Then process the ARRAY command
+            String[] arrayCommandLines = Arrays.copyOfRange(lines, arrayStartIndex, lines.length);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing ARRAY command with " + arrayCommandLines.length + " lines");
+            processCommand("ARRAY", arrayCommandLines);
+            return;
+        }
+        
         String command = lines[0];
         
         // Add debug logging for message routing
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** MESSAGE ROUTING - command='" + command + "', lines.length=" + lines.length + ", contains colon=" + command.contains(":"));
         
+        processCommand(command, lines);
+        
+        } finally {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Message processing complete");
+        }
+    }
+    
+    private void processCommand(String command, String[] lines) {
         // Handle colon-separated commands like "STOP:file:line"
         if (command.contains(":")) {
             String[] parts = command.split(":");
@@ -475,6 +510,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 handleVariables(command, varLines);
                 break;
                 
+            case "ARRAY":
+                // Handle array elements response
+                String[] arrayLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "ARRAY response with " + arrayLines.length + " element lines");
+                handleArrayElements(arrayLines);
+                break;
+                
             case "WORKAREAS":
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS CASE REACHED - lines.length=" + lines.length);
                 // Handle workarea enumeration - process all lines in the message
@@ -578,9 +621,6 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 // Handle end of workarea enumeration
                 liveDBFConnection.processWorkareaMessage(command);
                 break;
-        }
-        } finally {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Message processing complete");
         }
     }
     
@@ -704,6 +744,142 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         }
     }
     
+    // Helper method to find nested array elements
+    private HarbourDebuggerValue findNestedArray(HarbourDebuggerValue parent, String indices) {
+        // Parse indices like "[2]" or "[2][1]"
+        if (!indices.startsWith("[") || !indices.contains("]")) {
+            return null;
+        }
+        
+        int closeIndex = indices.indexOf("]");
+        String indexStr = indices.substring(1, closeIndex);
+        
+        try {
+            // Find child with this index
+            for (HarbourDebuggerValue child : parent.getChildren()) {
+                if (child.getName().equals("[" + indexStr + "]")) {
+                    // If there are more indices, recurse
+                    if (closeIndex + 1 < indices.length() && indices.charAt(closeIndex + 1) == '[') {
+                        return findNestedArray(child, indices.substring(closeIndex + 1));
+                    }
+                    return child;
+                }
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Error finding nested array: " + e.getMessage());
+        }
+        
+        return null;
+    }
+    
+    private void handleArrayElements(String[] arrayLines) {
+        // Handle array elements response
+        // Format expected: scope:arrayName:index:type:value
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Processing array elements: " + arrayLines.length + " lines");
+        
+        if (arrayLines.length == 0) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "No array element data received");
+            return;
+        }
+        
+        // First line should contain array info: scope:name
+        String[] info = arrayLines[0].split(":", 2);
+        if (info.length < 2) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid array info format: " + arrayLines[0]);
+            return;
+        }
+        
+        String scope = info[0];
+        String arrayName = info[1];
+        String arrayKey = scope + "." + arrayName;
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Array elements for " + arrayKey);
+        
+        // Get the array variable from our map
+        HarbourDebuggerValue arrayVar = variables.get(arrayKey);
+        
+        // If not found directly, it might be a nested array element
+        if (arrayVar == null && arrayName.contains("[")) {
+            // Parse nested array path like "BAR[2]"
+            int bracketIndex = arrayName.indexOf("[");
+            String parentName = arrayName.substring(0, bracketIndex);
+            String parentKey = scope + "." + parentName;
+            
+            HarbourDebuggerValue parentVar = variables.get(parentKey);
+            if (parentVar != null) {
+                // Extract indices from path like "BAR[2]" or "BAR[2][1]"
+                String indices = arrayName.substring(bracketIndex);
+                arrayVar = findNestedArray(parentVar, indices);
+                
+                if (arrayVar != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Found nested array: " + arrayName);
+                }
+            }
+        }
+        
+        if (arrayVar == null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Array variable not found: " + arrayKey);
+            return;
+        }
+        
+        // Clear any existing children
+        arrayVar.clearChildren();
+        
+        // Process element lines
+        for (int i = 1; i < arrayLines.length; i++) {
+            String line = arrayLines[i];
+            if (line.equals("END_ARRAY")) {
+                break;
+            }
+            
+            // Parse element: index:type:value
+            String[] parts = line.split(":", 3);
+            if (parts.length >= 3) {
+                String index = parts[0];
+                String type = parts[1];
+                String value = parts[2];
+                
+                // Create child value for array element
+                HarbourDebuggerValue elementValue = new HarbourDebuggerValue(
+                    "[" + index + "]", type, value);
+                elementValue.setIsArrayElement(true);
+                
+                // If element is also an array, set it up for expansion
+                if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(6, value.length() - 1);
+                        int arraySize = Integer.parseInt(sizeStr);
+                        // Use composite key for nested arrays
+                        elementValue.setArrayInfo(scope, arrayName + "[" + index + "]", arraySize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse nested array size from: " + value);
+                    }
+                }
+                
+                arrayVar.addChild(elementValue);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Array element [" + index + "] = " + value + " (" + type + ")");
+            }
+        }
+        
+        // Trigger UI update - this needs to be done through the debug session
+        // The array variable should now have its children populated
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Array " + arrayKey + " now has " + arrayVar.getChildren().size() + " elements loaded");
+        
+        // Update the UI with the loaded children
+        arrayVar.updateChildren();
+    }
+    
     private void handleVariables(String scope, String[] varLines) {
         try {
             // Validate input parameters to prevent crashes
@@ -782,6 +958,23 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         try {
                             String key = scope + "." + name.trim();
                             HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name.trim(), type.trim(), value);
+                            
+                            // Parse array info if it's an array type
+                            if ("A".equals(type.trim()) && value.startsWith("Array(") && value.endsWith(")")) {
+                                // Extract array size from "Array(n)" format
+                                try {
+                                    String sizeStr = value.substring(6, value.length() - 1);
+                                    int arraySize = Integer.parseInt(sizeStr);
+                                    debugValue.setArrayInfo(scope, name.trim(), arraySize);
+                                    debugValue.setDebugProcess(this);  // Set reference to this debug process
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Array detected: " + name.trim() + " with size " + arraySize);
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Failed to parse array size from: " + value);
+                                }
+                            }
+                            
                             variables.put(key, debugValue);
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
@@ -2302,5 +2495,21 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         } catch (Exception e) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error during resource cleanup: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Request array elements for a specific array variable
+     * @param scope The variable scope (LOCALS, STATICS, etc.)
+     * @param arrayName The name of the array variable
+     * @param start The starting index (1-based)
+     * @param count The number of elements to retrieve
+     */
+    public void requestArrayElements(String scope, String arrayName, int start, int count) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting array elements for " + scope + "." + arrayName + " [" + start + ".." + (start+count-1) + "]");
+        
+        // Send command to debugger to get array elements
+        // Format: ARRAY:scope:name:start:count
+        sendCommand("ARRAY", scope + ":" + arrayName + ":" + start + ":" + count);
     }
 }

@@ -340,6 +340,12 @@ public class HarbourDebuggerConnection {
                             messageBuilder.append(CRLF);
                         }
                         messageBuilder.append(line);
+                        
+                        // Check if this is the end of an ARRAY message
+                        if (line.equals("END_ARRAY") && messageBuilder.toString().startsWith("ARRAY")) {
+                            processMessage(messageBuilder.toString());
+                            messageBuilder.setLength(0);
+                        }
                     }
                 }
             } catch (IOException e) {
@@ -372,7 +378,7 @@ public class HarbourDebuggerConnection {
                line.equals("PRIVATES") || line.equals("PUBLICS") || line.equals("AREAS") ||
                line.equals("WORKAREAS") || // Add WORKAREAS command recognition
                line.startsWith("AREA") && line.contains(":") && (line.contains("FIELDS") || line.contains("RECORD") || line.contains("SCHEMA")) ||
-               line.startsWith("ARRAY:") || line.startsWith("OBJECT:") ||
+               line.equals("ARRAY") || line.startsWith("ARRAY:") || line.startsWith("OBJECT:") || // Fixed: added line.equals("ARRAY")
                line.startsWith("CONSOLE:") || // Add console output recognition
                line.equals("END_LOCALS") || line.equals("END_STATICS") || 
                line.equals("END_PRIVATES") || line.equals("END_PUBLICS") ||

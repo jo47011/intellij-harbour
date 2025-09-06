@@ -510,6 +510,12 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   // WORKAREAS command - enumerate all open database areas
                   SendWorkAreas()
                   
+               CASE Left(tmp, 5) == "ARRAY"
+                  // ARRAY command - send array elements
+                  IF ":" $ tmp
+                     SendArrayElements(SubStr(tmp, 7))  // ARRAY: = 6 chars, so 7 gets after colon
+                  ENDIF
+                  
                CASE Left(tmp, 4) == "AREA"
                   // AREA commands for specific workarea details
                   IF ":" $ tmp
@@ -1062,6 +1068,137 @@ STATIC FUNCTION FormatValue(xValue)
    ENDCASE
    
 RETURN cResult
+
+// Send array elements for a specific array variable
+STATIC PROCEDURE SendArrayElements(cParams)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL aParams, cScope, cArrayName, nStart, nCount
+   LOCAL xArray, xElement, cType, i
+   LOCAL vmStack, aStack
+   LOCAL nStackIndex, l
+   LOCAL tmp, vName, nPrivates, nPublics, cName, xValue, nEnd
+   LOCAL cBaseName, aIndices, nPos, cIndex
+   
+   oDebugInfo := __DEBUGITEM()
+   vmStack := oDebugInfo["vmStack"]
+   aStack := oDebugInfo["aStack"]
+   
+   // Parse parameters: scope:arrayName:start:count
+   aParams := hb_ATokens(cParams, ":")
+   IF Len(aParams) < 2
+      hb_inetSend(oDebugInfo["socket"], "ARRAY" + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "END_ARRAY" + CRLF)
+      RETURN
+   ENDIF
+   
+   cScope := aParams[1]
+   cArrayName := aParams[2]
+   nStart := IF(Len(aParams) >= 3, Val(aParams[3]), 1)
+   nCount := IF(Len(aParams) >= 4, Val(aParams[4]), 100)
+   
+   // Handle nested array notation (e.g., "FOO[2]" or "FOO[2][3]")
+   cBaseName := cArrayName
+   aIndices := {}
+   
+   // Extract base name and indices
+   IF "[" $ cArrayName
+      nPos := At("[", cArrayName)
+      cBaseName := Left(cArrayName, nPos - 1)
+      // Parse all indices
+      cIndex := SubStr(cArrayName, nPos)
+      DO WHILE "[" $ cIndex
+         nPos := At("[", cIndex)
+         cIndex := SubStr(cIndex, nPos + 1)
+         nPos := At("]", cIndex)
+         IF nPos > 0
+            AAdd(aIndices, Val(Left(cIndex, nPos - 1)))
+            cIndex := SubStr(cIndex, nPos + 1)
+         ELSE
+            EXIT
+         ENDIF
+      ENDDO
+   ENDIF
+   
+   // Get the array variable based on scope
+   xArray := NIL
+   
+   DO CASE
+      CASE cScope == "LOCALS"
+         // Get local variable by name
+         IF vmStack != NIL .AND. Len(vmStack) > 0
+            // Find the appropriate stack frame
+            nStackIndex := 1  // Use first frame for now
+            IF nStackIndex > 0 .AND. nStackIndex <= Len(vmStack)
+               // Search for the variable in locals
+               FOR i := 1 TO Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
+                  tmp := vmStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+                  vName := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                  IF Upper(tmp[HB_DBG_VAR_NAME]) == Upper(cBaseName)
+                     xArray := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                     EXIT
+                  ENDIF
+               NEXT
+            ENDIF
+         ENDIF
+         
+      CASE cScope == "PRIVATES"
+         // Get private variable by name
+         nPrivates := __mvDbgInfo(HB_MV_PRIVATE)
+         FOR i := 1 TO nPrivates
+            xValue := __mvDbgInfo(HB_MV_PRIVATE, i, @cName)
+            IF Upper(cName) == Upper(cBaseName)
+               xArray := xValue
+               EXIT
+            ENDIF
+         NEXT
+         
+      CASE cScope == "PUBLICS"
+         // Get public variable by name
+         nPublics := __mvDbgInfo(HB_MV_PUBLIC)
+         FOR i := 1 TO nPublics
+            xValue := __mvDbgInfo(HB_MV_PUBLIC, i, @cName)
+            IF Upper(cName) == Upper(cBaseName)
+               xArray := xValue
+               EXIT
+            ENDIF
+         NEXT
+         
+      CASE cScope == "STATICS"
+         // Get static variable - this is more complex and may require module info
+         // For now, send empty response
+         xArray := NIL
+   ENDCASE
+   
+   // Navigate through nested array indices if any
+   IF xArray != NIL .AND. Len(aIndices) > 0
+      FOR i := 1 TO Len(aIndices)
+         IF ValType(xArray) == "A" .AND. aIndices[i] > 0 .AND. aIndices[i] <= Len(xArray)
+            xArray := xArray[aIndices[i]]
+         ELSE
+            xArray := NIL
+            EXIT
+         ENDIF
+      NEXT
+   ENDIF
+   
+   // Send array elements
+   hb_inetSend(oDebugInfo["socket"], "ARRAY" + CRLF)
+   hb_inetSend(oDebugInfo["socket"], cScope + ":" + cArrayName + CRLF)
+   
+   IF ValType(xArray) == "A"
+      // Send array elements within the requested range
+      nEnd := Min(nStart + nCount - 1, Len(xArray))
+      
+      FOR i := nStart TO nEnd
+         xElement := xArray[i]
+         cType := ValType(xElement)
+         hb_inetSend(oDebugInfo["socket"], ;
+            AllTrim(Str(i)) + ":" + cType + ":" + FormatValue(xElement) + CRLF)
+      NEXT
+   ENDIF
+   
+   hb_inetSend(oDebugInfo["socket"], "END_ARRAY" + CRLF)
+RETURN
 
 // Send list of all open workareas
 STATIC PROCEDURE SendWorkAreas()
