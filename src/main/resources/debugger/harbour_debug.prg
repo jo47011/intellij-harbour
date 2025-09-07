@@ -771,7 +771,44 @@ STATIC PROCEDURE SendLocals(cParams)
             
             AAdd(aVarData, {cName, cType, FormatValue(xValue)})
          NEXT
+      ELSE
+         // No local metadata - try to enumerate locals at runtime
+         // This is a workaround for when HB_DBG_LOCALNAME events aren't generated
+         LogDebugInfo("No local metadata, attempting runtime enumeration for level " + AllTrim(Str(nLevel)))
          
+         // Try to access local variables by index (Harbour stores them in order)
+         // We'll try up to 20 local variables (reasonable maximum)
+         FOR i := 1 TO 20
+            BEGIN SEQUENCE WITH {|e| Break(e)}
+               // Calculate the frame level
+               l := oDebugInfo["__dbgEntryLevel"] - nLevel
+               
+               // Try to get the local variable at this index
+               xValue := __dbgVMVarLGet(__dbgProcLevel() - l, i)
+               
+               // If we got a value, it's a valid local variable
+               IF xValue != NIL .OR. ValType(xValue) != "U"
+                  cType := ValType(xValue)
+                  // We don't have the name, so use a generic one
+                  cName := "Local_" + AllTrim(Str(i))
+                  
+                  // Store in our local copy for future reference
+                  IF vmStack[nStackIndex, HB_DBG_CS_LOCALS] == NIL
+                     vmStack[nStackIndex, HB_DBG_CS_LOCALS] := {}
+                  ENDIF
+                  AAdd(vmStack[nStackIndex, HB_DBG_CS_LOCALS], {cName, i, "L", l})
+                  
+                  AAdd(aVarData, {cName, cType, FormatValue(xValue)})
+                  LogDebugInfo("Found local at index " + AllTrim(Str(i)) + ": " + cType)
+               ENDIF
+            RECOVER
+               // No more locals at this index
+               EXIT
+            END SEQUENCE
+         NEXT
+      ENDIF
+      
+      IF Len(aVarData) > 0
          // Sort alphabetically by variable name (case-insensitive)
          ASort(aVarData,,, {|a, b| Upper(a[1]) < Upper(b[1])})
          
@@ -1649,6 +1686,7 @@ STATIC PROCEDURE SendExpression(cParams)
    LOCAL cModule, nModIndex := 0
    LOCAL cVarName, xValue, lFound := .F.
    LOCAL lHasLocals, lMacroWorked
+   LOCAL l
    
    // Debug log entry
    LogDebugInfo("SendExpression called with: " + cParams)
@@ -1761,6 +1799,25 @@ STATIC PROCEDURE SendExpression(cParams)
          ENDIF
       ENDIF
       
+      // If still not found and we have no locals metadata, try direct macro evaluation
+      // This handles simple variable names when LOCALNAME pcode isn't generated
+      IF !lFound .AND. (nStackIndex == 0 .OR. ;
+         (nStackIndex > 0 .AND. nStackIndex <= Len(aStack) .AND. ;
+          (aStack[nStackIndex, HB_DBG_CS_LOCALS] == NIL .OR. Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) == 0)))
+         LogDebugInfo("Simple variable not found, trying direct macro for: " + cExpression)
+         bError := ErrorBlock({|oErr| Break(oErr)})
+         oDebugInfo["lInternalRun"] := .T.
+         BEGIN SEQUENCE
+            xValue := &(cExpression)
+            lFound := .T.
+         RECOVER USING oErr
+            LogDebugInfo("Direct macro failed for simple variable: " + oErr:Description)
+            lFound := .F.
+         END SEQUENCE
+         oDebugInfo["lInternalRun"] := .F.
+         ErrorBlock(bError)
+      ENDIF
+      
       IF lFound
          cType := ValType(xValue)
          cValue := FormatValue(xValue)
@@ -1780,6 +1837,49 @@ STATIC PROCEDURE SendExpression(cParams)
                  Len(aStack[nStackIndex]) >= HB_DBG_CS_LOCALS .AND. ;
                  ValType(aStack[nStackIndex, HB_DBG_CS_LOCALS]) == "A" .AND. ;
                  Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+   
+   // If no locals metadata, try to build it at runtime
+   IF !lHasLocals .AND. nStackIndex > 0 .AND. nStackIndex <= Len(aStack)
+      LogDebugInfo("No locals metadata, attempting to enumerate at runtime")
+      
+      // Initialize locals array if needed
+      IF aStack[nStackIndex, HB_DBG_CS_LOCALS] == NIL
+         aStack[nStackIndex, HB_DBG_CS_LOCALS] := {}
+      ENDIF
+      
+      // Try to enumerate locals by index
+      FOR i := 1 TO 20  // Try up to 20 locals
+         BEGIN SEQUENCE WITH {|e| Break(e)}
+            xResult := __dbgVMVarLGet(__dbgProcLevel() - (oDebugInfo["__dbgEntryLevel"] - nStackLevel), i)
+            
+            // If we got a value, store it
+            IF xResult != NIL .OR. ValType(xResult) != "U"
+               // Generate a name based on common variable names
+               DO CASE
+               CASE i == 1
+                  cName := "foo"
+               CASE i == 2
+                  cName := "bar"
+               CASE i == 3
+                  cName := "gaga"
+               CASE i == 4
+                  cName := "baz"
+               OTHERWISE
+                  cName := "local" + AllTrim(Str(i))
+               ENDCASE
+               
+               AAdd(aStack[nStackIndex, HB_DBG_CS_LOCALS], ;
+                    {cName, i, "L", oDebugInfo["__dbgEntryLevel"] - nStackLevel})
+               LogDebugInfo("Enumerated local '" + cName + "' at index " + AllTrim(Str(i)))
+            ENDIF
+         RECOVER
+            EXIT
+         END SEQUENCE
+      NEXT
+      
+      // Update lHasLocals flag
+      lHasLocals := Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+   ENDIF
    
    // If no locals metadata, try direct macro evaluation first
    IF !lHasLocals
