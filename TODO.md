@@ -1,13 +1,5 @@
 # TODOs
 
-- when typing endif it is not unindented after return
-
-- debugger:
-  - Expression evaluation not yet implemented for: aMaxRech:rechNr
-
-  While examining the VS Code extension, I noticed they also support:
-  - Objects with properties
-
 - startup: scanning harbour project files hangs at 8/111 or so
 
 - navigation

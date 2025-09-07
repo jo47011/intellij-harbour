@@ -556,6 +556,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 handleHashElements(hashLines);
                 break;
                 
+            case "OBJECT":
+                // Handle object properties response
+                String[] objectLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "OBJECT response with " + objectLines.length + " property lines");
+                handleObjectProperties(objectLines);
+                break;
+                
             case "EXPRESSION":
                 // Handle expression evaluation response
                 // Format: EXPRESSION:stack_level:type:value
@@ -936,6 +944,114 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         hashVar.updateChildren();
     }
     
+    private void handleObjectProperties(String[] objectLines) {
+        // Handle object properties response
+        // Format expected: scope:objectName followed by property:type:value lines
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Processing object properties: " + objectLines.length + " lines");
+        
+        if (objectLines.length == 0) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "No object property data received");
+            return;
+        }
+        
+        // First line should contain object info: scope:name
+        String[] info = objectLines[0].split(":", 2);
+        if (info.length < 2) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid object info format: " + objectLines[0]);
+            return;
+        }
+        
+        String scope = info[0];
+        String objectName = info[1];
+        String objectKey = scope + "." + objectName;
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Object properties for " + objectKey);
+        
+        // Get the object variable from our map
+        HarbourDebuggerValue objectVar = variables.get(objectKey);
+        
+        if (objectVar == null) {
+            // Log all available keys for debugging
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Object variable not found: " + objectKey);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Available keys in variables map: " + variables.keySet());
+            
+            // Maybe the response arrived after variables were cleared, keep the object for next time
+            // Store a placeholder if needed
+            return;
+        }
+        
+        // Clear any existing children
+        objectVar.clearChildren();
+        
+        // Process property lines
+        for (int i = 1; i < objectLines.length; i++) {
+            String line = objectLines[i];
+            if (line.equals("END_OBJECT")) {
+                break;
+            }
+            
+            // Parse property: name:type:value
+            String[] parts = line.split(":", 3);
+            if (parts.length >= 3) {
+                String propName = parts[0];
+                String type = parts[1];
+                String value = parts[2];
+                
+                // Create child value for object property
+                HarbourDebuggerValue propertyValue = new HarbourDebuggerValue(
+                    propName, type, value);
+                propertyValue.setIsObjectProperty(true);
+                
+                // If property is a hash, set it up for expansion
+                if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(5, value.length() - 1);
+                        int hashSize = Integer.parseInt(sizeStr);
+                        propertyValue.setHashInfo(scope, objectName + ":" + propName, hashSize);
+                        propertyValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse hash size from object property: " + value);
+                    }
+                }
+                // If property is an array, set it up for expansion
+                else if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(6, value.length() - 1);
+                        int arraySize = Integer.parseInt(sizeStr);
+                        propertyValue.setArrayInfo(scope, objectName + ":" + propName, arraySize);
+                        propertyValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse array size from object property: " + value);
+                    }
+                }
+                // If property is also an object, set it up for expansion
+                else if ("O".equals(type)) {
+                    propertyValue.setObjectInfo(scope, objectName + ":" + propName);
+                    propertyValue.setDebugProcess(this);
+                }
+                
+                objectVar.addChild(propertyValue);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Object property " + propName + " = " + value + " (" + type + ")");
+            }
+        }
+        
+        // Trigger UI update
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Object " + objectKey + " now has " + objectVar.getChildren().size() + " properties loaded");
+        
+        // Update the UI with the loaded children
+        objectVar.updateChildren();
+    }
+    
     private void handleArrayElements(String[] arrayLines) {
         // Handle array elements response
         // Format expected: scope:arrayName:index:type:value
@@ -1151,6 +1267,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                     HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                         "Failed to parse hash size from: " + value);
                                 }
+                            }
+                            // Parse object info if it's an object type
+                            else if ("O".equals(type.trim())) {
+                                debugValue.setObjectInfo(scope, name.trim());
+                                debugValue.setDebugProcess(this);  // Set reference to this debug process
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Object detected: " + name.trim() + " of type " + value);
                             }
                             
                             variables.put(key, debugValue);
@@ -2703,6 +2826,20 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Send command to debugger to get hash key-value pairs
         // Format: HASH:scope:name
         sendCommand("HASH", scope + ":" + hashName);
+    }
+    
+    /**
+     * Request object properties for a specific object variable
+     * @param scope The variable scope (LOCALS, STATICS, etc.)
+     * @param objectName The name of the object variable
+     */
+    public void requestObjectProperties(String scope, String objectName) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting object properties for " + scope + "." + objectName);
+        
+        // Send command to debugger to get object properties
+        // Format: OBJECT:scope:name
+        sendCommand("OBJECT", scope + ":" + objectName);
     }
     
     // Store pending expression evaluations

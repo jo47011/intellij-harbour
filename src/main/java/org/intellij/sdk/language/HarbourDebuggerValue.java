@@ -24,8 +24,10 @@ public class HarbourDebuggerValue extends XValue {
     private int arraySize;  // For arrays: store the size
     private String hashName;  // For hashes: store the hash variable name
     private int hashSize;  // For hashes: store the size
+    private String objectName;  // For objects: store the object variable name
     private boolean isArrayElement = false;  // Flag to indicate if this is an array element
     private boolean isHashElement = false;  // Flag to indicate if this is a hash element
+    private boolean isObjectProperty = false;  // Flag to indicate if this is an object property
     private HarbourDebuggerBaseProcess debugProcess;  // Reference to debug process for array/hash expansion
     private XCompositeNode pendingNode = null;  // Store node for async update
     private boolean childrenRequested = false;  // Track if we've already requested children
@@ -78,6 +80,17 @@ public class HarbourDebuggerValue extends XValue {
         this.isHashElement = isElement;
     }
     
+    // Set object info for expandable objects
+    public void setObjectInfo(String scope, String objectName) {
+        this.scope = scope;
+        this.objectName = objectName;
+    }
+    
+    // Mark this value as an object property
+    public void setIsObjectProperty(boolean isProperty) {
+        this.isObjectProperty = isProperty;
+    }
+    
     // Getter methods for debugging
     public String getName() { return name; }
     public String getType() { return type; }
@@ -101,8 +114,11 @@ public class HarbourDebuggerValue extends XValue {
             icon = AllIcons.Debugger.Value;
         }
 
-        // For arrays and hashes, indicate they have children even if not loaded yet
-        boolean hasChildren = !children.isEmpty() || ("A".equals(type) && arraySize > 0) || ("H".equals(type) && hashSize > 0);
+        // For arrays, hashes, and objects, indicate they have children even if not loaded yet
+        boolean hasChildren = !children.isEmpty() || 
+            ("A".equals(type) && arraySize > 0) || 
+            ("H".equals(type) && hashSize > 0) ||
+            ("O".equals(type));  // Objects are always expandable
         node.setPresentation(icon, type, value, hasChildren);
     }
 
@@ -193,6 +209,57 @@ public class HarbourDebuggerValue extends XValue {
                 
                 // If we get here and pendingNode is null, it means the update was lost
                 // This could happen if computeChildren is called again after update
+                if (pendingNode == null && childrenRequested) {
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "WARNING: pendingNode is null but childrenRequested is true for " + name + 
+                        " - update may have been lost. Storing new node.");
+                    pendingNode = node;
+                }
+            }
+        } else if ("O".equals(type) && debugProcess != null) {
+            HarbourLogger.log("HarbourDebuggerValue", 
+                "computeChildren called for object " + name + " - children.isEmpty()=" + children.isEmpty() + 
+                ", childrenRequested=" + childrenRequested + ", pendingNode=" + (pendingNode != null));
+            
+            // Handle object expansion
+            if (!children.isEmpty()) {
+                // Children already loaded, display them
+                HarbourLogger.log("HarbourDebuggerValue", 
+                    "Object " + name + " already has " + children.size() + " children loaded, displaying them");
+                XValueChildrenList childrenList = new XValueChildrenList();
+                for (HarbourDebuggerValue child : children) {
+                    childrenList.add(child.name, child);
+                }
+                node.addChildren(childrenList, true);
+            } else if (!childrenRequested || pendingNode == null) {
+                // Request object properties from the debugger
+                HarbourLogger.log("HarbourDebuggerValue", 
+                    "Requesting object properties for " + name + " (scope: " + scope + ")");
+                
+                // Store the node for later update
+                pendingNode = node;
+                childrenRequested = true;
+                
+                if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                    HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                    // Request object properties - this will trigger an async response
+                    remoteProcess.requestObjectProperties(scope, objectName);
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "Object request sent for " + name + ", waiting for response");
+                    
+                    // Don't show loading message - just wait for real data
+                } else {
+                    // No debug process available
+                    HarbourLogger.log("HarbourDebuggerValue", 
+                        "No debug process available for object " + name);
+                    super.computeChildren(node);
+                }
+            } else {
+                // Already requested, wait for response
+                HarbourLogger.log("HarbourDebuggerValue", 
+                    "Object " + name + " already requested, waiting for response (pendingNode=" + (pendingNode != null) + ")");
+                
+                // If we get here and pendingNode is null, it means the update was lost
                 if (pendingNode == null && childrenRequested) {
                     HarbourLogger.log("HarbourDebuggerValue", 
                         "WARNING: pendingNode is null but childrenRequested is true for " + name + 

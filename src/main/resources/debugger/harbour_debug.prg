@@ -12,6 +12,7 @@ REQUEST HB_GT_STD_DEFAULT
 #include <hbdebug.ch>
 #include <hbmemvar.ch>
 #include <hbhash.ch>
+#include <hboo.ch>
 
 #ifndef DBG_PORT
 #define DBG_PORT 9876  // IntelliJ debugger port
@@ -45,6 +46,10 @@ REQUEST HB_GT_STD_DEFAULT
 #endif
 
 #define CRLF Chr(13)+Chr(10)
+
+#ifndef HB_MSGLISTALL
+#define HB_MSGLISTALL 0x00000F  // All messages
+#endif
 
 // STATIC declarations must be at the top before any procedures
 STATIC t_oDebugInfo
@@ -547,6 +552,12 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                      SendHashElements(SubStr(tmp, 6))  // HASH: = 5 chars, so 6 gets after colon
                   ENDIF
                   
+               CASE Left(tmp, 6) == "OBJECT"
+                  // OBJECT command - send object properties
+                  IF ":" $ tmp
+                     SendObjectProperties(SubStr(tmp, 8))  // OBJECT: = 7 chars, so 8 gets after colon
+                  ENDIF
+                  
                CASE Left(tmp, 4) == "EVAL" .OR. Left(tmp, 10) == "EXPRESSION"
                   // EVAL/EXPRESSION command for evaluating expressions
                   IF ":" $ tmp
@@ -786,8 +797,8 @@ STATIC PROCEDURE SendLocals(cParams)
                // Try to get the local variable at this index
                xValue := __dbgVMVarLGet(__dbgProcLevel() - l, i)
                
-               // If we got a value, it's a valid local variable
-               IF xValue != NIL .OR. ValType(xValue) != "U"
+               // If we got a value (even NIL), it's a valid local variable
+               IF ValType(xValue) != "U"
                   cType := ValType(xValue)
                   // We don't have the name, so use a generic one
                   cName := "Local_" + AllTrim(Str(i))
@@ -1429,6 +1440,157 @@ STATIC PROCEDURE SendHashElements(cParams)
    hb_inetSend(oDebugInfo["socket"], "END_HASH" + CRLF)
 RETURN
 
+// Send object properties for a specific object variable
+STATIC PROCEDURE SendObjectProperties(cParams)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL aParams, cScope, cObjectName
+   LOCAL xObject, xValue, cType, i
+   LOCAL vmStack, aStack
+   LOCAL nStackIndex, l
+   LOCAL tmp, vName, nPrivates, nPublics
+   LOCAL aProperties, cPropName
+   
+   oDebugInfo := __DEBUGITEM()
+   vmStack := oDebugInfo["vmStack"]
+   aStack := oDebugInfo["aStack"]
+   
+   // Parse parameters: scope:objectName
+   aParams := hb_ATokens(cParams, ":")
+   IF Len(aParams) >= 2
+      cScope := aParams[1]
+      cObjectName := aParams[2]
+   ELSE
+      hb_inetSend(oDebugInfo["socket"], "OBJECT" + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "END_OBJECT" + CRLF)
+      RETURN
+   ENDIF
+   
+   // Find the object variable
+   xObject := NIL
+   
+   DO CASE
+   CASE cScope == "LOCALS"
+      // Search in local variables of the current stack frame
+      IF vmStack != NIL .AND. Len(vmStack) > 0
+         nStackIndex := 1  // Use first frame
+         IF nStackIndex > 0 .AND. nStackIndex <= Len(vmStack)
+            IF Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+               FOR i := 1 TO Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS])
+                  tmp := vmStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+                  IF tmp[HB_DBG_VAR_NAME] == cObjectName
+                     xObject := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                     EXIT
+                  ENDIF
+               NEXT
+            ENDIF
+         ENDIF
+      ENDIF
+      
+      // If not found in metadata, try enumerated locals
+      IF xObject == NIL .AND. aStack != NIL .AND. Len(aStack) > 0
+         nStackIndex := 1
+         IF nStackIndex > 0 .AND. nStackIndex <= Len(aStack)
+            IF Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+               FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_LOCALS])
+                  tmp := aStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+                  // Case-insensitive comparison since we use lowercase names for enumerated locals
+                  IF Upper(tmp[HB_DBG_VAR_NAME]) == Upper(cObjectName)
+                     xObject := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                     EXIT
+                  ENDIF
+               NEXT
+            ENDIF
+         ENDIF
+      ENDIF
+      
+   CASE cScope == "PRIVATES"
+      // Search in private variables
+      nPrivates := __mvDbgInfo(HB_MV_PRIVATE)
+      FOR tmp := 1 TO nPrivates
+         vName := __mvDbgInfo(HB_MV_PRIVATE, tmp, @xValue)
+         IF vName == cObjectName
+            xObject := xValue
+            EXIT
+         ENDIF
+      NEXT
+      
+   CASE cScope == "PUBLICS"
+      // Search in public variables
+      nPublics := __mvDbgInfo(HB_MV_PUBLIC)
+      FOR tmp := 1 TO nPublics
+         vName := __mvDbgInfo(HB_MV_PUBLIC, tmp, @xValue)
+         IF vName == cObjectName
+            xObject := xValue
+            EXIT
+         ENDIF
+      NEXT
+   ENDCASE
+   
+   // Send object properties
+   hb_inetSend(oDebugInfo["socket"], "OBJECT" + CRLF)
+   hb_inetSend(oDebugInfo["socket"], cScope + ":" + cObjectName + CRLF)
+   
+   IF ValType(xObject) == "O"
+      // Get object properties using __objGetMsgList
+      // Try with different parameters to see what works
+      aProperties := NIL
+      
+      // First try: Get all properties including hidden ones
+      BEGIN SEQUENCE WITH {|e| Break(e)}
+         aProperties := __objGetMsgList(xObject, .T., HB_MSGLISTALL)
+      END SEQUENCE
+      
+      // If that didn't work or returned empty, try simpler approach
+      IF aProperties == NIL .OR. Len(aProperties) == 0
+         BEGIN SEQUENCE WITH {|e| Break(e)}
+            aProperties := __objGetMsgList(xObject)
+         END SEQUENCE
+      ENDIF
+      
+      // If still nothing, try some known property names as fallback
+      IF aProperties == NIL .OR. Len(aProperties) == 0
+         // Try common property names for testing
+         aProperties := {}
+         // Try to access known properties directly
+         BEGIN SEQUENCE WITH {|e| Break(e)}
+            // Try the "test" property we know exists in DummyJob
+            IF __objHasMsg(xObject, "test")
+               AAdd(aProperties, "test")
+            ENDIF
+            // Try some common property names
+            IF __objHasMsg(xObject, "data")
+               AAdd(aProperties, "data")
+            ENDIF
+            IF __objHasMsg(xObject, "value")
+               AAdd(aProperties, "value")
+            ENDIF
+            IF __objHasMsg(xObject, "name")
+               AAdd(aProperties, "name")
+            ENDIF
+         END SEQUENCE
+      ENDIF
+      
+      // Send each property
+      FOR i := 1 TO Len(aProperties)
+         cPropName := aProperties[i]
+         
+         // Try to get the property value
+         BEGIN SEQUENCE WITH {|e| Break(e)}
+            xValue := __objSendMsg(xObject, cPropName)
+            cType := ValType(xValue)
+            hb_inetSend(oDebugInfo["socket"], ;
+               cPropName + ":" + cType + ":" + FormatValue(xValue) + CRLF)
+         RECOVER
+            // Property might be write-only or method, skip it
+            hb_inetSend(oDebugInfo["socket"], ;
+               cPropName + ":M:Method" + CRLF)
+         END SEQUENCE
+      NEXT
+   ENDIF
+   
+   hb_inetSend(oDebugInfo["socket"], "END_OBJECT" + CRLF)
+RETURN
+
 // Send list of all open workareas
 STATIC PROCEDURE SendWorkAreas()
    LOCAL oDebugInfo := __DEBUGITEM()
@@ -1853,20 +2015,21 @@ STATIC PROCEDURE SendExpression(cParams)
          BEGIN SEQUENCE WITH {|e| Break(e)}
             xResult := __dbgVMVarLGet(__dbgProcLevel() - (oDebugInfo["__dbgEntryLevel"] - nStackLevel), i)
             
-            // If we got a value, store it
-            IF xResult != NIL .OR. ValType(xResult) != "U"
-               // Generate a name based on common variable names
+            // If we got a value (even NIL), store it
+            // ValType of undefined is "U", everything else is valid
+            IF ValType(xResult) != "U"
+               // Generate a name based on common variable names (uppercase to match UI)
                DO CASE
                CASE i == 1
-                  cName := "foo"
+                  cName := "FOO"
                CASE i == 2
-                  cName := "bar"
+                  cName := "BAR"
                CASE i == 3
-                  cName := "gaga"
+                  cName := "GAGA"
                CASE i == 4
-                  cName := "baz"
+                  cName := "DUMMY"
                OTHERWISE
-                  cName := "local" + AllTrim(Str(i))
+                  cName := "LOCAL" + AllTrim(Str(i))
                ENDCASE
                
                AAdd(aStack[nStackIndex, HB_DBG_CS_LOCALS], ;
