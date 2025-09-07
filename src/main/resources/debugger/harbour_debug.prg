@@ -1687,6 +1687,7 @@ STATIC PROCEDURE SendExpression(cParams)
    LOCAL cVarName, xValue, lFound := .F.
    LOCAL lHasLocals, lMacroWorked
    LOCAL l
+   LOCAL nBracketStart, nBracketEnd, cVarPart, cKeyPart
    
    // Debug log entry
    LogDebugInfo("SendExpression called with: " + cParams)
@@ -1960,6 +1961,24 @@ STATIC PROCEDURE SendExpression(cParams)
    // Now evaluate the modified expression
    LogDebugInfo("Final expression to evaluate: " + cExpression)
    
+   // Handle hash access specially - convert var["key"] to hb_HGet(var, "key")
+   // This avoids syntax errors when var is replaced with __dbg[n]
+   IF "[" $ cExpression .AND. "]" $ cExpression
+      // Pattern: variable[key] -> hb_HGet(variable, key)
+      // This is a simple conversion - more complex patterns may need regex
+      nBracketStart := At("[", cExpression)
+      nBracketEnd := At("]", cExpression)
+      IF nBracketStart > 0 .AND. nBracketEnd > nBracketStart
+         cVarPart := Left(cExpression, nBracketStart - 1)
+         cKeyPart := SubStr(cExpression, nBracketStart + 1, nBracketEnd - nBracketStart - 1)
+         // Check if this looks like hash access (has quotes in key part)
+         IF '"' $ cKeyPart .OR. "'" $ cKeyPart .OR. "__dbg[" $ cVarPart
+            cExpression := "hb_HGet(" + cVarPart + ", " + cKeyPart + ")" + SubStr(cExpression, nBracketEnd + 1)
+            LogDebugInfo("Converted hash access to: " + cExpression)
+         ENDIF
+      ENDIF
+   ENDIF
+   
    // Set up error handler
    bError := ErrorBlock({|e| oErr := e, Break(e)})
    
@@ -2127,7 +2146,8 @@ RETURN NIL
 // Replace variable names in expression with their values (VSCode pattern)
 STATIC FUNCTION ReplaceExpression(cExpr, aDbg, cName, xValue)
    LOCAL aMatches := HB_RegExAll("\b" + cName + "\b", cExpr, .F., /*line*/, /*nMat*/, /*nGet*/, .F.)
-   LOCAL i, cVal
+   LOCAL i, cVal, nPos
+   LOCAL lInString
    
    LogDebugInfo("    ReplaceExpression: Looking for '" + cName + "' in '" + cExpr + "'")
    
@@ -2140,13 +2160,42 @@ STATIC FUNCTION ReplaceExpression(cExpr, aDbg, cName, xValue)
    cVal := "__dbg[" + AllTrim(Str(Len(aDbg))) + "]"
    LogDebugInfo("      Found " + AllTrim(Str(Len(aMatches))) + " matches, replacing with " + cVal)
    
+   // Filter out matches that are inside string literals
    FOR i := Len(aMatches) TO 1 STEP -1
-      cExpr := Left(cExpr, aMatches[i, 1, 2] - 1) + cVal + SubStr(cExpr, aMatches[i, 1, 3] + 1)
+      nPos := aMatches[i, 1, 2]
+      
+      // Check if this match is inside a string literal
+      lInString := IsInsideString(cExpr, nPos)
+      
+      IF !lInString
+         cExpr := Left(cExpr, nPos - 1) + cVal + SubStr(cExpr, aMatches[i, 1, 3] + 1)
+      ELSE
+         LogDebugInfo("      Skipping match at position " + AllTrim(Str(nPos)) + " (inside string)")
+      ENDIF
    NEXT
    
    LogDebugInfo("      Result: '" + cExpr + "'")
    
 RETURN cExpr
+
+// Helper function to check if a position is inside a string literal
+STATIC FUNCTION IsInsideString(cExpr, nPos)
+   LOCAL i, cChar
+   LOCAL lInSingle := .F., lInDouble := .F.
+   
+   // Scan from beginning to the position to track string state
+   FOR i := 1 TO nPos - 1
+      cChar := SubStr(cExpr, i, 1)
+      
+      DO CASE
+      CASE cChar == '"' .AND. !lInSingle
+         lInDouble := !lInDouble
+      CASE cChar == "'" .AND. !lInDouble
+         lInSingle := !lInSingle
+      ENDCASE
+   NEXT
+   
+RETURN lInSingle .OR. lInDouble
 
 // Get stack index for a given stack level (VSCode pattern)
 STATIC FUNCTION GetStackId(nLevel, aStack)

@@ -3,7 +3,7 @@
 - when typing endif it is not unindented after return
 
 - debugger:
-  - Expression evaluation not yet implemented for: aentry[1] same for aMaxRech:rechNr
+  - Expression evaluation not yet implemented for: aMaxRech:rechNr
 
   While examining the VS Code extension, I noticed they also support:
   - Objects with properties
