@@ -97,17 +97,31 @@ public class HarbourDebuggerEvaluator extends XDebuggerEvaluator {
     private String evaluateExpression(String expression) {
         try {
             // Send evaluation command to the debug process
-            // Note: This depends on the debugging protocol implementation
-            // For now, we'll try to handle basic expressions
-            
             HarbourLogger.log("HarbourDebuggerEvaluator", 
                 "Attempting to evaluate complex expression: " + expression);
             
-            // Send EVAL command to debugger if supported
-            debugProcess.sendCommand("EVAL", expression);
+            // Replace colons with semicolons to avoid protocol conflicts
+            String safeExpression = expression.replace(":", ";");
             
-            // For now, return a placeholder - this would need proper protocol implementation
-            return "Expression evaluation not yet implemented for: " + expression;
+            // Get current stack level (default to 1 if not available)
+            int stackLevel = 1;
+            
+            // Send EVAL command to debugger: EVAL:stack_level:expression
+            String command = String.format("%d:%s", stackLevel, safeExpression);
+            
+            if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                // Request evaluation and wait for response
+                String result = remoteProcess.requestExpression(command);
+                if (result != null) {
+                    return result;
+                }
+            } else {
+                debugProcess.sendCommand("EVAL", command);
+            }
+            
+            // Temporary fallback
+            return "Waiting for evaluation result...";
             
         } catch (Exception e) {
             HarbourLogger.logStackTrace("HarbourDebuggerEvaluator", e);

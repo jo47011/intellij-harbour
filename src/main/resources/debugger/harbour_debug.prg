@@ -60,6 +60,27 @@ STATIC s_lSocketEnabled := .T.  // ENABLED: Socket communication needed for PyCh
 
 // REMOVED: ErrorHandlerWrapper - part of abandoned approach
 
+// Debug logging function - writes to .hbmk/debug.log
+STATIC PROCEDURE LogDebugInfo(cMessage)
+   LOCAL hFile
+   LOCAL cLogFile := ".hbmk/debug.log"
+   
+   // Only log if .hbmk directory exists (means we're in debug mode)
+   IF hb_DirExists(".hbmk")
+      hFile := FOpen(cLogFile, 1)  // Open for writing, append mode
+      IF hFile == -1
+         hFile := FCreate(cLogFile)  // Create if doesn't exist
+      ELSE
+         FSeek(hFile, 0, 2)  // Seek to end
+      ENDIF
+      
+      IF hFile != -1
+         FWrite(hFile, "[" + Time() + "] " + cMessage + Chr(13) + Chr(10))
+         FClose(hFile)
+      ENDIF
+   ENDIF
+RETURN
+
 // Get or create debug info
 STATIC FUNCTION __DEBUGITEM(xValue)
    IF xValue != NIL
@@ -115,6 +136,8 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
          // Set the current debug entry level
          oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
          
+         LogDebugInfo("HB_DBG_MODULENAME: " + uParam1 + " at level " + AllTrim(Str(__dbgProcLevel()-1)))
+         
          i := RAt(":", uParam1)
          tmp := ATail(oDebugInfo["aStack"])
          
@@ -133,6 +156,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
             tmp[HB_DBG_CS_LOCALS] := {}
             tmp[HB_DBG_CS_STATICS] := {}
             AAdd(oDebugInfo["aStack"], tmp)
+            LogDebugInfo("  Added stack frame, aStack now has " + AllTrim(Str(Len(oDebugInfo["aStack"]))) + " frames")
          ENDIF
       ENDIF
       
@@ -143,6 +167,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
          tmp := ATail(oDebugInfo["aStack"])
          // Store: name, index, type, frame level
          AAdd(tmp[HB_DBG_CS_LOCALS], {uParam2, uParam1, "L", __dbgProcLevel()-1})
+         LogDebugInfo("HB_DBG_LOCALNAME: Added local '" + uParam2 + "' at index " + AllTrim(Str(uParam1)))
       ENDIF
       
    CASE nMode == HB_DBG_STATICNAME
@@ -520,6 +545,16 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   // HASH command - send hash key-value pairs
                   IF ":" $ tmp
                      SendHashElements(SubStr(tmp, 6))  // HASH: = 5 chars, so 6 gets after colon
+                  ENDIF
+                  
+               CASE Left(tmp, 4) == "EVAL" .OR. Left(tmp, 10) == "EXPRESSION"
+                  // EVAL/EXPRESSION command for evaluating expressions
+                  IF ":" $ tmp
+                     IF Left(tmp, 4) == "EVAL"
+                        SendExpression(SubStr(tmp, 6))  // EVAL: = 5 chars
+                     ELSE
+                        SendExpression(SubStr(tmp, 12))  // EXPRESSION: = 11 chars
+                     ENDIF
                   ENDIF
                   
                CASE Left(tmp, 4) == "AREA"
@@ -1599,6 +1634,495 @@ INIT PROCEDURE __InitIntelliJDebugger()
    // Load pre-set breakpoints from init.cld
    LoadBreakpoints()
 RETURN
+
+// Evaluate an expression and send the result (VSCode pattern)
+STATIC PROCEDURE SendExpression(cParams)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL xResult, cType, cValue
+   LOCAL nPos, nStackLevel, cExpression
+   LOCAL bError, oErr
+   LOCAL aStack := oDebugInfo["aStack"]
+   LOCAL aModules := oDebugInfo["aModules"]
+   LOCAL nStackIndex, i, tmp
+   LOCAL cName, v
+   LOCAL aDbg := {}  // Array to hold substituted values
+   LOCAL cModule, nModIndex := 0
+   LOCAL cVarName, xValue, lFound := .F.
+   LOCAL lHasLocals, lMacroWorked
+   
+   // Debug log entry
+   LogDebugInfo("SendExpression called with: " + cParams)
+   LogDebugInfo("  Current proc level: " + AllTrim(Str(__dbgProcLevel())))
+   
+   // Parse parameters: stack_level:expression
+   nPos := At(":", cParams)
+   IF nPos > 0
+      nStackLevel := Val(Left(cParams, nPos - 1))
+      cExpression := SubStr(cParams, nPos + 1)
+   ELSE
+      nStackLevel := 1
+      cExpression := cParams
+   ENDIF
+   
+   LogDebugInfo("Parsed - nStackLevel: " + AllTrim(Str(nStackLevel)) + ", cExpression: " + cExpression)
+   
+   // Replace semicolons back to colons (protocol uses semicolons to avoid conflicts)
+   cExpression := StrTran(cExpression, ";", ":")
+   cExpression := StrTran(cExpression, "::", "self:")
+   
+   LogDebugInfo("aStack has " + IF(aStack == NIL, "NIL", AllTrim(Str(Len(aStack)))) + " frames")
+   
+   // If stack is empty, try to build it retroactively from current call stack
+   IF Empty(aStack)
+      LogDebugInfo("Building stack retroactively from current call stack")
+      LogDebugInfo("  Current __dbgProcLevel(): " + AllTrim(Str(__dbgProcLevel())))
+      aStack := {}
+      // Also set __dbgEntryLevel if not set
+      IF !hb_HHasKey(oDebugInfo, "__dbgEntryLevel") .OR. oDebugInfo["__dbgEntryLevel"] == 0
+         oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
+         LogDebugInfo("  Set __dbgEntryLevel to " + AllTrim(Str(oDebugInfo["__dbgEntryLevel"])))
+      ENDIF
+      // Build stack frames - the VSCode formula expects levels relative to __dbgEntryLevel
+      // GetStackId calculates l = __dbgEntryLevel - nStackLevel
+      // For stackLevel 1: l = __dbgEntryLevel - 1
+      // Since __dbgEntryLevel was set when stopped (not now), we need to calculate relative levels
+      // The first user frame should have level = __dbgEntryLevel - 1
+      FOR i := 3 TO __dbgProcLevel() - 1  // Skip debugger frames
+         AAdd(aStack, {;
+            ProcFile(i),;                                      // HB_DBG_CS_MODULE
+            ProcName(i),;                                      // HB_DBG_CS_FUNCTION  
+            ProcLine(i),;                                      // HB_DBG_CS_LINE
+            oDebugInfo["__dbgEntryLevel"] - (i - 2),;         // HB_DBG_CS_LEVEL (relative to entry)
+            {},;                                               // HB_DBG_CS_LOCALS (empty for now)
+            {};                                                // HB_DBG_CS_STATICS (empty for now)
+         })
+         LogDebugInfo("  Added frame: " + ProcName(i) + " at level " + AllTrim(Str(oDebugInfo["__dbgEntryLevel"] - (i - 2))))
+      NEXT
+      oDebugInfo["aStack"] := aStack
+      LogDebugInfo("Built " + AllTrim(Str(Len(aStack))) + " stack frames")
+   ENDIF
+   
+   // Get the correct stack index using VSCode pattern
+   nStackIndex := GetStackId(nStackLevel, aStack)
+   LogDebugInfo("GetStackId returned index: " + AllTrim(Str(nStackIndex)))
+   
+   // Get module info if we have a valid stack frame
+   IF nStackIndex > 0 .AND. nStackIndex <= Len(aStack) .AND. Len(aStack[nStackIndex]) >= HB_DBG_CS_MODULE
+      cModule := Lower(aStack[nStackIndex, HB_DBG_CS_MODULE])
+      nModIndex := AScan(aModules, {|v| v[1] == cModule})
+      LogDebugInfo("Module: " + cModule + ", ModIndex: " + AllTrim(Str(nModIndex)))
+   ENDIF
+   
+   // First, check if the expression is a simple variable name
+   // This allows us to get variables from the correct stack frame
+   IF IsSimpleVariable(cExpression)
+      cVarName := Upper(AllTrim(cExpression))
+      
+      // Find the appropriate stack frame
+      nStackIndex := 0
+      FOR i := 1 TO Len(aStack)
+         IF aStack[i, HB_DBG_CS_LEVEL] == nStackLevel
+            nStackIndex := i
+            EXIT
+         ENDIF
+      NEXT
+      
+      IF nStackIndex > 0 .AND. nStackIndex <= Len(aStack)
+         // Check locals
+         IF aStack[nStackIndex, HB_DBG_CS_LOCALS] != NIL
+            FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_LOCALS])
+               tmp := aStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == cVarName
+                  xValue := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                  lFound := .T.
+                  EXIT
+               ENDIF
+            NEXT
+         ENDIF
+         
+         // Check statics if not found in locals
+         IF !lFound .AND. aStack[nStackIndex, HB_DBG_CS_STATICS] != NIL
+            FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
+               tmp := aStack[nStackIndex, HB_DBG_CS_STATICS, i]
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == cVarName
+                  xValue := __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                  lFound := .T.
+                  EXIT
+               ENDIF
+            NEXT
+         ENDIF
+      ENDIF
+      
+      // Check privates/publics if not found
+      IF !lFound
+         xValue := GetPrivateOrPublic(cVarName)
+         IF xValue != NIL
+            lFound := .T.
+         ENDIF
+      ENDIF
+      
+      IF lFound
+         cType := ValType(xValue)
+         cValue := FormatValue(xValue)
+         hb_inetSend(oDebugInfo["socket"], "EXPRESSION:" + ;
+                     AllTrim(Str(nStackLevel)) + ":" + ;
+                     cType + ":" + ;
+                     cValue + CRLF)
+         RETURN
+      ENDIF
+   ENDIF
+   
+   // For complex expressions, use variable replacement approach (VSCode pattern)
+   LogDebugInfo("Evaluating expression with variable replacement: " + cExpression)
+   
+   // Check if we have locals metadata for this stack frame
+   lHasLocals := nStackIndex > 0 .AND. nStackIndex <= Len(aStack) .AND. ;
+                 Len(aStack[nStackIndex]) >= HB_DBG_CS_LOCALS .AND. ;
+                 ValType(aStack[nStackIndex, HB_DBG_CS_LOCALS]) == "A" .AND. ;
+                 Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+   
+   // If no locals metadata, try direct macro evaluation first
+   IF !lHasLocals
+      LogDebugInfo("No locals metadata available, trying direct macro evaluation")
+      bError := ErrorBlock({|oErr| Break(oErr)})
+      oDebugInfo["lInternalRun"] := .T.
+      BEGIN SEQUENCE
+         xResult := &(cExpression)
+         lMacroWorked := .T.
+      RECOVER USING oErr
+         LogDebugInfo("Direct macro evaluation failed: " + oErr:Description)
+         lMacroWorked := .F.
+      END SEQUENCE
+      oDebugInfo["lInternalRun"] := .F.
+      ErrorBlock(bError)
+      
+      IF lMacroWorked
+         LogDebugInfo("Direct macro evaluation successful")
+         cType := ValType(xResult)
+         cValue := FormatValue(xResult)
+         hb_inetSend(oDebugInfo["socket"], "EXPRESSION:" + ;
+                     AllTrim(Str(nStackLevel)) + ":" + ;
+                     cType + ":" + ;
+                     cValue + CRLF)
+         RETURN
+      ENDIF
+   ENDIF
+   
+   // Replace variables in expression with their actual values
+   // 1. Replace locals
+   IF lHasLocals
+      LogDebugInfo("Replacing " + AllTrim(Str(Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]))) + " locals")
+      FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_LOCALS])
+         tmp := aStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+         cExpression := ReplaceExpression(cExpression, @aDbg, tmp[HB_DBG_VAR_NAME], ;
+                       __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX]))
+      NEXT
+      
+      // 2. Replace procedure statics
+      IF Len(aStack[nStackIndex]) >= HB_DBG_CS_STATICS .AND. ;
+         ValType(aStack[nStackIndex, HB_DBG_CS_STATICS]) == "A"
+         
+         LogDebugInfo("Replacing " + AllTrim(Str(Len(aStack[nStackIndex, HB_DBG_CS_STATICS]))) + " proc statics")
+         FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
+            tmp := aStack[nStackIndex, HB_DBG_CS_STATICS, i]
+            cExpression := ReplaceExpression(cExpression, @aDbg, tmp[HB_DBG_VAR_NAME], ;
+                          __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX]))
+         NEXT
+      ENDIF
+   ENDIF
+   
+   // 3. Replace all public variables
+   FOR i := 1 TO __mvDbgInfo(HB_MV_PUBLIC)
+      v := __mvDbgInfo(HB_MV_PUBLIC, i, @cName)
+      LogDebugInfo("  Public var: " + cName + " = " + ValType(v))
+      cExpression := ReplaceExpression(cExpression, @aDbg, cName, v)
+   NEXT
+   LogDebugInfo("Replaced " + AllTrim(Str(__mvDbgInfo(HB_MV_PUBLIC))) + " publics")
+   
+   // 4. Replace all private variables
+   FOR i := 1 TO __mvDbgInfo(HB_MV_PRIVATE)
+      v := __mvDbgInfo(HB_MV_PRIVATE, i, @cName)
+      LogDebugInfo("  Private var: " + cName + " = " + ValType(v))
+      cExpression := ReplaceExpression(cExpression, @aDbg, cName, v)
+   NEXT
+   LogDebugInfo("Replaced " + AllTrim(Str(__mvDbgInfo(HB_MV_PRIVATE))) + " privates")
+   
+   // 5. Replace module statics
+   IF nModIndex > 0 .AND. Len(aModules) >= nModIndex .AND. Len(aModules[nModIndex]) >= 4
+      LogDebugInfo("Replacing " + AllTrim(Str(Len(aModules[nModIndex, 4]))) + " module statics")
+      FOR i := 1 TO Len(aModules[nModIndex, 4])
+         tmp := aModules[nModIndex, 4, i]
+         cExpression := ReplaceExpression(cExpression, @aDbg, tmp[HB_DBG_VAR_NAME], ;
+                       __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX]))
+      NEXT
+   ENDIF
+   
+   // Now evaluate the modified expression
+   LogDebugInfo("Final expression to evaluate: " + cExpression)
+   
+   // Set up error handler
+   bError := ErrorBlock({|e| oErr := e, Break(e)})
+   
+   oDebugInfo["lInternalRun"] := .T.
+   BEGIN SEQUENCE
+      // Evaluate the expression with __dbg array containing values
+      xResult := Eval(&("{|__dbg| " + cExpression + "}"), aDbg)
+   RECOVER
+      xResult := oErr
+   END SEQUENCE
+   oDebugInfo["lInternalRun"] := .F.
+   
+   // Restore error handler
+   ErrorBlock(bError)
+   
+   // Format the result
+   IF ValType(xResult) == "O" .AND. xResult:ClassName() == "ERROR"
+      cType := "E"
+      cValue := xResult:Description
+      LogDebugInfo("Expression evaluation error: " + cValue)
+   ELSE
+      cType := ValType(xResult)
+      cValue := FormatValue(xResult)
+      LogDebugInfo("Expression evaluated successfully: Type=" + cType + ", Value=" + cValue)
+   ENDIF
+   
+   // Send response: EXPRESSION:stack_level:type:value
+   hb_inetSend(oDebugInfo["socket"], "EXPRESSION:" + ;
+               AllTrim(Str(nStackLevel)) + ":" + ;
+               cType + ":" + ;
+               cValue + CRLF)
+RETURN
+
+// Check if a string is a simple variable name (no operators, function calls, etc.)
+STATIC FUNCTION IsSimpleVariable(cExpression)
+   LOCAL cChar, i
+   LOCAL cClean := AllTrim(cExpression)
+   
+   // Empty string is not a variable
+   IF Empty(cClean)
+      RETURN .F.
+   ENDIF
+   
+   // Check each character
+   FOR i := 1 TO Len(cClean)
+      cChar := SubStr(cClean, i, 1)
+      // Variable names can only contain letters, numbers, and underscore
+      IF !(IsAlpha(cChar) .OR. IsDigit(cChar) .OR. cChar == "_")
+         RETURN .F.
+      ENDIF
+   NEXT
+   
+   // First character cannot be a digit
+   IF IsDigit(Left(cClean, 1))
+      RETURN .F.
+   ENDIF
+   
+RETURN .T.
+
+// Get value of a private or public variable by name
+STATIC FUNCTION GetPrivateOrPublic(cVarName)
+   LOCAL xValue := NIL
+   LOCAL bError, oErr
+   
+   LogDebugInfo("GetPrivateOrPublic: checking for '" + cVarName + "'")
+   
+   // Set up error handler to catch undefined variable errors
+   bError := ErrorBlock({|e| oErr := e, Break(e)})
+   
+   BEGIN SEQUENCE
+      // Try to get the variable value using macro
+      xValue := &(cVarName)
+      LogDebugInfo("  Found value: " + ValType(xValue))
+   RECOVER
+      // Variable doesn't exist
+      xValue := NIL
+      LogDebugInfo("  Variable not found")
+   END SEQUENCE
+   
+   // Restore error handler
+   ErrorBlock(bError)
+   
+RETURN xValue
+
+// Evaluate complex expressions with variable substitution
+STATIC FUNCTION EvaluateComplexExpression(cExpression, nStackLevel, vmStack, aStack)
+   LOCAL xResult := NIL
+   LOCAL bError, oErr
+   LOCAL cModified, nPos, cVarName, xVarValue
+   LOCAL i, nStackIndex, tmp
+   LOCAL cUpper := Upper(cExpression)
+   LOCAL aVars := {}
+   LOCAL cTemp
+   LOCAL aFunctions := {"LEN(", "VAL(", "STR(", "UPPER(", "LOWER(", "TRIM(", "ALLTRIM(", "TYPE(", "VALTYPE("}
+   
+   LogDebugInfo("EvaluateComplexExpression called with: " + cExpression)
+   LogDebugInfo("  nStackLevel: " + AllTrim(Str(nStackLevel)))
+   LogDebugInfo("  aStack length: " + AllTrim(Str(Len(aStack))))
+   
+   // Common function patterns to check
+   
+   // Check if expression contains a function call
+   FOR i := 1 TO Len(aFunctions)
+      IF aFunctions[i] $ cUpper
+         LogDebugInfo("Found function: " + aFunctions[i])
+         // Extract variable name from function call
+         // e.g., "LEN(GAGA)" -> "GAGA"
+         nPos := At(aFunctions[i], cUpper)
+         IF nPos > 0
+            cTemp := SubStr(cExpression, nPos + Len(aFunctions[i]))
+            nPos := At(")", cTemp)
+            IF nPos > 0
+               cVarName := AllTrim(Left(cTemp, nPos - 1))
+               LogDebugInfo("Extracted variable name: " + cVarName)
+               
+               // Get the variable value
+               xVarValue := GetVariableValue(cVarName, nStackLevel, vmStack, aStack)
+               LogDebugInfo("GetVariableValue returned: " + IF(xVarValue == NIL, "NIL", ValType(xVarValue)))
+               
+               IF xVarValue != NIL
+                  // Now evaluate the function with the actual value
+                  bError := ErrorBlock({|e| oErr := e, Break(e)})
+                  
+                  BEGIN SEQUENCE
+                     // Build the expression with the actual value
+                     DO CASE
+                        CASE Left(aFunctions[i], 3) == "LEN"
+                           xResult := Len(xVarValue)
+                        CASE Left(aFunctions[i], 3) == "VAL"
+                           xResult := Val(xVarValue)
+                        CASE Left(aFunctions[i], 3) == "STR"
+                           xResult := Str(xVarValue)
+                        CASE Left(aFunctions[i], 5) == "UPPER"
+                           xResult := Upper(xVarValue)
+                        CASE Left(aFunctions[i], 5) == "LOWER"
+                           xResult := Lower(xVarValue)
+                        CASE Left(aFunctions[i], 4) == "TRIM"
+                           xResult := Trim(xVarValue)
+                        CASE Left(aFunctions[i], 7) == "ALLTRIM"
+                           xResult := AllTrim(xVarValue)
+                        CASE Left(aFunctions[i], 4) == "TYPE"
+                           xResult := Type(cVarName)  // TYPE needs the variable name
+                        CASE Left(aFunctions[i], 7) == "VALTYPE"
+                           xResult := ValType(xVarValue)
+                     ENDCASE
+                     
+                  RECOVER
+                     xResult := NIL
+                  END SEQUENCE
+                  
+                  ErrorBlock(bError)
+                  
+                  IF xResult != NIL
+                     RETURN xResult
+                  ENDIF
+               ENDIF
+            ENDIF
+         ENDIF
+      ENDIF
+   NEXT
+   
+   // For other complex expressions, return NIL to use fallback
+RETURN NIL
+
+// Replace variable names in expression with their values (VSCode pattern)
+STATIC FUNCTION ReplaceExpression(cExpr, aDbg, cName, xValue)
+   LOCAL aMatches := HB_RegExAll("\b" + cName + "\b", cExpr, .F., /*line*/, /*nMat*/, /*nGet*/, .F.)
+   LOCAL i, cVal
+   
+   LogDebugInfo("    ReplaceExpression: Looking for '" + cName + "' in '" + cExpr + "'")
+   
+   IF Empty(aMatches)
+      LogDebugInfo("      No matches found")
+      RETURN cExpr
+   ENDIF
+   
+   AAdd(aDbg, xValue)
+   cVal := "__dbg[" + AllTrim(Str(Len(aDbg))) + "]"
+   LogDebugInfo("      Found " + AllTrim(Str(Len(aMatches))) + " matches, replacing with " + cVal)
+   
+   FOR i := Len(aMatches) TO 1 STEP -1
+      cExpr := Left(cExpr, aMatches[i, 1, 2] - 1) + cVal + SubStr(cExpr, aMatches[i, 1, 3] + 1)
+   NEXT
+   
+   LogDebugInfo("      Result: '" + cExpr + "'")
+   
+RETURN cExpr
+
+// Get stack index for a given stack level (VSCode pattern)
+STATIC FUNCTION GetStackId(nLevel, aStack)
+   LOCAL l := __DEBUGITEM()["__dbgEntryLevel"] - nLevel
+   LOCAL i
+   
+   LogDebugInfo("GetStackId: nLevel=" + AllTrim(Str(nLevel)) + ", __dbgEntryLevel=" + AllTrim(Str(__DEBUGITEM()["__dbgEntryLevel"])) + ", calculated l=" + AllTrim(Str(l)))
+   
+   // Check for error state and adjust if needed
+   IF hb_HHasKey(__DEBUGITEM(), "lError") .AND. __DEBUGITEM()["lError"]
+      l := l - 1
+      LogDebugInfo("  Adjusted for error state, l=" + AllTrim(Str(l)))
+   ENDIF
+   
+   IF Empty(aStack)
+      aStack := __DEBUGITEM()["aStack"]
+   ENDIF
+   
+   // Log what we're searching for
+   FOR i := 1 TO Len(aStack)
+      LogDebugInfo("  Stack[" + AllTrim(Str(i)) + "] level=" + AllTrim(Str(aStack[i, HB_DBG_CS_LEVEL])))
+   NEXT
+   
+RETURN AScan(aStack, {|a| a[HB_DBG_CS_LEVEL] == l})
+
+// Get variable value from any scope
+STATIC FUNCTION GetVariableValue(cVarName, nStackLevel, vmStack, aStack)
+   LOCAL xValue := NIL
+   LOCAL nStackIndex, i, tmp
+   LOCAL cUpperName := Upper(AllTrim(cVarName))
+   
+   LogDebugInfo("GetVariableValue: looking for '" + cVarName + "' at stack level " + AllTrim(Str(nStackLevel)))
+   LogDebugInfo("  aStack has " + AllTrim(Str(Len(aStack))) + " frames")
+   
+   // Find the appropriate stack frame
+   nStackIndex := 0
+   FOR i := 1 TO Len(aStack)
+      IF aStack[i, HB_DBG_CS_LEVEL] == nStackLevel
+         nStackIndex := i
+         LogDebugInfo("  Found stack frame at index " + AllTrim(Str(i)))
+         EXIT
+      ENDIF
+   NEXT
+   
+   IF nStackIndex == 0
+      LogDebugInfo("  Stack frame not found for level " + AllTrim(Str(nStackLevel)))
+   ENDIF
+   
+   IF nStackIndex > 0 .AND. nStackIndex <= Len(aStack)
+      // Check locals
+      IF aStack[nStackIndex, HB_DBG_CS_LOCALS] != NIL
+         FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_LOCALS])
+            tmp := aStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+            IF Upper(tmp[HB_DBG_VAR_NAME]) == cUpperName
+               xValue := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+               RETURN xValue
+            ENDIF
+         NEXT
+      ENDIF
+      
+      // Check statics
+      IF aStack[nStackIndex, HB_DBG_CS_STATICS] != NIL
+         FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
+            tmp := aStack[nStackIndex, HB_DBG_CS_STATICS, i]
+            IF Upper(tmp[HB_DBG_VAR_NAME]) == cUpperName
+               xValue := __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+               RETURN xValue
+            ENDIF
+         NEXT
+      ENDIF
+   ENDIF
+   
+   // Check privates/publics
+   xValue := GetPrivateOrPublic(cVarName)
+   
+RETURN xValue
 
 // Override AltD() to trigger debugger (WORKING SOLUTION FROM GIT HISTORY)
 PROCEDURE AltD()

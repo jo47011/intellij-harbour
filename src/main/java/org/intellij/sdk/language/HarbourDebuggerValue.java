@@ -88,15 +88,15 @@ public class HarbourDebuggerValue extends XValue {
         Icon icon = AllIcons.Debugger.Value;
 
         if ("N".equals(type) || "NUM".equals(type) || "NUMBER".equals(type)) {
-            icon = AllIcons.Debugger.Db_primitive;
+            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
         } else if ("C".equals(type) || "CHAR".equals(type) || "CHARACTER".equals(type)) {
-            icon = AllIcons.Debugger.Db_primitive;
+            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
         } else if ("L".equals(type) || "LOGICAL".equals(type)) {
-            icon = AllIcons.Debugger.Db_primitive;
+            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
         } else if ("D".equals(type) || "DATE".equals(type)) {
-            icon = AllIcons.Debugger.Db_primitive;
+            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
         } else if ("A".equals(type) || "ARRAY".equals(type)) {
-            icon = AllIcons.Debugger.Db_array;
+            icon = AllIcons.Debugger.Value;  // Use generic value icon for arrays (Db_array might not exist)
         } else if ("O".equals(type) || "OBJECT".equals(type)) {
             icon = AllIcons.Debugger.Value;
         }

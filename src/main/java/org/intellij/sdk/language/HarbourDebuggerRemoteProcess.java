@@ -28,9 +28,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 /**
@@ -421,6 +423,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         }
                         break;
                         
+                    case "EXPRESSION":
+                        // Handle expression evaluation response
+                        // Format: EXPRESSION:stack_level:type:value
+                        handleExpressionResult(command);
+                        break;
+                        
                     case "AREA":
                         // Check if this is a workarea info message or a detailed data request response
                         if (parts.length >= 2 && (parts[1].equals("FIELDS") || parts[1].equals("RECORD") || parts[1].equals("SCHEMA"))) {
@@ -546,6 +554,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                     "HASH response with " + hashLines.length + " element lines");
                 handleHashElements(hashLines);
+                break;
+                
+            case "EXPRESSION":
+                // Handle expression evaluation response
+                // Format: EXPRESSION:stack_level:type:value
+                if (lines.length > 0) {
+                    handleExpressionResult(lines[0]);
+                }
                 break;
                 
             case "WORKAREAS":
@@ -2687,5 +2703,93 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Send command to debugger to get hash key-value pairs
         // Format: HASH:scope:name
         sendCommand("HASH", scope + ":" + hashName);
+    }
+    
+    // Store pending expression evaluations
+    private final Map<String, CompletableFuture<String>> pendingExpressions = new ConcurrentHashMap<>();
+    private String lastExpressionCommand = null;
+    
+    public String requestExpression(String command) {
+        lastExpressionCommand = command;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting expression evaluation: " + command);
+        
+        // Create a future to wait for the result
+        CompletableFuture<String> future = new CompletableFuture<>();
+        pendingExpressions.put(command, future);
+        
+        // Send command to debugger
+        sendCommand("EVAL", command);
+        
+        try {
+            // Wait for response with timeout
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Expression evaluation timed out: " + command);
+            pendingExpressions.remove(command);
+            return "Evaluation timed out";
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Expression evaluation failed: " + e.getMessage());
+            pendingExpressions.remove(command);
+            return "Evaluation failed: " + e.getMessage();
+        }
+    }
+    
+    private void handleExpressionResult(String response) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Received expression result: " + response);
+        
+        // Parse EXPRESSION:stack_level:type:value
+        String[] parts = response.split(":", 4);
+        if (parts.length >= 4) {
+            String stackLevel = parts[1];
+            String type = parts[2];
+            String value = parts[3];
+            
+            // Format the result based on type
+            String result;
+            if ("E".equals(type)) {
+                // Error
+                result = "Error: " + value;
+            } else {
+                // Success - format based on type
+                result = value;
+                if ("C".equals(type)) {
+                    // String - already quoted by FormatValue
+                } else if ("N".equals(type)) {
+                    // Number
+                } else if ("L".equals(type)) {
+                    // Logical
+                } else if ("A".equals(type)) {
+                    // Array
+                } else if ("H".equals(type)) {
+                    // Hash
+                } else if ("O".equals(type)) {
+                    // Object
+                } else if ("U".equals(type)) {
+                    // NIL
+                }
+            }
+            
+            // Complete any pending future for this expression
+            if (lastExpressionCommand != null) {
+                CompletableFuture<String> future = pendingExpressions.remove(lastExpressionCommand);
+                if (future != null) {
+                    future.complete(result);
+                }
+                lastExpressionCommand = null;
+            }
+            
+            // Also complete any futures that might match (in case of multiple evaluations)
+            for (Map.Entry<String, CompletableFuture<String>> entry : pendingExpressions.entrySet()) {
+                entry.getValue().complete(result);
+            }
+            pendingExpressions.clear();
+        } else {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid expression result format: " + response);
+        }
     }
 }
