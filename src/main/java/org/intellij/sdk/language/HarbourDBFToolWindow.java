@@ -19,6 +19,7 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableColumn;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
@@ -26,7 +27,9 @@ import java.awt.*;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Tool window for displaying live DBF workarea information during debugging.
@@ -1199,10 +1202,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 return;
             }
             
-            List<String[]> columns = new ArrayList<>();
-            List<String[]> rows = new ArrayList<>();
-            String currentRowNum = null;
-            List<String[]> currentRow = new ArrayList<>();
+            List<String> columnNames = new ArrayList<>();
+            List<Map<String, String>> rows = new ArrayList<>();
+            Map<String, String> currentRow = null;
             
             // Parse the records data
             for (String line : recordsData) {
@@ -1216,75 +1218,84 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     detailsTable.revalidate();
                     return;
                 } else if (line.startsWith("COLUMN:")) {
-                    // Parse column definition
+                    // Parse column definition - format: COLUMN:name:type:length:decimals
                     String[] parts = line.substring(7).split(":");
-                    if (parts.length >= 3) {
-                        columns.add(new String[]{parts[0], parts[1], parts[2]});
+                    if (parts.length >= 1) {
+                        columnNames.add(parts[0]);
                     }
                 } else if (line.startsWith("ROW:")) {
                     // Save previous row if exists
-                    if (currentRowNum != null && !currentRow.isEmpty()) {
-                        String[] rowData = new String[columns.size() + 1];
-                        rowData[0] = currentRowNum;
-                        for (int i = 0; i < currentRow.size() && i < columns.size(); i++) {
-                            rowData[i + 1] = currentRow.get(i)[1];
-                        }
-                        rows.add(rowData);
+                    if (currentRow != null) {
+                        rows.add(new HashMap<>(currentRow));
                     }
                     // Start new row
-                    currentRowNum = line.substring(4);
-                    currentRow.clear();
-                } else if (line.startsWith("CELL:")) {
-                    // Parse cell data
+                    currentRow = new HashMap<>();
+                    currentRow.put("RecNo", line.substring(4));
+                } else if (line.startsWith("CELL:") && currentRow != null) {
+                    // Parse cell data - format: CELL:fieldname:value
                     int colonPos = line.indexOf(':', 5);
                     if (colonPos > 0) {
                         String fieldName = line.substring(5, colonPos);
                         String value = line.substring(colonPos + 1);
-                        currentRow.add(new String[]{fieldName, value});
+                        // Remove quotes from values
+                        if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
+                            value = value.substring(1, value.length() - 1);
+                        }
+                        // Trim trailing spaces from character fields
+                        value = value.trim();
+                        currentRow.put(fieldName, value);
                     }
                 }
             }
             
             // Add last row
-            if (currentRowNum != null && !currentRow.isEmpty()) {
-                String[] rowData = new String[columns.size() + 1];
-                rowData[0] = currentRowNum;
-                for (int i = 0; i < currentRow.size() && i < columns.size(); i++) {
-                    rowData[i + 1] = currentRow.get(i)[1];
+            if (currentRow != null) {
+                rows.add(currentRow);
+            }
+            
+            // If no columns found, show error
+            if (columnNames.isEmpty() || rows.isEmpty()) {
+                List<String[]> data = new ArrayList<>();
+                data.add(new String[]{"Table Grid View for " + workarea.getAlias(), ""});
+                data.add(new String[]{"No data available", ""});
+                tableModel.setData(data);
+                detailsTable.repaint();
+                detailsTable.revalidate();
+                return;
+            }
+            
+            // Create a proper grid table model
+            String[] columnArray = new String[columnNames.size() + 1];
+            columnArray[0] = "RecNo";
+            for (int i = 0; i < columnNames.size(); i++) {
+                columnArray[i + 1] = columnNames.get(i);
+            }
+            
+            // Convert to table data format
+            Object[][] tableData = new Object[rows.size()][columnArray.length];
+            for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+                Map<String, String> row = rows.get(rowIdx);
+                tableData[rowIdx][0] = row.get("RecNo");
+                for (int colIdx = 0; colIdx < columnNames.size(); colIdx++) {
+                    String value = row.get(columnNames.get(colIdx));
+                    tableData[rowIdx][colIdx + 1] = value != null ? value : "";
                 }
-                rows.add(rowData);
             }
             
-            // Create table data
-            List<String[]> data = new ArrayList<>();
-            data.add(new String[]{"Table Grid View for " + workarea.getAlias(), ""});
-            data.add(new String[]{"Showing " + rows.size() + " records", ""});
-            data.add(new String[]{"", ""});
+            // Update the table model with proper grid data
+            GridTableModel gridModel = new GridTableModel(columnArray, tableData);
+            detailsTable.setModel(gridModel);
             
-            // Add column headers
-            StringBuilder header = new StringBuilder("RecNo | ");
-            for (String[] col : columns) {
-                header.append(col[0]).append(" | ");
-            }
-            data.add(new String[]{"Columns:", header.toString()});
-            data.add(new String[]{"", ""});
-            
-            // Add rows
-            for (String[] row : rows) {
-                StringBuilder rowStr = new StringBuilder(row[0] + " | ");
-                for (int i = 1; i < row.length; i++) {
-                    if (row[i] != null) {
-                        String val = row[i];
-                        if (val.length() > 20) {
-                            val = val.substring(0, 20) + "...";
-                        }
-                        rowStr.append(val).append(" | ");
-                    }
+            // Adjust column widths
+            for (int i = 0; i < detailsTable.getColumnCount(); i++) {
+                TableColumn column = detailsTable.getColumnModel().getColumn(i);
+                if (i == 0) {
+                    column.setPreferredWidth(60); // RecNo column
+                } else {
+                    column.setPreferredWidth(120); // Data columns
                 }
-                data.add(new String[]{"", rowStr.toString()});
             }
             
-            tableModel.setData(data);
             detailsTable.repaint();
             detailsTable.revalidate();
         }
@@ -1307,6 +1318,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             String currentKey = null;
             String currentFor = null;
             String currentBag = null;
+            List<String[]> indexList = new ArrayList<>();
             
             // Parse all index data
             for (String line : indexesData) {
@@ -1322,18 +1334,24 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     currentFor = line.substring(12);
                 } else if (line.startsWith("CURRENT_BAG:")) {
                     currentBag = line.substring(12);
+                } else if (line.startsWith("INDEX:")) {
+                    // Parse INDEX:number:name:file:key:for
+                    String[] parts = line.substring(6).split(":", 5);
+                    if (parts.length >= 4) {
+                        indexList.add(parts);
+                    }
                 }
             }
             
             // Display current index details
             if (currentIndex != null && !currentIndex.equals("0")) {
-                data.add(new String[]{"=== CURRENTLY SELECTED INDEX ===", ""});
+                data.add(new String[]{"Currently Selected Index", ""});
                 data.add(new String[]{"Index Order:", currentIndex});
                 if (currentName != null && !currentName.isEmpty()) {
                     data.add(new String[]{"Index Name:", currentName});
                 }
                 if (currentBag != null && !currentBag.isEmpty()) {
-                    data.add(new String[]{"Index File (Bag):", currentBag});
+                    data.add(new String[]{"Index File:", currentBag});
                 }
                 if (currentKey != null && !currentKey.isEmpty()) {
                     data.add(new String[]{"Key Expression:", currentKey});
@@ -1342,52 +1360,82 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     data.add(new String[]{"For Condition:", currentFor});
                 }
                 data.add(new String[]{"", ""});
-            } else {
-                data.add(new String[]{"No index currently selected", ""});
-                data.add(new String[]{"", ""});
             }
             
             // Display all indexes
-            data.add(new String[]{"=== ALL INDEXES ===", ""});
-            boolean hasIndexes = false;
-            
-            for (String line : indexesData) {
-                if (line.startsWith("INDEX:")) {
-                    hasIndexes = true;
-                    // Parse INDEX:number:name:file:key:for
-                    String[] parts = line.substring(6).split(":", 5);
-                    if (parts.length >= 4) {
-                        String indexNum = parts[0];
-                        String indexName = parts[1];
-                        String indexFile = parts[2];
-                        String indexKey = parts[3];
-                        String indexFor = parts.length > 4 ? parts[4] : "";
-                        
-                        data.add(new String[]{"", ""});
-                        data.add(new String[]{"Index #" + indexNum + (indexName.isEmpty() ? "" : " (" + indexName + ")"), ""});
-                        if (!indexFile.isEmpty()) {
-                            data.add(new String[]{"  File:", indexFile});
-                        }
-                        data.add(new String[]{"  Key:", indexKey});
-                        if (!indexFor.isEmpty()) {
-                            data.add(new String[]{"  For:", indexFor});
-                        }
-                        
-                        // Mark if this is the current index
-                        if (currentIndex != null && currentIndex.equals(indexNum)) {
-                            data.add(new String[]{"  Status:", "*** ACTIVE ***"});
-                        }
+            if (!indexList.isEmpty()) {
+                data.add(new String[]{"All Indexes", ""});
+                
+                for (String[] parts : indexList) {
+                    String indexNum = parts[0];
+                    String indexName = parts[1];
+                    String indexFile = parts[2];
+                    String indexKey = parts[3];
+                    String indexFor = parts.length > 4 ? parts[4] : "";
+                    
+                    data.add(new String[]{"", ""});
+                    String indexTitle = "Index #" + indexNum;
+                    if (!indexName.isEmpty()) {
+                        indexTitle += " (" + indexName + ")";
+                    }
+                    if (currentIndex != null && currentIndex.equals(indexNum)) {
+                        indexTitle += " [ACTIVE]";
+                    }
+                    data.add(new String[]{indexTitle, ""});
+                    
+                    if (!indexFile.isEmpty()) {
+                        data.add(new String[]{"  File:", indexFile});
+                    }
+                    data.add(new String[]{"  Key:", indexKey});
+                    if (!indexFor.isEmpty()) {
+                        data.add(new String[]{"  For:", indexFor});
                     }
                 }
-            }
-            
-            if (!hasIndexes) {
+            } else {
                 data.add(new String[]{"No indexes defined for this workarea", ""});
             }
             
             tableModel.setData(data);
             detailsTable.repaint();
             detailsTable.revalidate();
+        }
+    }
+    
+    /**
+     * Table model for grid view display
+     */
+    private static class GridTableModel extends AbstractTableModel {
+        private final String[] columnNames;
+        private final Object[][] data;
+        
+        public GridTableModel(String[] columnNames, Object[][] data) {
+            this.columnNames = columnNames;
+            this.data = data;
+        }
+        
+        @Override
+        public int getRowCount() {
+            return data.length;
+        }
+        
+        @Override
+        public int getColumnCount() {
+            return columnNames.length;
+        }
+        
+        @Override
+        public String getColumnName(int column) {
+            return columnNames[column];
+        }
+        
+        @Override
+        public Object getValueAt(int rowIndex, int columnIndex) {
+            return data[rowIndex][columnIndex];
+        }
+        
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            return false;
         }
     }
     
