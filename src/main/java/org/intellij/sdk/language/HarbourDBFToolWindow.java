@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.components.JBTabbedPane;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.table.JBTable;
@@ -17,10 +18,12 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableModel;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 import java.awt.*;
+import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -88,6 +91,13 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private final DetailsTableModel tableModel;
         private final JLabel statusLabel;
         
+        // Navigation controls
+        private JButton prevButton;
+        private JButton nextButton;
+        private JButton gotoButton;
+        private JSpinner recordSpinner;
+        private String currentWorkarea = null;
+        
         private HarbourLiveDBFConnection liveConnection;
         
         // Cache for storing received data per workarea
@@ -140,6 +150,14 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         public HarbourDBFToolWindowContent(@NotNull Project project) {
             this.project = project;
             
+            // Version indicator - CRITICAL: Table Grid View and Indexes nodes MUST appear
+            HarbourLogger.log("HarbourDBFToolWindow", "");
+            HarbourLogger.log("HarbourDBFToolWindow", "==========================================");
+            HarbourLogger.log("HarbourDBFToolWindow", "*** PLUGIN VERSION 1.2.28 LOADED ***");
+            HarbourLogger.log("HarbourDBFToolWindow", "*** Table Grid View and Indexes ENABLED ***");
+            HarbourLogger.log("HarbourDBFToolWindow", "==========================================");
+            HarbourLogger.log("HarbourDBFToolWindow", "");
+            
             // Create UI components
             mainPanel = new JPanel(new BorderLayout());
             
@@ -162,15 +180,43 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             statusLabel = new JLabel("No debugging session active");
             statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
             
-            // Create refresh button
-            JButton refreshButton = new JButton("Refresh Workareas");
-            refreshButton.addActionListener(e -> refreshWorkareas());
+            // Create refresh button - now handles both workarea refresh and data reload
+            JButton refreshButton = new JButton("Refresh");
+            refreshButton.setToolTipText("Refresh workareas and reload current data");
+            refreshButton.addActionListener(e -> refreshData());
+            
+            // Create navigation controls
+            prevButton = new JButton("Previous");
+            prevButton.setEnabled(false);
+            prevButton.addActionListener(e -> navigateToPreviousRecord());
+            
+            nextButton = new JButton("Next");
+            nextButton.setEnabled(false);
+            nextButton.addActionListener(e -> navigateToNextRecord());
+            
+            recordSpinner = new JSpinner(new SpinnerNumberModel(1, 1, 1, 1));
+            recordSpinner.setEnabled(false);
+            recordSpinner.setPreferredSize(new Dimension(80, 25));
+            
+            gotoButton = new JButton("Go To");
+            gotoButton.setEnabled(false);
+            gotoButton.addActionListener(e -> navigateToRecord());
+            
+            // Create navigation panel
+            JPanel navigationPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            navigationPanel.add(new JLabel("Record Navigation:"));
+            navigationPanel.add(prevButton);
+            navigationPanel.add(nextButton);
+            navigationPanel.add(new JLabel("  Go to:"));
+            navigationPanel.add(recordSpinner);
+            navigationPanel.add(gotoButton);
             
             // Create toolbar
             JPanel toolbar = new JPanel(new BorderLayout());
+            toolbar.add(navigationPanel, BorderLayout.CENTER);
             toolbar.add(refreshButton, BorderLayout.EAST);
             
-            // Layout components
+            // Create split pane with tree on left, details on right
             JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
             splitPane.setLeftComponent(new JBScrollPane(workareaTree));
             splitPane.setRightComponent(new JBScrollPane(detailsTable));
@@ -187,6 +233,14 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             checkForExistingDebugSession();
             
             HarbourLogger.log("HarbourDBFToolWindow", "Created DBF tool window for project: " + project.getName());
+            
+            // Auto-refresh when tool window is first opened
+            SwingUtilities.invokeLater(() -> {
+                if (liveConnection != null) {
+                    refreshData();
+                    HarbourLogger.log("HarbourDBFToolWindow", "Auto-refreshed data on tool window open");
+                }
+            });
         }
         
         public JComponent getContent() {
@@ -206,6 +260,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             waitingForWorkarea = null;
             waitingForDataType = null;
             pendingRequests.clear();
+            currentWorkarea = null;
+            updateNavigationButtons();
             
             this.liveConnection = connection;
             connection.addWorkareaUpdateListener(this);
@@ -235,6 +291,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             waitingForWorkarea = null;
             waitingForDataType = null;
             pendingRequests.clear();
+            currentWorkarea = null;
+            updateNavigationButtons();
             
             updateStatus("Debugging session disconnected");
             
@@ -317,7 +375,18 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Add child nodes for different information types
                 workareaNode.add(new DefaultMutableTreeNode("Fields (" + workarea.getFieldCount() + ")"));
                 workareaNode.add(new DefaultMutableTreeNode("Current Record"));
+                workareaNode.add(new DefaultMutableTreeNode("Table Grid View"));
+                workareaNode.add(new DefaultMutableTreeNode("Indexes"));
                 workareaNode.add(new DefaultMutableTreeNode("Schema Info"));
+                
+                HarbourLogger.log("HarbourDBFToolWindow", "Added tree nodes for " + workarea.getAlias() + 
+                    " including Table Grid View and Indexes");
+                
+                // Log all child nodes to verify they exist
+                for (int i = 0; i < workareaNode.getChildCount(); i++) {
+                    DefaultMutableTreeNode child = (DefaultMutableTreeNode) workareaNode.getChildAt(i);
+                    HarbourLogger.log("HarbourDBFToolWindow", "  Child node " + i + ": '" + child.getUserObject() + "'");
+                }
             }
             
             treeModel.reload();
@@ -325,16 +394,33 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Expand root node
             workareaTree.expandPath(new TreePath(rootNode.getPath()));
             
-            // Restore expansion state
+            // Keep workareas collapsed by default for cleaner UI
+            // Users can expand them as needed
             for (int i = 0; i < rootNode.getChildCount(); i++) {
                 DefaultMutableTreeNode child = (DefaultMutableTreeNode) rootNode.getChildAt(i);
                 if (child.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
                     HarbourLiveDBFConnection.WorkareaInfo info = (HarbourLiveDBFConnection.WorkareaInfo) child.getUserObject();
+                    // Check if this workarea was previously expanded
                     if (expandedWorkareas.contains(info.getAlias())) {
-                        workareaTree.expandPath(new TreePath(child.getPath()));
+                        TreePath childPath = new TreePath(child.getPath());
+                        workareaTree.expandPath(childPath);
+                        HarbourLogger.log("HarbourDBFToolWindow", "Restored expanded state for: " + info.getAlias());
+                    } else {
+                        // Keep collapsed - user can expand if needed
+                        TreePath childPath = new TreePath(child.getPath());
+                        workareaTree.collapsePath(childPath);
+                        HarbourLogger.log("HarbourDBFToolWindow", "Keeping collapsed: " + info.getAlias() + 
+                            " with " + child.getChildCount() + " child nodes");
                     }
                 }
             }
+            
+            // Force UI refresh to ensure all nodes are visible
+            SwingUtilities.invokeLater(() -> {
+                workareaTree.revalidate();
+                workareaTree.repaint();
+                HarbourLogger.log("HarbourDBFToolWindow", "UI refresh completed for workarea tree");
+            });
             
             // Don't restore selection - it causes unwanted event triggering
             // The user's waiting state is preserved, so when data arrives it will display correctly
@@ -381,10 +467,17 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     String nodeText = selectedNode.getUserObject().toString();
                     String alias = workarea.getAlias();
                     
+                    HarbourLogger.log("HarbourDBFToolWindow", "==============================================");
+                    HarbourLogger.log("HarbourDBFToolWindow", "*** NODE SELECTED: '" + nodeText + "' ***");
+                    HarbourLogger.log("HarbourDBFToolWindow", "*** WORKAREA: " + alias + " ***");
+                    HarbourLogger.log("HarbourDBFToolWindow", "==============================================");
+                    
                     // Get or create cache for this workarea
                     WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
                     
                     if (nodeText.startsWith("Fields")) {
+                        currentWorkarea = alias;
+                        updateNavigationButtons();
                         if (cache.fieldData != null) {
                             // Show cached data immediately
                             displayFieldData(workarea, cache.fieldData);
@@ -411,8 +504,38 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             pendingRequests.put(alias + ":Record", System.currentTimeMillis());
                             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 286] Requesting record for " + alias + ", waiting state set");
                             liveConnection.requestRecordData(alias);
+                            currentWorkarea = alias;
+                            updateNavigationButtons();
                         }
+                    } else if (nodeText.equals("Table Grid View")) {
+                        HarbourLogger.log("HarbourDBFToolWindow", "*** TABLE GRID VIEW SELECTED for " + alias);
+                        currentWorkarea = alias;
+                        updateNavigationButtons();
+                        // Request multiple records for grid view
+                        showLoadingMessage("Table Grid View");
+                        waitingForWorkarea = alias;
+                        waitingForDataType = "Records";
+                        pendingRequests.put(alias + ":Records", System.currentTimeMillis());
+                        HarbourLogger.log("HarbourDBFToolWindow", "Setting up request for table grid - alias: " + alias + 
+                            ", waitingForDataType: Records, pendingRequest key: " + alias + ":Records");
+                        liveConnection.requestRecords(alias, 1, 50); // Request first 50 records
+                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestRecords(" + alias + ", 1, 50)");
+                    } else if (nodeText.equals("Indexes")) {
+                        HarbourLogger.log("HarbourDBFToolWindow", "*** INDEXES SELECTED for " + alias);
+                        currentWorkarea = alias;
+                        updateNavigationButtons();
+                        // Request index information
+                        showLoadingMessage("Index Information");
+                        waitingForWorkarea = alias;
+                        waitingForDataType = "Indexes";
+                        pendingRequests.put(alias + ":Indexes", System.currentTimeMillis());
+                        HarbourLogger.log("HarbourDBFToolWindow", "Setting up request for indexes - alias: " + alias + 
+                            ", waitingForDataType: Indexes, pendingRequest key: " + alias + ":Indexes");
+                        liveConnection.requestIndexInfo(alias);
+                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestIndexInfo(" + alias + ")");
                     } else if (nodeText.equals("Schema Info")) {
+                        currentWorkarea = alias;
+                        updateNavigationButtons();
                         if (cache.schemaData != null) {
                             // Show cached data immediately
                             displaySchemaData(workarea, cache.schemaData);
@@ -427,6 +550,143 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             liveConnection.requestSchemaInfo(alias);
                         }
                     }
+                }
+            }
+        }
+        
+        /**
+         * Navigate to the previous record
+         */
+        private void navigateToPreviousRecord() {
+            if (currentWorkarea != null && liveConnection != null) {
+                liveConnection.navigateToPreviousRecord(currentWorkarea);
+                // Clear cached record data to force refresh
+                WorkareaCache cache = dataCache.get(currentWorkarea);
+                if (cache != null) {
+                    cache.recordData = null;
+                }
+                // Request updated record data
+                liveConnection.requestRecordData(currentWorkarea);
+                updateNavigationButtons();
+            }
+        }
+        
+        /**
+         * Navigate to the next record
+         */
+        private void navigateToNextRecord() {
+            if (currentWorkarea != null && liveConnection != null) {
+                liveConnection.navigateToNextRecord(currentWorkarea);
+                // Clear cached record data to force refresh
+                WorkareaCache cache = dataCache.get(currentWorkarea);
+                if (cache != null) {
+                    cache.recordData = null;
+                }
+                // Request updated record data
+                liveConnection.requestRecordData(currentWorkarea);
+                updateNavigationButtons();
+            }
+        }
+        
+        /**
+         * Navigate to a specific record number
+         */
+        private void navigateToRecord() {
+            if (currentWorkarea != null && liveConnection != null) {
+                int recordNumber = (Integer) recordSpinner.getValue();
+                liveConnection.navigateToRecord(currentWorkarea, recordNumber);
+                // Clear cached record data to force refresh
+                WorkareaCache cache = dataCache.get(currentWorkarea);
+                if (cache != null) {
+                    cache.recordData = null;
+                }
+                // Request updated record data
+                liveConnection.requestRecordData(currentWorkarea);
+                updateNavigationButtons();
+            }
+        }
+        
+        /**
+         * Reload current data manually
+         */
+        private void reloadCurrentData() {
+            if (currentWorkarea == null || liveConnection == null) {
+                return;
+            }
+            
+            TreePath selectionPath = workareaTree.getSelectionPath();
+            if (selectionPath == null) {
+                return;
+            }
+            
+            DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+            
+            // Determine what type of data is currently selected
+            String nodeText = "";
+            if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                // Workarea selected - reload current record
+                nodeText = "Current Record";
+            } else if (selectedNode.getParent() != null) {
+                nodeText = selectedNode.getUserObject().toString();
+            }
+            
+            // Clear cache for the selected data type
+            WorkareaCache cache = dataCache.get(currentWorkarea);
+            if (cache != null) {
+                if (nodeText.startsWith("Fields")) {
+                    cache.fieldData = null;
+                    liveConnection.requestFieldInfo(currentWorkarea);
+                } else if (nodeText.equals("Current Record")) {
+                    cache.recordData = null;
+                    liveConnection.requestRecordData(currentWorkarea);
+                } else if (nodeText.equals("Table Grid View")) {
+                    // Request records again
+                    showLoadingMessage("Table Grid View");
+                    waitingForWorkarea = currentWorkarea;
+                    waitingForDataType = "Records";
+                    pendingRequests.put(currentWorkarea + ":Records", System.currentTimeMillis());
+                    liveConnection.requestRecords(currentWorkarea, 1, 50);
+                } else if (nodeText.equals("Indexes")) {
+                    // Request indexes again
+                    showLoadingMessage("Index Information");
+                    waitingForWorkarea = currentWorkarea;
+                    waitingForDataType = "Indexes";
+                    pendingRequests.put(currentWorkarea + ":Indexes", System.currentTimeMillis());
+                    liveConnection.requestIndexInfo(currentWorkarea);
+                } else if (nodeText.equals("Schema Info")) {
+                    cache.schemaData = null;
+                    liveConnection.requestSchemaInfo(currentWorkarea);
+                }
+            }
+            
+            HarbourLogger.log("HarbourDBFToolWindow", "Manual reload requested for " + currentWorkarea + " - " + nodeText);
+        }
+        
+        /**
+         * Update navigation button states based on current record position
+         */
+        private void updateNavigationButtons() {
+            if (currentWorkarea == null || liveConnection == null) {
+                prevButton.setEnabled(false);
+                nextButton.setEnabled(false);
+                gotoButton.setEnabled(false);
+                recordSpinner.setEnabled(false);
+                return;
+            }
+            
+            HarbourLiveDBFConnection.WorkareaInfo workarea = liveConnection.getWorkarea(currentWorkarea);
+            if (workarea != null) {
+                int currentRecord = workarea.getCurrentRecord();
+                int totalRecords = workarea.getTotalRecords();
+                
+                prevButton.setEnabled(currentRecord > 1);
+                nextButton.setEnabled(currentRecord < totalRecords);
+                gotoButton.setEnabled(totalRecords > 0);
+                recordSpinner.setEnabled(totalRecords > 0);
+                
+                // Update spinner model
+                if (totalRecords > 0) {
+                    recordSpinner.setModel(new SpinnerNumberModel(currentRecord, 1, totalRecords, 1));
                 }
             }
         }
@@ -451,6 +711,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 pendingRequests.put(alias + ":Record", System.currentTimeMillis());
                 HarbourLogger.log("HarbourDBFToolWindow", "[LINE 324] Requesting record for workarea: " + alias + ", waiting state set");
                 liveConnection.requestRecordData(alias);
+                currentWorkarea = alias;
+                updateNavigationButtons();
             }
         }
         
@@ -473,17 +735,17 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         }
         
         /**
-         * Manually refresh workarea information
+         * Refresh both workareas and current data
          */
-        private void refreshWorkareas() {
+        private void refreshData() {
             if (liveConnection != null) {
-                // Don't clear cache - keep existing data until new data arrives
-                // This prevents data loss when switching panels
-                // Also don't clear waiting state - we might be waiting for data
-                // waitingForWorkarea = null;  // REMOVED - don't clear waiting state
-                // waitingForDataType = null;   // REMOVED - don't clear waiting state
+                // First refresh workareas
                 liveConnection.requestWorkareaUpdate();
-                updateStatus("Refreshing workarea information...");
+                
+                // Then reload current data if something is selected
+                reloadCurrentData();
+                
+                updateStatus("Refreshing data...");
             } else {
                 updateStatus("No active debugging session to refresh");
             }
@@ -658,6 +920,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (shouldDisplay) {
                 // Display the data - displayRecordData will handle EDT properly
                 displayRecordData(workarea, recordData);
+                // Update navigation buttons to reflect current record position
+                updateNavigationButtons();
             }
         }
         
@@ -800,6 +1064,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         return true;
                     } else if (dataType.equals("Record") && nodeText.equals("Current Record")) {
                         return true;
+                    } else if (dataType.equals("Records") && nodeText.equals("Table Grid View")) {
+                        return true;
+                    } else if (dataType.equals("Indexes") && nodeText.equals("Indexes")) {
+                        return true;
                     } else if (dataType.equals("Schema") && nodeText.equals("Schema Info")) {
                         return true;
                     }
@@ -871,6 +1139,256 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             
             HarbourLogger.log("HarbourDBFToolWindow", "[LINE 707] Displayed " + itemCount + " schema items for " + workarea.getAlias());
         }
+        
+        @Override
+        public void onRecordsReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordsData) {
+            // Check if we should display this data
+            String alias = workarea.getAlias();
+            boolean shouldDisplay = false;
+            String requestKey = alias + ":Records";
+            
+            HarbourLogger.log("HarbourDBFToolWindow", "onRecordsReceived called for " + alias + " with " + recordsData.length + " lines of data");
+            
+            if (pendingRequests.containsKey(requestKey)) {
+                shouldDisplay = true;
+                pendingRequests.remove(requestKey);
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying records grid for " + alias);
+                
+                if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Records".equals(waitingForDataType)) {
+                    waitingForWorkarea = null;
+                    waitingForDataType = null;
+                }
+            }
+            
+            if (shouldDisplay) {
+                displayRecordsGrid(workarea, recordsData);
+            }
+        }
+        
+        @Override
+        public void onIndexesReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] indexesData) {
+            // Check if we should display this data
+            String alias = workarea.getAlias();
+            boolean shouldDisplay = false;
+            String requestKey = alias + ":Indexes";
+            
+            HarbourLogger.log("HarbourDBFToolWindow", "onIndexesReceived called for " + alias + " with " + indexesData.length + " lines of data");
+            
+            if (pendingRequests.containsKey(requestKey)) {
+                shouldDisplay = true;
+                pendingRequests.remove(requestKey);
+                HarbourLogger.log("HarbourDBFToolWindow", "Displaying indexes for " + alias);
+                
+                if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Indexes".equals(waitingForDataType)) {
+                    waitingForWorkarea = null;
+                    waitingForDataType = null;
+                }
+            }
+            
+            if (shouldDisplay) {
+                displayIndexes(workarea, indexesData);
+            }
+        }
+        
+        /**
+         * Display multiple records in a grid view
+         */
+        private void displayRecordsGrid(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordsData) {
+            if (!SwingUtilities.isEventDispatchThread()) {
+                SwingUtilities.invokeLater(() -> displayRecordsGrid(workarea, recordsData));
+                return;
+            }
+            
+            List<String[]> columns = new ArrayList<>();
+            List<String[]> rows = new ArrayList<>();
+            String currentRowNum = null;
+            List<String[]> currentRow = new ArrayList<>();
+            
+            // Parse the records data
+            for (String line : recordsData) {
+                if (line.startsWith("ERROR:")) {
+                    // Handle error
+                    List<String[]> errorData = new ArrayList<>();
+                    errorData.add(new String[]{"Table Grid View Error", ""});
+                    errorData.add(new String[]{"Error:", line.substring(6)});
+                    tableModel.setData(errorData);
+                    detailsTable.repaint();
+                    detailsTable.revalidate();
+                    return;
+                } else if (line.startsWith("COLUMN:")) {
+                    // Parse column definition
+                    String[] parts = line.substring(7).split(":");
+                    if (parts.length >= 3) {
+                        columns.add(new String[]{parts[0], parts[1], parts[2]});
+                    }
+                } else if (line.startsWith("ROW:")) {
+                    // Save previous row if exists
+                    if (currentRowNum != null && !currentRow.isEmpty()) {
+                        String[] rowData = new String[columns.size() + 1];
+                        rowData[0] = currentRowNum;
+                        for (int i = 0; i < currentRow.size() && i < columns.size(); i++) {
+                            rowData[i + 1] = currentRow.get(i)[1];
+                        }
+                        rows.add(rowData);
+                    }
+                    // Start new row
+                    currentRowNum = line.substring(4);
+                    currentRow.clear();
+                } else if (line.startsWith("CELL:")) {
+                    // Parse cell data
+                    int colonPos = line.indexOf(':', 5);
+                    if (colonPos > 0) {
+                        String fieldName = line.substring(5, colonPos);
+                        String value = line.substring(colonPos + 1);
+                        currentRow.add(new String[]{fieldName, value});
+                    }
+                }
+            }
+            
+            // Add last row
+            if (currentRowNum != null && !currentRow.isEmpty()) {
+                String[] rowData = new String[columns.size() + 1];
+                rowData[0] = currentRowNum;
+                for (int i = 0; i < currentRow.size() && i < columns.size(); i++) {
+                    rowData[i + 1] = currentRow.get(i)[1];
+                }
+                rows.add(rowData);
+            }
+            
+            // Create table data
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Table Grid View for " + workarea.getAlias(), ""});
+            data.add(new String[]{"Showing " + rows.size() + " records", ""});
+            data.add(new String[]{"", ""});
+            
+            // Add column headers
+            StringBuilder header = new StringBuilder("RecNo | ");
+            for (String[] col : columns) {
+                header.append(col[0]).append(" | ");
+            }
+            data.add(new String[]{"Columns:", header.toString()});
+            data.add(new String[]{"", ""});
+            
+            // Add rows
+            for (String[] row : rows) {
+                StringBuilder rowStr = new StringBuilder(row[0] + " | ");
+                for (int i = 1; i < row.length; i++) {
+                    if (row[i] != null) {
+                        String val = row[i];
+                        if (val.length() > 20) {
+                            val = val.substring(0, 20) + "...";
+                        }
+                        rowStr.append(val).append(" | ");
+                    }
+                }
+                data.add(new String[]{"", rowStr.toString()});
+            }
+            
+            tableModel.setData(data);
+            detailsTable.repaint();
+            detailsTable.revalidate();
+        }
+        
+        /**
+         * Display index information
+         */
+        private void displayIndexes(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] indexesData) {
+            if (!SwingUtilities.isEventDispatchThread()) {
+                SwingUtilities.invokeLater(() -> displayIndexes(workarea, indexesData));
+                return;
+            }
+            
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Index Information for " + workarea.getAlias(), ""});
+            data.add(new String[]{"", ""});
+            
+            String currentIndex = null;
+            String currentName = null;
+            String currentKey = null;
+            String currentFor = null;
+            String currentBag = null;
+            
+            // Parse all index data
+            for (String line : indexesData) {
+                if (line.startsWith("ERROR:")) {
+                    data.add(new String[]{"Error:", line.substring(6)});
+                } else if (line.startsWith("CURRENT:")) {
+                    currentIndex = line.substring(8);
+                } else if (line.startsWith("CURRENT_NAME:")) {
+                    currentName = line.substring(13);
+                } else if (line.startsWith("CURRENT_KEY:")) {
+                    currentKey = line.substring(12);
+                } else if (line.startsWith("CURRENT_FOR:")) {
+                    currentFor = line.substring(12);
+                } else if (line.startsWith("CURRENT_BAG:")) {
+                    currentBag = line.substring(12);
+                }
+            }
+            
+            // Display current index details
+            if (currentIndex != null && !currentIndex.equals("0")) {
+                data.add(new String[]{"=== CURRENTLY SELECTED INDEX ===", ""});
+                data.add(new String[]{"Index Order:", currentIndex});
+                if (currentName != null && !currentName.isEmpty()) {
+                    data.add(new String[]{"Index Name:", currentName});
+                }
+                if (currentBag != null && !currentBag.isEmpty()) {
+                    data.add(new String[]{"Index File (Bag):", currentBag});
+                }
+                if (currentKey != null && !currentKey.isEmpty()) {
+                    data.add(new String[]{"Key Expression:", currentKey});
+                }
+                if (currentFor != null && !currentFor.isEmpty()) {
+                    data.add(new String[]{"For Condition:", currentFor});
+                }
+                data.add(new String[]{"", ""});
+            } else {
+                data.add(new String[]{"No index currently selected", ""});
+                data.add(new String[]{"", ""});
+            }
+            
+            // Display all indexes
+            data.add(new String[]{"=== ALL INDEXES ===", ""});
+            boolean hasIndexes = false;
+            
+            for (String line : indexesData) {
+                if (line.startsWith("INDEX:")) {
+                    hasIndexes = true;
+                    // Parse INDEX:number:name:file:key:for
+                    String[] parts = line.substring(6).split(":", 5);
+                    if (parts.length >= 4) {
+                        String indexNum = parts[0];
+                        String indexName = parts[1];
+                        String indexFile = parts[2];
+                        String indexKey = parts[3];
+                        String indexFor = parts.length > 4 ? parts[4] : "";
+                        
+                        data.add(new String[]{"", ""});
+                        data.add(new String[]{"Index #" + indexNum + (indexName.isEmpty() ? "" : " (" + indexName + ")"), ""});
+                        if (!indexFile.isEmpty()) {
+                            data.add(new String[]{"  File:", indexFile});
+                        }
+                        data.add(new String[]{"  Key:", indexKey});
+                        if (!indexFor.isEmpty()) {
+                            data.add(new String[]{"  For:", indexFor});
+                        }
+                        
+                        // Mark if this is the current index
+                        if (currentIndex != null && currentIndex.equals(indexNum)) {
+                            data.add(new String[]{"  Status:", "*** ACTIVE ***"});
+                        }
+                    }
+                }
+            }
+            
+            if (!hasIndexes) {
+                data.add(new String[]{"No indexes defined for this workarea", ""});
+            }
+            
+            tableModel.setData(data);
+            detailsTable.repaint();
+            detailsTable.revalidate();
+        }
     }
     
     /**
@@ -917,4 +1435,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             fireTableDataChanged();
         }
     }
+    
+    /**
+     * Table model for the grid view of DBF data
+     */
 }

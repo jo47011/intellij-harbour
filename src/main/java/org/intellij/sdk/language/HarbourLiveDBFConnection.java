@@ -241,10 +241,128 @@ public class HarbourLiveDBFConnection implements Disposable {
     }
     
     /**
+     * Navigate to the next record in a specific workarea
+     */
+    public void navigateToNextRecord(@NotNull String alias) {
+        WorkareaInfo workarea = workareas.get(alias);
+        if (workarea != null && debuggerConnection.isConnected()) {
+            String command = "AREA" + workarea.getAreaNumber() + ":NEXT";
+            HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING NAVIGATION COMMAND: " + command + " for alias: " + alias);
+            debuggerConnection.sendCommand(command);
+            
+            // Update the workarea info with the new record position
+            if (workarea.getCurrentRecord() < workarea.getTotalRecords()) {
+                WorkareaInfo updatedWorkarea = new WorkareaInfo(
+                    workarea.getAlias(),
+                    workarea.getAreaNumber(),
+                    workarea.getFieldCount(),
+                    workarea.getCurrentRecord() + 1,
+                    workarea.getTotalRecords(),
+                    workarea.getIndexScope()
+                );
+                workareas.put(alias, updatedWorkarea);
+            }
+        }
+    }
+    
+    /**
+     * Navigate to the previous record in a specific workarea
+     */
+    public void navigateToPreviousRecord(@NotNull String alias) {
+        WorkareaInfo workarea = workareas.get(alias);
+        if (workarea != null && debuggerConnection.isConnected()) {
+            String command = "AREA" + workarea.getAreaNumber() + ":PREVIOUS";
+            HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING NAVIGATION COMMAND: " + command + " for alias: " + alias);
+            debuggerConnection.sendCommand(command);
+            
+            // Update the workarea info with the new record position
+            if (workarea.getCurrentRecord() > 1) {
+                WorkareaInfo updatedWorkarea = new WorkareaInfo(
+                    workarea.getAlias(),
+                    workarea.getAreaNumber(),
+                    workarea.getFieldCount(),
+                    workarea.getCurrentRecord() - 1,
+                    workarea.getTotalRecords(),
+                    workarea.getIndexScope()
+                );
+                workareas.put(alias, updatedWorkarea);
+            }
+        }
+    }
+    
+    /**
+     * Navigate to a specific record number in a workarea
+     */
+    public void navigateToRecord(@NotNull String alias, int recordNumber) {
+        WorkareaInfo workarea = workareas.get(alias);
+        if (workarea != null && debuggerConnection.isConnected()) {
+            if (recordNumber > 0 && recordNumber <= workarea.getTotalRecords()) {
+                String command = "AREA" + workarea.getAreaNumber() + ":GOTO:" + recordNumber;
+                HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING GOTO COMMAND: " + command + " for alias: " + alias);
+                debuggerConnection.sendCommand(command);
+                
+                // Update the workarea info with the new record position
+                WorkareaInfo updatedWorkarea = new WorkareaInfo(
+                    workarea.getAlias(),
+                    workarea.getAreaNumber(),
+                    workarea.getFieldCount(),
+                    recordNumber,
+                    workarea.getTotalRecords(),
+                    workarea.getIndexScope()
+                );
+                workareas.put(alias, updatedWorkarea);
+            }
+        }
+    }
+    
+    /**
+     * Request multiple records for table grid view
+     */
+    public void requestRecords(@NotNull String alias, int startRecord, int count) {
+        HarbourLogger.log("HarbourLiveDBFConnection", "*** requestRecords called - alias: " + alias + 
+            ", start: " + startRecord + ", count: " + count);
+        WorkareaInfo workarea = workareas.get(alias);
+        if (workarea != null) {
+            HarbourLogger.log("HarbourLiveDBFConnection", "Found workarea for " + alias + 
+                ", area number: " + workarea.getAreaNumber());
+            if (debuggerConnection.isConnected()) {
+                String command = "AREA" + workarea.getAreaNumber() + ":RECORDS:" + startRecord + ":" + count;
+                HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING RECORDS COMMAND: " + command + " for alias: " + alias);
+                debuggerConnection.sendCommand(command);
+            } else {
+                HarbourLogger.log("HarbourLiveDBFConnection", "ERROR: debuggerConnection is NOT connected!");
+            }
+        } else {
+            HarbourLogger.log("HarbourLiveDBFConnection", "ERROR: No workarea found for alias: " + alias);
+        }
+    }
+    
+    /**
+     * Request index information for a workarea
+     */
+    public void requestIndexInfo(@NotNull String alias) {
+        HarbourLogger.log("HarbourLiveDBFConnection", "*** requestIndexInfo called for alias: " + alias);
+        WorkareaInfo workarea = workareas.get(alias);
+        if (workarea != null) {
+            HarbourLogger.log("HarbourLiveDBFConnection", "Found workarea for " + alias + 
+                ", area number: " + workarea.getAreaNumber());
+            if (debuggerConnection.isConnected()) {
+                String command = "AREA" + workarea.getAreaNumber() + ":INDEXES";
+                HarbourLogger.log("HarbourLiveDBFConnection", ">>> SENDING INDEXES COMMAND: " + command + " for alias: " + alias);
+                debuggerConnection.sendCommand(command);
+            } else {
+                HarbourLogger.log("HarbourLiveDBFConnection", "ERROR: debuggerConnection is NOT connected!");
+            }
+        } else {
+            HarbourLogger.log("HarbourLiveDBFConnection", "ERROR: No workarea found for alias: " + alias);
+        }
+    }
+    
+    /**
      * Process area-specific responses (FIELDS, RECORD, SCHEMA)
      */
     public void processAreaResponse(@NotNull String command, @NotNull String[] responseLines) {
-        HarbourLogger.log("HarbourLiveDBFConnection", "Processing area response: " + command);
+        HarbourLogger.log("HarbourLiveDBFConnection", "Processing area response: " + command + " with " + responseLines.length + " lines");
         
         if (!isActive) {
             HarbourLogger.log("HarbourLiveDBFConnection", "Not active, ignoring area response");
@@ -253,7 +371,10 @@ public class HarbourLiveDBFConnection implements Disposable {
         
         // Parse command (e.g., "AREA1:FIELDS", "AREA2:RECORD")  
         String[] parts = command.split(":");
-        if (parts.length < 2) return;
+        if (parts.length < 2) {
+            HarbourLogger.log("HarbourLiveDBFConnection", "Invalid command format: " + command);
+            return;
+        }
         
         int areaNumber = Integer.parseInt(parts[0].substring(4)); // Remove "AREA"
         String responseType = parts[1];
@@ -300,6 +421,12 @@ public class HarbourLiveDBFConnection implements Disposable {
                     case "SCHEMA":
                         detailedListener.onSchemaInfoReceived(workarea, responseLines);
                         break;
+                    case "RECORDS":
+                        detailedListener.onRecordsReceived(workarea, responseLines);
+                        break;
+                    case "INDEXES":
+                        detailedListener.onIndexesReceived(workarea, responseLines);
+                        break;
                 }
             } else {
                 HarbourLogger.log("HarbourLiveDBFConnection", 
@@ -315,6 +442,8 @@ public class HarbourLiveDBFConnection implements Disposable {
         void onFieldsReceived(@NotNull WorkareaInfo workarea, @NotNull String[] fieldData);
         void onRecordDataReceived(@NotNull WorkareaInfo workarea, @NotNull String[] recordData);
         void onSchemaInfoReceived(@NotNull WorkareaInfo workarea, @NotNull String[] schemaData);
+        void onRecordsReceived(@NotNull WorkareaInfo workarea, @NotNull String[] recordsData);
+        void onIndexesReceived(@NotNull WorkareaInfo workarea, @NotNull String[] indexesData);
     }
     
     @Override

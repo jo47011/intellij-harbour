@@ -389,7 +389,7 @@ public class HarbourDebuggerConnection {
                line.equals("ACTIVATED") || line.equals("LOCALS") || line.equals("STATICS") ||
                line.equals("PRIVATES") || line.equals("PUBLICS") || line.equals("AREAS") ||
                line.equals("WORKAREAS") || // Add WORKAREAS command recognition
-               line.startsWith("AREA") && line.contains(":") && (line.contains("FIELDS") || line.contains("RECORD") || line.contains("SCHEMA")) ||
+               line.startsWith("AREA") && line.contains(":") && (line.contains("FIELDS") || line.contains("RECORD") || line.contains("SCHEMA") || line.contains("RECORDS") || line.contains("INDEXES")) ||
                line.equals("ARRAY") || line.startsWith("ARRAY:") || 
                line.equals("OBJECT") || line.startsWith("OBJECT:") || // Fixed: added line.equals("OBJECT")
                line.equals("HASH") || line.startsWith("HASH:") || // Add HASH command recognition
@@ -397,7 +397,8 @@ public class HarbourDebuggerConnection {
                line.startsWith("CONSOLE:") || // Add console output recognition
                line.equals("END_LOCALS") || line.equals("END_STATICS") || 
                line.equals("END_PRIVATES") || line.equals("END_PUBLICS") ||
-               line.equals("END_FIELDS") || line.equals("END_RECORD") || line.equals("END_SCHEMA") ||
+               line.equals("END_FIELDS") || line.equals("END_RECORD") || line.equals("END_SCHEMA") || 
+               line.equals("END_RECORDS") || line.equals("END_INDEXES") ||
                line.equals("END_HASH") || line.equals("END_ARRAY") || line.equals("END_OBJECT") || // Add END_HASH, END_ARRAY and END_OBJECT
                line.startsWith("FIELD:") || line.startsWith("DATA:") || line.startsWith("INFO:") ||
                (line.length() == 1 && Character.isUpperCase(line.charAt(0))); // Type responses

@@ -1628,9 +1628,14 @@ RETURN
 STATIC PROCEDURE HandleAreaCommand(cCommand)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL aParams := hb_ATokens(cCommand, ":")
-   LOCAL nArea, cSubCommand, nOldArea
+   LOCAL nArea, cSubCommand, nOldArea, nRecNo
+   
+   // Debug: Log received command and parsing
+   LogDebugInfo("HandleAreaCommand: Received command: " + cCommand)
+   LogDebugInfo("HandleAreaCommand: aParams length: " + AllTrim(Str(Len(aParams))))
    
    IF Len(aParams) < 2
+      LogDebugInfo("HandleAreaCommand: ERROR - Not enough parameters, returning")
       RETURN
    ENDIF
    
@@ -1638,18 +1643,25 @@ STATIC PROCEDURE HandleAreaCommand(cCommand)
    nArea := Val(SubStr(aParams[1], 5))  // Extract number from "AREA{n}"
    cSubCommand := Upper(aParams[2])
    
+   LogDebugInfo("HandleAreaCommand: Parsed nArea=" + AllTrim(Str(nArea)) + ", cSubCommand=" + cSubCommand)
+   
    // Validate area number
    IF nArea < 1 .OR. nArea > 65535
+      LogDebugInfo("HandleAreaCommand: ERROR - Invalid area number: " + AllTrim(Str(nArea)))
       RETURN
    ENDIF
    
    nOldArea := Select()
+   LogDebugInfo("HandleAreaCommand: Switching from area " + AllTrim(Str(nOldArea)) + " to area " + AllTrim(Str(nArea)))
    dbSelectArea( nArea )
    
    IF !Used()
+      LogDebugInfo("HandleAreaCommand: ERROR - Area " + AllTrim(Str(nArea)) + " is not in use, returning")
       dbSelectArea( nOldArea )
       RETURN
    ENDIF
+   
+   LogDebugInfo("HandleAreaCommand: Area " + AllTrim(Str(nArea)) + " is open, processing command: " + cSubCommand)
    
    DO CASE
       CASE cSubCommand == "FIELDS"
@@ -1660,6 +1672,40 @@ STATIC PROCEDURE HandleAreaCommand(cCommand)
          
       CASE cSubCommand == "SCHEMA"
          SendAreaSchema(nArea)
+         
+      CASE cSubCommand == "NEXT"
+         // Move to next record and send updated record data
+         IF !EOF()
+            SKIP
+         ENDIF
+         SendAreaRecord(nArea)
+         
+      CASE cSubCommand == "PREVIOUS" .OR. cSubCommand == "PREV"
+         // Move to previous record and send updated record data
+         IF !BOF()
+            SKIP -1
+         ENDIF
+         SendAreaRecord(nArea)
+         
+      CASE cSubCommand == "GOTO"
+         // Go to specific record number (AREA1:GOTO:100)
+         IF Len(aParams) >= 3
+            nRecNo := Val(aParams[3])
+            IF nRecNo > 0 .AND. nRecNo <= LastRec()
+               GOTO nRecNo
+            ENDIF
+         ENDIF
+         SendAreaRecord(nArea)
+         
+      CASE cSubCommand == "RECORDS"
+         // Send multiple records (AREA1:RECORDS:start:count)
+         LogDebugInfo("HandleAreaCommand: RECORDS command received for area " + AllTrim(Str(nArea)))
+         SendAreaRecords(nArea, aParams)
+         
+      CASE cSubCommand == "INDEXES"
+         // Send index information for the workarea
+         LogDebugInfo("HandleAreaCommand: INDEXES command received for area " + AllTrim(Str(nArea)))
+         SendAreaIndexes(nArea)
          
    ENDCASE
    
@@ -1737,6 +1783,127 @@ STATIC PROCEDURE SendAreaSchema(nArea)
    ENDIF
    
    hb_inetSend(oDebugInfo["socket"], "END_SCHEMA" + CRLF)
+RETURN
+
+// Send multiple records for table grid view
+STATIC PROCEDURE SendAreaRecords(nArea, aParams)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL nStart := 1, nCount := 20
+   LOCAL i, j, xValue, cFieldName
+   LOCAL nSaveRecNo := RecNo()
+   LOCAL nFieldCount := FCount()
+   
+   LogDebugInfo("SendAreaRecords: Starting for area " + AllTrim(Str(nArea)) + ", aParams length: " + AllTrim(Str(Len(aParams))))
+   
+   // Parse start and count parameters if provided
+   IF Len(aParams) >= 3
+      nStart := Val(aParams[3])
+      LogDebugInfo("SendAreaRecords: Parsed nStart=" + AllTrim(Str(nStart)))
+   ENDIF
+   IF Len(aParams) >= 4
+      nCount := Val(aParams[4])
+      LogDebugInfo("SendAreaRecords: Parsed nCount=" + AllTrim(Str(nCount)))
+   ENDIF
+   
+   // Limit count to reasonable number
+   IF nCount > 100
+      nCount := 100
+   ENDIF
+   
+   // Check if table is open
+   LogDebugInfo("SendAreaRecords: Checking table, nFieldCount=" + AllTrim(Str(nFieldCount)))
+   IF nFieldCount == 0
+      LogDebugInfo("SendAreaRecords: ERROR - No table open, sending error response")
+      hb_inetSend(oDebugInfo["socket"], "AREA" + AllTrim(Str(nArea)) + ":RECORDS" + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "ERROR:No table open in this workarea" + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "END_RECORDS" + CRLF)
+      RETURN
+   ENDIF
+   
+   LogDebugInfo("SendAreaRecords: Table is open, sending header")
+   hb_inetSend(oDebugInfo["socket"], "AREA" + AllTrim(Str(nArea)) + ":RECORDS" + CRLF)
+   
+   // Send field names first
+   FOR i := 1 TO FCount()
+      hb_inetSend(oDebugInfo["socket"], "COLUMN:" + FieldName(i) + ":" + ;
+                  FieldType(i) + ":" + AllTrim(Str(FieldLen(i))) + ":" + ;
+                  AllTrim(Str(FieldDec(i))) + CRLF)
+   NEXT
+   
+   // Position to start record
+   IF nStart > 0 .AND. nStart <= LastRec()
+      GOTO nStart
+   ELSE
+      GO TOP
+   ENDIF
+   
+   // Send records
+   FOR i := 1 TO nCount
+      IF EOF()
+         EXIT
+      ENDIF
+      
+      hb_inetSend(oDebugInfo["socket"], "ROW:" + AllTrim(Str(RecNo())) + CRLF)
+      
+      FOR j := 1 TO FCount()
+         xValue := FieldGet(j)
+         hb_inetSend(oDebugInfo["socket"], "CELL:" + FieldName(j) + ":" + ;
+                     FormatValue(xValue) + CRLF)
+      NEXT
+      
+      SKIP
+   NEXT
+   
+   // Restore original record position
+   GOTO nSaveRecNo
+   
+   LogDebugInfo("SendAreaRecords: Sending END_RECORDS marker")
+   hb_inetSend(oDebugInfo["socket"], "END_RECORDS" + CRLF)
+   LogDebugInfo("SendAreaRecords: Completed successfully")
+RETURN
+
+// Send index information for workarea
+STATIC PROCEDURE SendAreaIndexes(nArea)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL i, cIndexFile, cIndexKey, cIndexFor, cIndexName
+   LOCAL nIndexCount := 0
+   
+   LogDebugInfo("SendAreaIndexes: Starting for area " + AllTrim(Str(nArea)))
+   hb_inetSend(oDebugInfo["socket"], "AREA" + AllTrim(Str(nArea)) + ":INDEXES" + CRLF)
+   
+   // Count indexes - use OrdKey() which is standard
+   DO WHILE !Empty(OrdKey(++nIndexCount))
+   ENDDO
+   nIndexCount--
+   
+   LogDebugInfo("SendAreaIndexes: Found " + AllTrim(Str(nIndexCount)) + " indexes")
+   
+   // Send current index information with all details
+   IF IndexOrd() > 0
+      hb_inetSend(oDebugInfo["socket"], "CURRENT:" + AllTrim(Str(IndexOrd())) + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "CURRENT_NAME:" + OrdName() + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "CURRENT_KEY:" + OrdKey() + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "CURRENT_FOR:" + OrdFor() + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "CURRENT_BAG:" + OrdBagName() + CRLF)
+   ELSE
+      hb_inetSend(oDebugInfo["socket"], "CURRENT:0" + CRLF)
+   ENDIF
+   
+   // Send each index
+   FOR i := 1 TO nIndexCount
+      // Use OrdName, OrdBagName, OrdKey, OrdFor with index number
+      cIndexName := OrdName(i)
+      cIndexFile := OrdBagName(i)
+      cIndexKey := OrdKey(i)
+      cIndexFor := OrdFor(i)
+      
+      hb_inetSend(oDebugInfo["socket"], "INDEX:" + AllTrim(Str(i)) + ":" + ;
+                  cIndexName + ":" + cIndexFile + ":" + cIndexKey + ":" + cIndexFor + CRLF)
+   NEXT
+   
+   LogDebugInfo("SendAreaIndexes: Sending END_INDEXES marker")
+   hb_inetSend(oDebugInfo["socket"], "END_INDEXES" + CRLF)
+   LogDebugInfo("SendAreaIndexes: Completed successfully")
 RETURN
 
 #pragma BEGINDUMP
