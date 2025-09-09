@@ -25,6 +25,9 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.event.ActionListener;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -102,7 +105,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         // Navigation controls
         private JButton prevButton;
         private JButton nextButton;
-        private JButton gotoButton;
+        // Removed gotoButton and loadAllButton - using Enter key in spinner instead
         private JSpinner recordSpinner;
         private String currentWorkarea = null;
         
@@ -193,6 +196,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             refreshButton.setToolTipText("Refresh workareas and reload current data");
             refreshButton.addActionListener(e -> refreshData());
             
+            // Removed Load All button per user request
+            
             // Create navigation controls
             prevButton = new JButton("Previous");
             prevButton.setEnabled(false);
@@ -206,9 +211,41 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             recordSpinner.setEnabled(false);
             recordSpinner.setPreferredSize(new Dimension(80, 25));
             
-            gotoButton = new JButton("Go To");
-            gotoButton.setEnabled(false);
-            gotoButton.addActionListener(e -> navigateToRecord());
+            // Add Enter key listener to spinner's text field
+            JComponent editor = recordSpinner.getEditor();
+            if (editor instanceof JSpinner.DefaultEditor) {
+                JFormattedTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+                
+                // Method 1: ActionListener (should work but let's improve it)
+                textField.addActionListener(e -> {
+                    try {
+                        recordSpinner.commitEdit(); // Ensure the value is committed
+                        navigateToRecord();
+                    } catch (ParseException ex) {
+                        // Invalid input, ignore
+                        HarbourLogger.log("HarbourDBFToolWindow", "Invalid record number input: " + ex.getMessage());
+                    }
+                });
+                
+                // Method 2: KeyListener as backup (more direct control)
+                textField.addKeyListener(new KeyAdapter() {
+                    @Override
+                    public void keyPressed(KeyEvent e) {
+                        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+                            SwingUtilities.invokeLater(() -> {
+                                try {
+                                    recordSpinner.commitEdit();
+                                    navigateToRecord();
+                                } catch (ParseException ex) {
+                                    HarbourLogger.log("HarbourDBFToolWindow", "Invalid record number on Enter: " + ex.getMessage());
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+            
+            // Removed Go To button - using Enter key in spinner instead
             
             // Create total records label
             totalRecordsLabel = new JLabel("");
@@ -220,14 +257,18 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             navigationPanel.add(nextButton);
             navigationPanel.add(new JLabel("  Go to:"));
             navigationPanel.add(recordSpinner);
-            navigationPanel.add(gotoButton);
+            navigationPanel.add(new JLabel(" (Enter)"));
             navigationPanel.add(new JLabel("  "));
             navigationPanel.add(totalRecordsLabel);
+            
+            // Create button panel for right side of toolbar
+            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+            buttonPanel.add(refreshButton);
             
             // Create toolbar
             JPanel toolbar = new JPanel(new BorderLayout());
             toolbar.add(navigationPanel, BorderLayout.CENTER);
-            toolbar.add(refreshButton, BorderLayout.EAST);
+            toolbar.add(buttonPanel, BorderLayout.EAST);
             
             // Create split pane with tree on left, details on right
             JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
@@ -535,9 +576,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             ", waitingForDataType: Records, pendingRequest key: " + alias + ":Records");
                         // Get current record position from workarea
                         int currentRec = workarea != null ? workarea.getCurrentRecord() : 1;
-                        // Start at current record, get 50 records from there
-                        liveConnection.requestRecords(alias, currentRec, 50);
-                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestRecords(" + alias + ", " + currentRec + ", 50)");
+                        // Start at current record, get records from settings
+                        HarbourSettings settings = HarbourSettings.getInstance(project);
+                        int recordCount = settings.getMaxGridPreloadResults();
+                        HarbourLogger.log("HarbourDBFToolWindow", "Using grid preload setting: " + recordCount + " records");
+                        liveConnection.requestRecords(alias, currentRec, recordCount);
+                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestRecords(" + alias + ", " + currentRec + ", " + recordCount + ")");
                     } else if (nodeText.equals("Indexes")) {
                         HarbourLogger.log("HarbourDBFToolWindow", "*** INDEXES SELECTED for " + alias);
                         currentWorkarea = alias;
@@ -610,6 +654,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private void navigateToRecord() {
             if (currentWorkarea != null && liveConnection != null) {
                 int recordNumber = (Integer) recordSpinner.getValue();
+                HarbourLogger.log("HarbourDBFToolWindow", "Navigate to record triggered: " + recordNumber + " in workarea: " + currentWorkarea);
                 liveConnection.navigateToRecord(currentWorkarea, recordNumber);
                 // Clear cached record data to force refresh
                 WorkareaCache cache = dataCache.get(currentWorkarea);
@@ -619,8 +664,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Request updated record data
                 liveConnection.requestRecordData(currentWorkarea);
                 updateNavigationButtons();
+            } else {
+                HarbourLogger.log("HarbourDBFToolWindow", "Navigate to record skipped - workarea: " + currentWorkarea + ", connection: " + (liveConnection != null));
             }
         }
+        
+        // Removed loadAllRecords method per user request
         
         /**
          * Reload current data manually
@@ -664,8 +713,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     // Get current record position for reload
                     HarbourLiveDBFConnection.WorkareaInfo workarea = liveConnection.getWorkarea(currentWorkarea);
                     int currentRec = workarea != null ? workarea.getCurrentRecord() : 1;
-                    // Start at current record, get 50 records from there
-                    liveConnection.requestRecords(currentWorkarea, currentRec, 50);
+                    // Start at current record, get records from settings
+                    HarbourSettings settings = HarbourSettings.getInstance(project);
+                    int recordCount = settings.getMaxGridPreloadResults();
+                    HarbourLogger.log("HarbourDBFToolWindow", "Reload using grid preload setting: " + recordCount + " records");
+                    liveConnection.requestRecords(currentWorkarea, currentRec, recordCount);
                 } else if (nodeText.equals("Indexes")) {
                     // Request indexes again
                     showLoadingMessage("Index Information");
@@ -689,7 +741,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (currentWorkarea == null || liveConnection == null) {
                 prevButton.setEnabled(false);
                 nextButton.setEnabled(false);
-                gotoButton.setEnabled(false);
+                // Removed gotoButton and loadAllButton
                 recordSpinner.setEnabled(false);
                 totalRecordsLabel.setText("");
                 return;
@@ -700,9 +752,20 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 int currentRecord = workarea.getCurrentRecord();
                 int totalRecords = workarea.getTotalRecords();
                 
+                // Check if Table Grid View is selected
+                boolean isGridViewSelected = false;
+                TreePath selectionPath = workareaTree.getSelectionPath();
+                if (selectionPath != null) {
+                    DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+                    if (selectedNode != null && selectedNode.getUserObject() != null) {
+                        String nodeText = selectedNode.getUserObject().toString();
+                        isGridViewSelected = nodeText.equals("Table Grid View");
+                    }
+                }
+                
                 prevButton.setEnabled(currentRecord > 1);
                 nextButton.setEnabled(currentRecord < totalRecords);
-                gotoButton.setEnabled(totalRecords > 0);
+                // Removed gotoButton and loadAllButton - using Enter key in spinner
                 recordSpinner.setEnabled(totalRecords > 0);
                 
                 // Update spinner model
