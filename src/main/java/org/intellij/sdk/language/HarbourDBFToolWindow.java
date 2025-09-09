@@ -93,6 +93,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private final DefaultTreeModel treeModel;
         private final DetailsTableModel tableModel;
         private final JLabel statusLabel;
+        private JLabel totalRecordsLabel;
         
         // Grid view components
         private JBTable gridTable;
@@ -209,6 +210,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             gotoButton.setEnabled(false);
             gotoButton.addActionListener(e -> navigateToRecord());
             
+            // Create total records label
+            totalRecordsLabel = new JLabel("");
+            
             // Create navigation panel
             JPanel navigationPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
             navigationPanel.add(new JLabel("Record Navigation:"));
@@ -217,6 +221,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             navigationPanel.add(new JLabel("  Go to:"));
             navigationPanel.add(recordSpinner);
             navigationPanel.add(gotoButton);
+            navigationPanel.add(new JLabel("  "));
+            navigationPanel.add(totalRecordsLabel);
             
             // Create toolbar
             JPanel toolbar = new JPanel(new BorderLayout());
@@ -288,23 +294,28 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 liveConnection = null;
             }
             
-            // Clear UI
-            DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) treeModel.getRoot();
-            rootNode.removeAllChildren();
-            treeModel.reload();
-            tableModel.clearData();
-            
-            // Clear cache, waiting state, and pending requests
-            dataCache.clear();
-            waitingForWorkarea = null;
-            waitingForDataType = null;
-            pendingRequests.clear();
-            currentWorkarea = null;
-            updateNavigationButtons();
-            
-            updateStatus("Debugging session disconnected");
-            
-            HarbourLogger.log("HarbourDBFToolWindow", "Disconnected from debugging session");
+            // Clear UI - properly handle tree updates on EDT
+            SwingUtilities.invokeLater(() -> {
+                // Clear selection first to avoid assertion errors
+                workareaTree.clearSelection();
+                
+                DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) treeModel.getRoot();
+                rootNode.removeAllChildren();
+                treeModel.reload();
+                tableModel.clearData();
+                
+                // Clear cache, waiting state, and pending requests
+                dataCache.clear();
+                waitingForWorkarea = null;
+                waitingForDataType = null;
+                pendingRequests.clear();
+                currentWorkarea = null;
+                updateNavigationButtons();
+                
+                updateStatus("Debugging session disconnected");
+                
+                HarbourLogger.log("HarbourDBFToolWindow", "Disconnected from debugging session");
+            });
         }
         
         @Override
@@ -673,6 +684,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 nextButton.setEnabled(false);
                 gotoButton.setEnabled(false);
                 recordSpinner.setEnabled(false);
+                totalRecordsLabel.setText("");
                 return;
             }
             
@@ -689,6 +701,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Update spinner model
                 if (totalRecords > 0) {
                     recordSpinner.setModel(new SpinnerNumberModel(currentRecord, 1, totalRecords, 1));
+                    totalRecordsLabel.setText("Total: " + totalRecords);
+                } else {
+                    totalRecordsLabel.setText("");
                 }
             }
         }
@@ -1360,7 +1375,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 if (currentKey != null && !currentKey.isEmpty()) {
                     data.add(new String[]{"Key Expression:", currentKey});
                 }
-                if (currentFor != null && !currentFor.isEmpty()) {
+                if (currentFor != null && !currentFor.isEmpty() && !currentFor.equals("NIL")) {
                     data.add(new String[]{"For Condition:", currentFor});
                 }
                 data.add(new String[]{"", ""});
@@ -1391,7 +1406,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         data.add(new String[]{"  File:", indexFile});
                     }
                     data.add(new String[]{"  Key:", indexKey});
-                    if (!indexFor.isEmpty()) {
+                    if (!indexFor.isEmpty() && !indexFor.equals("NIL")) {
                         data.add(new String[]{"  For:", indexFor});
                     }
                 }

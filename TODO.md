@@ -6,6 +6,7 @@ Testen:
 
 - navigation
   - CLASS NegVerfuegItem<= not navigatable pls fix
+  - define definition in ch files not found, should be at top like func names etc.
 
 - code completion
   - rech:faell <ctrls-space> should propose matching methods and data fields
