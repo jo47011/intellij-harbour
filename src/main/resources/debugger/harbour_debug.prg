@@ -1885,6 +1885,9 @@ STATIC PROCEDURE SendAreaIndexes(nArea)
       hb_inetSend(oDebugInfo["socket"], "CURRENT_KEY:" + OrdKey() + CRLF)
       hb_inetSend(oDebugInfo["socket"], "CURRENT_FOR:" + OrdFor() + CRLF)
       hb_inetSend(oDebugInfo["socket"], "CURRENT_BAG:" + OrdBagName() + CRLF)
+      // Add additional index info
+      hb_inetSend(oDebugInfo["socket"], "CURRENT_KEYNO:" + AllTrim(Str(OrdKeyNo())) + CRLF)
+      hb_inetSend(oDebugInfo["socket"], "CURRENT_KEYCOUNT:" + AllTrim(Str(OrdKeyCount())) + CRLF)
    ELSE
       hb_inetSend(oDebugInfo["socket"], "CURRENT:0" + CRLF)
    ENDIF

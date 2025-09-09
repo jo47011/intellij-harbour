@@ -533,8 +533,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         pendingRequests.put(alias + ":Records", System.currentTimeMillis());
                         HarbourLogger.log("HarbourDBFToolWindow", "Setting up request for table grid - alias: " + alias + 
                             ", waitingForDataType: Records, pendingRequest key: " + alias + ":Records");
-                        liveConnection.requestRecords(alias, 1, 50); // Request first 50 records
-                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestRecords(" + alias + ", 1, 50)");
+                        // Get current record position from workarea
+                        int currentRec = workarea != null ? workarea.getCurrentRecord() : 1;
+                        // Start at current record, get 50 records from there
+                        liveConnection.requestRecords(alias, currentRec, 50);
+                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestRecords(" + alias + ", " + currentRec + ", 50)");
                     } else if (nodeText.equals("Indexes")) {
                         HarbourLogger.log("HarbourDBFToolWindow", "*** INDEXES SELECTED for " + alias);
                         currentWorkarea = alias;
@@ -658,7 +661,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     waitingForWorkarea = currentWorkarea;
                     waitingForDataType = "Records";
                     pendingRequests.put(currentWorkarea + ":Records", System.currentTimeMillis());
-                    liveConnection.requestRecords(currentWorkarea, 1, 50);
+                    // Get current record position for reload
+                    HarbourLiveDBFConnection.WorkareaInfo workarea = liveConnection.getWorkarea(currentWorkarea);
+                    int currentRec = workarea != null ? workarea.getCurrentRecord() : 1;
+                    // Start at current record, get 50 records from there
+                    liveConnection.requestRecords(currentWorkarea, currentRec, 50);
                 } else if (nodeText.equals("Indexes")) {
                     // Request indexes again
                     showLoadingMessage("Index Information");
@@ -701,7 +708,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Update spinner model
                 if (totalRecords > 0) {
                     recordSpinner.setModel(new SpinnerNumberModel(currentRecord, 1, totalRecords, 1));
-                    totalRecordsLabel.setText("Total: " + totalRecords);
+                    // Format with thousand separator
+                    String formattedTotal = String.format("%,d", totalRecords);
+                    totalRecordsLabel.setText("Total: " + formattedTotal);
                 } else {
                     totalRecordsLabel.setText("");
                 }
@@ -1337,6 +1346,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             String currentKey = null;
             String currentFor = null;
             String currentBag = null;
+            String currentKeyNo = null;
+            String currentKeyCount = null;
             List<String[]> indexList = new ArrayList<>();
             
             // Parse all index data
@@ -1353,6 +1364,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     currentFor = line.substring(12);
                 } else if (line.startsWith("CURRENT_BAG:")) {
                     currentBag = line.substring(12);
+                } else if (line.startsWith("CURRENT_KEYNO:")) {
+                    currentKeyNo = line.substring(14);
+                } else if (line.startsWith("CURRENT_KEYCOUNT:")) {
+                    currentKeyCount = line.substring(18);
                 } else if (line.startsWith("INDEX:")) {
                     // Parse INDEX:number:name:file:key:for
                     String[] parts = line.substring(6).split(":", 5);
@@ -1377,6 +1392,22 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 }
                 if (currentFor != null && !currentFor.isEmpty() && !currentFor.equals("NIL")) {
                     data.add(new String[]{"For Condition:", currentFor});
+                }
+                if (currentKeyNo != null && !currentKeyNo.isEmpty()) {
+                    try {
+                        String formattedKeyNo = String.format("%,d", Integer.parseInt(currentKeyNo));
+                        data.add(new String[]{"Current Position:", formattedKeyNo});
+                    } catch (NumberFormatException e) {
+                        data.add(new String[]{"Current Position:", currentKeyNo});
+                    }
+                }
+                if (currentKeyCount != null && !currentKeyCount.isEmpty()) {
+                    try {
+                        String formattedCount = String.format("%,d", Integer.parseInt(currentKeyCount));
+                        data.add(new String[]{"Total Keys:", formattedCount});
+                    } catch (NumberFormatException e) {
+                        data.add(new String[]{"Total Keys:", currentKeyCount});
+                    }
                 }
                 data.add(new String[]{"", ""});
             }
