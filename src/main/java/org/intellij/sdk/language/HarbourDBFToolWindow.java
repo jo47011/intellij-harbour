@@ -519,6 +519,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             liveConnection.requestFieldInfo(alias);
                         }
                     } else if (nodeText.equals("Current Record")) {
+                        currentWorkarea = alias;
+                        updateNavigationButtons();
                         if (cache.recordData != null) {
                             // Show cached data immediately
                             displayRecordData(workarea, cache.recordData);
@@ -529,8 +531,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             waitingForDataType = "Record";
                             pendingRequests.put(alias + ":Record", System.currentTimeMillis());
                             liveConnection.requestRecordData(alias);
-                            currentWorkarea = alias;
-                            updateNavigationButtons();
                         }
                     } else if (nodeText.equals("Table Grid View")) {
                         HarbourLogger.log("HarbourDBFToolWindow", "*** TABLE GRID VIEW SELECTED for " + alias);
@@ -636,12 +636,23 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 if (selectionPath != null) {
                     DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
                     if (selectedNode != null && selectedNode.getUserObject() != null) {
-                        String nodeText = selectedNode.getUserObject().toString();
-                        if (nodeText.equals("Current Record")) {
+                        boolean isCurrentRecord = false;
+                        boolean isGridView = false;
+                        
+                        // Check if it's a workarea node (defaults to current record)
+                        if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                            isCurrentRecord = true;
+                        } else {
+                            String nodeText = selectedNode.getUserObject().toString();
+                            isCurrentRecord = nodeText.equals("Current Record");
+                            isGridView = nodeText.equals("Table Grid View");
+                        }
+                        
+                        if (isCurrentRecord) {
                             // Request updated record data to refresh the display
                             HarbourLogger.log("HarbourDBFToolWindow", "Refreshing current record display after navigation");
                             liveConnection.requestRecordData(currentWorkarea);
-                        } else if (nodeText.equals("Table Grid View")) {
+                        } else if (isGridView) {
                             // Refresh grid view with new position
                             HarbourLogger.log("HarbourDBFToolWindow", "Refreshing grid view after navigation");
                             HarbourSettings settings = HarbourSettings.getInstance(project);
@@ -659,17 +670,20 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 updateNavigationButtons();
                 
                 // Keep focus in the spinner field after navigation
-                // Use a small delay to ensure all UI updates are complete
-                Timer focusTimer = new Timer(50, e -> {
-                    JComponent editor = recordSpinner.getEditor();
-                    if (editor instanceof JSpinner.DefaultEditor) {
-                        JTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
-                        textField.requestFocusInWindow();
-                        textField.selectAll(); // Select all text for easy typing of next number
-                    }
+                // Use SwingUtilities.invokeLater to ensure all UI updates are complete
+                SwingUtilities.invokeLater(() -> {
+                    // Additional delay to ensure model update is complete
+                    Timer focusTimer = new Timer(100, e -> {
+                        JComponent editor = recordSpinner.getEditor();
+                        if (editor instanceof JSpinner.DefaultEditor) {
+                            JTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+                            textField.requestFocusInWindow();
+                            textField.selectAll(); // Select all text for easy typing of next number
+                        }
+                    });
+                    focusTimer.setRepeats(false);
+                    focusTimer.start();
                 });
-                focusTimer.setRepeats(false);
-                focusTimer.start();
             } else {
                 HarbourLogger.log("HarbourDBFToolWindow", "Navigate to record skipped - workarea: " + currentWorkarea + ", connection: " + (liveConnection != null));
             }
@@ -831,6 +845,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             String alias = workarea.getAlias();
             WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
             
+            // Set current workarea immediately
+            currentWorkarea = alias;
+            updateNavigationButtons();
+            
             // Default behavior: show current record data when clicking on table name
             if (cache.recordData != null) {
                 // Show cached data immediately
@@ -842,8 +860,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 waitingForDataType = "Record";
                 pendingRequests.put(alias + ":Record", System.currentTimeMillis());
                 liveConnection.requestRecordData(alias);
-                currentWorkarea = alias;
-                updateNavigationButtons();
             }
         }
         
