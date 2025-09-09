@@ -211,39 +211,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             recordSpinner.setEnabled(false);
             recordSpinner.setPreferredSize(new Dimension(80, 25));
             
-            // Add Enter key listener to spinner's text field
-            JComponent editor = recordSpinner.getEditor();
-            if (editor instanceof JSpinner.DefaultEditor) {
-                JFormattedTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
-                
-                // Method 1: ActionListener (should work but let's improve it)
-                textField.addActionListener(e -> {
-                    try {
-                        recordSpinner.commitEdit(); // Ensure the value is committed
-                        navigateToRecord();
-                    } catch (ParseException ex) {
-                        // Invalid input, ignore
-                        HarbourLogger.log("HarbourDBFToolWindow", "Invalid record number input: " + ex.getMessage());
-                    }
-                });
-                
-                // Method 2: KeyListener as backup (more direct control)
-                textField.addKeyListener(new KeyAdapter() {
-                    @Override
-                    public void keyPressed(KeyEvent e) {
-                        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-                            SwingUtilities.invokeLater(() -> {
-                                try {
-                                    recordSpinner.commitEdit();
-                                    navigateToRecord();
-                                } catch (ParseException ex) {
-                                    HarbourLogger.log("HarbourDBFToolWindow", "Invalid record number on Enter: " + ex.getMessage());
-                                }
-                            });
-                        }
-                    }
-                });
-            }
+            // Setup Enter key handling (will be called again after model changes)
+            setupSpinnerEnterKeyHandling();
             
             // Removed Go To button - using Enter key in spinner instead
             
@@ -661,15 +630,79 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 if (cache != null) {
                     cache.recordData = null;
                 }
-                // Request updated record data
-                liveConnection.requestRecordData(currentWorkarea);
+                
+                // Check what view we're in and refresh accordingly
+                TreePath selectionPath = workareaTree.getSelectionPath();
+                if (selectionPath != null) {
+                    DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+                    if (selectedNode != null && selectedNode.getUserObject() != null) {
+                        String nodeText = selectedNode.getUserObject().toString();
+                        if (nodeText.equals("Current Record")) {
+                            // Request updated record data to refresh the display
+                            HarbourLogger.log("HarbourDBFToolWindow", "Refreshing current record display after navigation");
+                            liveConnection.requestRecordData(currentWorkarea);
+                        } else if (nodeText.equals("Table Grid View")) {
+                            // Refresh grid view with new position
+                            HarbourLogger.log("HarbourDBFToolWindow", "Refreshing grid view after navigation");
+                            HarbourSettings settings = HarbourSettings.getInstance(project);
+                            int recordCount = settings.getMaxGridPreloadResults();
+                            // Request records starting from new position
+                            waitingForWorkarea = currentWorkarea;
+                            waitingForDataType = "Records";
+                            String requestKey = currentWorkarea + ":Records";
+                            pendingRequests.put(requestKey, System.currentTimeMillis());
+                            liveConnection.requestRecords(currentWorkarea, recordNumber, recordCount);
+                        }
+                    }
+                }
+                
                 updateNavigationButtons();
+                
+                // Keep focus in the spinner field after navigation
+                // Use a small delay to ensure all UI updates are complete
+                Timer focusTimer = new Timer(50, e -> {
+                    JComponent editor = recordSpinner.getEditor();
+                    if (editor instanceof JSpinner.DefaultEditor) {
+                        JTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+                        textField.requestFocusInWindow();
+                        textField.selectAll(); // Select all text for easy typing of next number
+                    }
+                });
+                focusTimer.setRepeats(false);
+                focusTimer.start();
             } else {
                 HarbourLogger.log("HarbourDBFToolWindow", "Navigate to record skipped - workarea: " + currentWorkarea + ", connection: " + (liveConnection != null));
             }
         }
         
         // Removed loadAllRecords method per user request
+        
+        /**
+         * Setup Enter key handling for the record spinner
+         * This needs to be called after any model change as it recreates the editor
+         */
+        private void setupSpinnerEnterKeyHandling() {
+            JComponent editor = recordSpinner.getEditor();
+            
+            if (editor instanceof JSpinner.DefaultEditor) {
+                JFormattedTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+                
+                // Clear existing listeners first to avoid duplicates
+                for (var listener : textField.getActionListeners()) {
+                    textField.removeActionListener(listener);
+                }
+                
+                // Single ActionListener for Enter key
+                textField.addActionListener(e -> {
+                    try {
+                        recordSpinner.commitEdit(); // Ensure the value is committed
+                        navigateToRecord();
+                    } catch (ParseException ex) {
+                        HarbourLogger.log("HarbourDBFToolWindow", "Invalid record number input: " + ex.getMessage());
+                    }
+                });
+            }
+        }
         
         /**
          * Reload current data manually
@@ -752,25 +785,36 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 int currentRecord = workarea.getCurrentRecord();
                 int totalRecords = workarea.getTotalRecords();
                 
-                // Check if Table Grid View is selected
-                boolean isGridViewSelected = false;
+                // Check what view is selected - only enable navigation for Current Record and Table Grid View
+                boolean navigationEnabled = false;
                 TreePath selectionPath = workareaTree.getSelectionPath();
                 if (selectionPath != null) {
                     DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
                     if (selectedNode != null && selectedNode.getUserObject() != null) {
-                        String nodeText = selectedNode.getUserObject().toString();
-                        isGridViewSelected = nodeText.equals("Table Grid View");
+                        // Check if it's a workarea node (defaults to Current Record view)
+                        if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                            HarbourLiveDBFConnection.WorkareaInfo selectedWorkarea = 
+                                (HarbourLiveDBFConnection.WorkareaInfo) selectedNode.getUserObject();
+                            // Enable navigation if this is the current workarea
+                            navigationEnabled = selectedWorkarea.getAlias().equals(currentWorkarea);
+                        } else {
+                            // Check specific child node selections
+                            String nodeText = selectedNode.getUserObject().toString();
+                            navigationEnabled = nodeText.equals("Current Record") || nodeText.equals("Table Grid View");
+                        }
                     }
                 }
                 
-                prevButton.setEnabled(currentRecord > 1);
-                nextButton.setEnabled(currentRecord < totalRecords);
-                // Removed gotoButton and loadAllButton - using Enter key in spinner
-                recordSpinner.setEnabled(totalRecords > 0);
+                // Enable/disable navigation based on view and record position
+                prevButton.setEnabled(navigationEnabled && currentRecord > 1);
+                nextButton.setEnabled(navigationEnabled && currentRecord < totalRecords);
+                recordSpinner.setEnabled(navigationEnabled && totalRecords > 0);
                 
                 // Update spinner model
                 if (totalRecords > 0) {
                     recordSpinner.setModel(new SpinnerNumberModel(currentRecord, 1, totalRecords, 1));
+                    // IMPORTANT: Re-setup Enter key handling after model change
+                    setupSpinnerEnterKeyHandling();
                     // Format with thousand separator
                     String formattedTotal = String.format("%,d", totalRecords);
                     totalRecordsLabel.setText("Total: " + formattedTotal);
