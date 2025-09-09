@@ -642,11 +642,15 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         // Check if it's a workarea node (defaults to current record)
                         if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
                             isCurrentRecord = true;
+                            HarbourLogger.log("HarbourDBFToolWindow", "Selected node is WorkareaInfo, treating as Current Record");
                         } else {
                             String nodeText = selectedNode.getUserObject().toString();
+                            HarbourLogger.log("HarbourDBFToolWindow", "Selected node text: '" + nodeText + "'");
                             isCurrentRecord = nodeText.equals("Current Record");
                             isGridView = nodeText.equals("Table Grid View");
                         }
+                        
+                        HarbourLogger.log("HarbourDBFToolWindow", "isCurrentRecord=" + isCurrentRecord + ", isGridView=" + isGridView);
                         
                         if (isCurrentRecord) {
                             // Request updated record data to refresh the display
@@ -654,15 +658,25 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             liveConnection.requestRecordData(currentWorkarea);
                         } else if (isGridView) {
                             // Refresh grid view with new position
-                            HarbourLogger.log("HarbourDBFToolWindow", "Refreshing grid view after navigation");
+                            HarbourLogger.log("HarbourDBFToolWindow", "Refreshing grid view after navigation to record " + recordNumber);
                             HarbourSettings settings = HarbourSettings.getInstance(project);
                             int recordCount = settings.getMaxGridPreloadResults();
+                            HarbourLogger.log("HarbourDBFToolWindow", "Requesting " + recordCount + " records starting from " + recordNumber);
+                            
+                            // Clear any pending request for this workarea to avoid duplicates
+                            String requestKey = currentWorkarea + ":Records";
+                            if (pendingRequests.containsKey(requestKey)) {
+                                HarbourLogger.log("HarbourDBFToolWindow", "Clearing pending request for " + requestKey);
+                                pendingRequests.remove(requestKey);
+                            }
+                            
                             // Request records starting from new position
                             waitingForWorkarea = currentWorkarea;
                             waitingForDataType = "Records";
-                            String requestKey = currentWorkarea + ":Records";
                             pendingRequests.put(requestKey, System.currentTimeMillis());
                             liveConnection.requestRecords(currentWorkarea, recordNumber, recordCount);
+                        } else {
+                            HarbourLogger.log("HarbourDBFToolWindow", "No refresh - neither Current Record nor Grid View selected");
                         }
                     }
                 }
@@ -709,7 +723,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Single ActionListener for Enter key
                 textField.addActionListener(e -> {
                     try {
+                        HarbourLogger.log("HarbourDBFToolWindow", "Enter key pressed in spinner, committing edit...");
                         recordSpinner.commitEdit(); // Ensure the value is committed
+                        int value = (Integer) recordSpinner.getValue();
+                        HarbourLogger.log("HarbourDBFToolWindow", "Spinner value after commit: " + value);
                         navigateToRecord();
                     } catch (ParseException ex) {
                         HarbourLogger.log("HarbourDBFToolWindow", "Invalid record number input: " + ex.getMessage());
@@ -1270,14 +1287,35 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             
             HarbourLogger.log("HarbourDBFToolWindow", "onRecordsReceived called for " + alias + " with " + recordsData.length + " lines of data");
             
+            // Check if this is for the current grid view even without pending request
+            boolean isCurrentGridView = false;
+            if (currentWorkarea != null && currentWorkarea.equals(alias)) {
+                TreePath selectionPath = workareaTree.getSelectionPath();
+                if (selectionPath != null) {
+                    DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+                    if (selectedNode != null && selectedNode.getUserObject() != null) {
+                        String nodeText = selectedNode.getUserObject().toString();
+                        isCurrentGridView = nodeText.equals("Table Grid View");
+                    }
+                }
+            }
+            
+            // Process if we have a pending request OR if this is the current grid view
             if (pendingRequests.containsKey(requestKey)) {
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
+                HarbourLogger.log("HarbourDBFToolWindow", "Processing records for " + alias + " (pending request found and removed)");
                 
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Records".equals(waitingForDataType)) {
                     waitingForWorkarea = null;
                     waitingForDataType = null;
                 }
+            } else if (isCurrentGridView) {
+                // Accept duplicate for current grid view to ensure UI updates
+                shouldDisplay = true;
+                HarbourLogger.log("HarbourDBFToolWindow", "Processing duplicate records for " + alias + " (current grid view - ensuring UI update)");
+            } else {
+                HarbourLogger.log("HarbourDBFToolWindow", "Ignoring unexpected records for " + alias + " (not current grid view)");
             }
             
             if (shouldDisplay) {
