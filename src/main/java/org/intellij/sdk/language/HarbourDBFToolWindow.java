@@ -94,6 +94,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private final DetailsTableModel tableModel;
         private final JLabel statusLabel;
         
+        // Grid view components
+        private JBTable gridTable;
+        private JBScrollPane tableScrollPane;
+        
         // Navigation controls
         private JButton prevButton;
         private JButton nextButton;
@@ -222,7 +226,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Create split pane with tree on left, details on right
             JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
             splitPane.setLeftComponent(new JBScrollPane(workareaTree));
-            splitPane.setRightComponent(new JBScrollPane(detailsTable));
+            tableScrollPane = new JBScrollPane(detailsTable);
+            splitPane.setRightComponent(tableScrollPane);
             splitPane.setDividerLocation(250);
             
             mainPanel.add(toolbar, BorderLayout.NORTH);
@@ -484,28 +489,24 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         if (cache.fieldData != null) {
                             // Show cached data immediately
                             displayFieldData(workarea, cache.fieldData);
-                            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 267] Showing cached fields for " + alias);
                         } else {
                             // Show loading message and request data
                             showLoadingMessage("Fields");
                             waitingForWorkarea = alias;
                             waitingForDataType = "Fields";
                             pendingRequests.put(alias + ":Fields", System.currentTimeMillis());
-                            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 273] Requesting fields for " + alias + ", waiting state set");
                             liveConnection.requestFieldInfo(alias);
                         }
                     } else if (nodeText.equals("Current Record")) {
                         if (cache.recordData != null) {
                             // Show cached data immediately
                             displayRecordData(workarea, cache.recordData);
-                            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 280] Showing cached record for " + alias);
                         } else {
                             // Show loading message and request data
                             showLoadingMessage("Current Record");
                             waitingForWorkarea = alias;
                             waitingForDataType = "Record";
                             pendingRequests.put(alias + ":Record", System.currentTimeMillis());
-                            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 286] Requesting record for " + alias + ", waiting state set");
                             liveConnection.requestRecordData(alias);
                             currentWorkarea = alias;
                             updateNavigationButtons();
@@ -542,14 +543,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         if (cache.schemaData != null) {
                             // Show cached data immediately
                             displaySchemaData(workarea, cache.schemaData);
-                            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 293] Showing cached schema for " + alias);
                         } else {
                             // Show loading message and request data
                             showLoadingMessage("Schema Info");
                             waitingForWorkarea = alias;
                             waitingForDataType = "Schema";
                             pendingRequests.put(alias + ":Schema", System.currentTimeMillis());
-                            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 299] Requesting schema for " + alias + ", waiting state set");
                             liveConnection.requestSchemaInfo(alias);
                         }
                     }
@@ -705,14 +704,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (cache.recordData != null) {
                 // Show cached data immediately
                 displayRecordData(workarea, cache.recordData);
-                HarbourLogger.log("HarbourDBFToolWindow", "[LINE 318] Showing cached record for workarea: " + alias);
             } else {
                 // Show loading message and request data
                 showLoadingMessage("Current Record");
                 waitingForWorkarea = alias;
                 waitingForDataType = "Record";
                 pendingRequests.put(alias + ":Record", System.currentTimeMillis());
-                HarbourLogger.log("HarbourDBFToolWindow", "[LINE 324] Requesting record for workarea: " + alias + ", waiting state set");
                 liveConnection.requestRecordData(alias);
                 currentWorkarea = alias;
                 updateNavigationButtons();
@@ -812,8 +809,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
             cache.setFieldData(fieldData);
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 424] onFieldsReceived for " + alias + 
-                ", waiting for: " + waitingForWorkarea + "/" + waitingForDataType);
             
             // Check if we should display this data
             boolean shouldDisplay = false;
@@ -823,7 +818,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (pendingRequests.containsKey(requestKey)) {
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying fields for " + alias + " (pending request fulfilled)");
                 
                 // Also clear waiting state if it matches
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Fields".equals(waitingForDataType)) {
@@ -834,7 +828,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Or if it's currently selected
             else if (isCurrentlySelected(alias, "Fields")) {
                 shouldDisplay = true;
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying fields for " + alias + " (currently selected)");
             }
             
             if (shouldDisplay) {
@@ -852,12 +845,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 return;
             }
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 478] displayFieldData called for " + workarea.getAlias() + 
-                " with " + fieldData.length + " lines");
+            // Switch back to details table
+            switchToDetailsTable();
             
             List<String[]> data = new ArrayList<>();
-            data.add(new String[]{"Field Information for " + workarea.getAlias(), ""});
-            data.add(new String[]{"", ""});
             
             int fieldCount = 0;
             for (String fieldLine : fieldData) {
@@ -884,14 +875,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             detailsTable.repaint();
             detailsTable.revalidate();
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 502] Displayed " + fieldCount + " fields for " + workarea.getAlias());
         }
         
         @Override 
         public void onRecordDataReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordData) {
-            HarbourLogger.log("HarbourDBFToolWindow", 
-                "[LINE 458] onRecordDataReceived called for " + workarea.getAlias() + " with " + recordData.length + " lines" +
-                ", waiting for: " + waitingForWorkarea + "/" + waitingForDataType);
             
             // Cache the data
             String alias = workarea.getAlias();
@@ -906,7 +893,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (pendingRequests.containsKey(requestKey)) {
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying record for " + alias + " (pending request fulfilled)");
                 
                 // Also clear waiting state if it matches
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Record".equals(waitingForDataType)) {
@@ -917,7 +903,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Or if it's currently selected
             else if (isCurrentlySelected(alias, "Record")) {
                 shouldDisplay = true;
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying record for " + alias + " (currently selected)");
             }
             
             if (shouldDisplay) {
@@ -937,13 +922,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 return;
             }
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 539] displayRecordData called for " + workarea.getAlias() + 
-                " with " + recordData.length + " lines");
+            // Switch back to details table
+            switchToDetailsTable();
             
             List<String[]> data = new ArrayList<>();
-            data.add(new String[]{"Current Record Data for " + workarea.getAlias(), ""});
-            data.add(new String[]{"Record " + workarea.getCurrentRecord() + " of " + workarea.getTotalRecords(), ""});
-            data.add(new String[]{"", ""});
             
             int valueCount = 0;
             for (String dataLine : recordData) {
@@ -983,16 +965,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 }
             }
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 585] Added " + valueCount + " field values to display");
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 586] Total rows in data list: " + data.size());
             tableModel.setData(data);
             
             // Force table to repaint
             detailsTable.repaint();
             detailsTable.revalidate();
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 588] Set data in table model for " + workarea.getAlias() + 
-                ", table now has " + tableModel.getRowCount() + " rows");
         }
         
         @Override
@@ -1002,8 +980,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             WorkareaCache cache = dataCache.computeIfAbsent(alias, k -> new WorkareaCache());
             cache.setSchemaData(schemaData);
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 493] onSchemaInfoReceived for " + alias + 
-                ", waiting for: " + waitingForWorkarea + "/" + waitingForDataType);
             
             // Check if we should display this data
             boolean shouldDisplay = false;
@@ -1013,7 +989,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (pendingRequests.containsKey(requestKey)) {
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying schema for " + alias + " (pending request fulfilled)");
                 
                 // Also clear waiting state if it matches
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Schema".equals(waitingForDataType)) {
@@ -1024,7 +999,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Or if it's currently selected
             else if (isCurrentlySelected(alias, "Schema")) {
                 shouldDisplay = true;
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying schema for " + alias + " (currently selected)");
             }
             
             if (shouldDisplay) {
@@ -1089,12 +1063,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 return;
             }
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 664] displaySchemaData called for " + workarea.getAlias() + 
-                " with " + schemaData.length + " lines");
+            // Switch back to details table
+            switchToDetailsTable();
             
             List<String[]> data = new ArrayList<>();
-            data.add(new String[]{"Schema Information for " + workarea.getAlias(), ""});
-            data.add(new String[]{"", ""});
             
             int itemCount = 0;
             // Parse schema response
@@ -1140,7 +1112,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             detailsTable.repaint();
             detailsTable.revalidate();
             
-            HarbourLogger.log("HarbourDBFToolWindow", "[LINE 707] Displayed " + itemCount + " schema items for " + workarea.getAlias());
         }
         
         @Override
@@ -1155,7 +1126,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (pendingRequests.containsKey(requestKey)) {
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying records grid for " + alias);
                 
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Records".equals(waitingForDataType)) {
                     waitingForWorkarea = null;
@@ -1180,7 +1150,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             if (pendingRequests.containsKey(requestKey)) {
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
-                HarbourLogger.log("HarbourDBFToolWindow", "Displaying indexes for " + alias);
                 
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Indexes".equals(waitingForDataType)) {
                     waitingForWorkarea = null;
@@ -1209,13 +1178,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Parse the records data
             for (String line : recordsData) {
                 if (line.startsWith("ERROR:")) {
-                    // Handle error
+                    // Handle error - show in regular table
                     List<String[]> errorData = new ArrayList<>();
-                    errorData.add(new String[]{"Table Grid View Error", ""});
                     errorData.add(new String[]{"Error:", line.substring(6)});
                     tableModel.setData(errorData);
-                    detailsTable.repaint();
-                    detailsTable.revalidate();
+                    switchToDetailsTable();
                     return;
                 } else if (line.startsWith("COLUMN:")) {
                     // Parse column definition - format: COLUMN:name:type:length:decimals
@@ -1256,48 +1223,84 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // If no columns found, show error
             if (columnNames.isEmpty() || rows.isEmpty()) {
                 List<String[]> data = new ArrayList<>();
-                data.add(new String[]{"Table Grid View for " + workarea.getAlias(), ""});
                 data.add(new String[]{"No data available", ""});
                 tableModel.setData(data);
-                detailsTable.repaint();
-                detailsTable.revalidate();
+                switchToDetailsTable();
                 return;
             }
             
-            // Create a proper grid table model
-            String[] columnArray = new String[columnNames.size() + 1];
-            columnArray[0] = "RecNo";
-            for (int i = 0; i < columnNames.size(); i++) {
-                columnArray[i + 1] = columnNames.get(i);
-            }
+            // Create proper grid table
+            createAndSwitchToGridTable(columnNames, rows);
+        }
+        
+        /**
+         * Create a new JTable for grid view and switch to it
+         */
+        private void createAndSwitchToGridTable(List<String> columnNames, List<Map<String, String>> rows) {
+            // Add RecNo as first column
+            List<String> allColumns = new ArrayList<>();
+            allColumns.add("RecNo");
+            allColumns.addAll(columnNames);
             
-            // Convert to table data format
-            Object[][] tableData = new Object[rows.size()][columnArray.length];
-            for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
-                Map<String, String> row = rows.get(rowIdx);
-                tableData[rowIdx][0] = row.get("RecNo");
-                for (int colIdx = 0; colIdx < columnNames.size(); colIdx++) {
-                    String value = row.get(columnNames.get(colIdx));
-                    tableData[rowIdx][colIdx + 1] = value != null ? value : "";
+            // Create column names array
+            String[] columnArray = allColumns.toArray(new String[0]);
+            
+            // Create data array
+            Object[][] dataArray = new Object[rows.size()][allColumns.size()];
+            for (int i = 0; i < rows.size(); i++) {
+                Map<String, String> row = rows.get(i);
+                for (int j = 0; j < allColumns.size(); j++) {
+                    String columnName = allColumns.get(j);
+                    String value = row.get(columnName);
+                    dataArray[i][j] = value != null ? value : "";
                 }
             }
             
-            // Update the table model with proper grid data
-            GridTableModel gridModel = new GridTableModel(columnArray, tableData);
-            detailsTable.setModel(gridModel);
+            // Create new table model for grid
+            DefaultTableModel gridModel = new DefaultTableModel(dataArray, columnArray) {
+                @Override
+                public boolean isCellEditable(int row, int column) {
+                    return false; // Make table read-only
+                }
+            };
             
-            // Adjust column widths
-            for (int i = 0; i < detailsTable.getColumnCount(); i++) {
-                TableColumn column = detailsTable.getColumnModel().getColumn(i);
-                if (i == 0) {
-                    column.setPreferredWidth(60); // RecNo column
+            // Create new grid table
+            gridTable = new JBTable(gridModel);
+            gridTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+            gridTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            
+            // Set column widths based on content
+            for (int i = 0; i < gridTable.getColumnCount(); i++) {
+                TableColumn column = gridTable.getColumnModel().getColumn(i);
+                String columnName = columnArray[i];
+                
+                // Set preferred width based on column name and content
+                int width;
+                if ("RecNo".equals(columnName)) {
+                    width = 60;
                 } else {
-                    column.setPreferredWidth(120); // Data columns
+                    // Calculate width based on column name length and sample data
+                    width = Math.max(columnName.length() * 8, 80);
+                    width = Math.min(width, 200); // Cap maximum width
                 }
+                column.setPreferredWidth(width);
             }
             
-            detailsTable.repaint();
-            detailsTable.revalidate();
+            // Replace the table in the scroll pane
+            tableScrollPane.setViewportView(gridTable);
+            tableScrollPane.revalidate();
+            tableScrollPane.repaint();
+        }
+        
+        /**
+         * Switch back to the details table view
+         */
+        private void switchToDetailsTable() {
+            if (tableScrollPane.getViewport().getView() != detailsTable) {
+                tableScrollPane.setViewportView(detailsTable);
+                tableScrollPane.revalidate();
+                tableScrollPane.repaint();
+            }
         }
         
         /**
@@ -1309,9 +1312,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 return;
             }
             
+            // Switch back to details table
+            switchToDetailsTable();
+            
             List<String[]> data = new ArrayList<>();
-            data.add(new String[]{"Index Information for " + workarea.getAlias(), ""});
-            data.add(new String[]{"", ""});
             
             String currentIndex = null;
             String currentName = null;
@@ -1398,44 +1402,6 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             tableModel.setData(data);
             detailsTable.repaint();
             detailsTable.revalidate();
-        }
-    }
-    
-    /**
-     * Table model for grid view display
-     */
-    private static class GridTableModel extends AbstractTableModel {
-        private final String[] columnNames;
-        private final Object[][] data;
-        
-        public GridTableModel(String[] columnNames, Object[][] data) {
-            this.columnNames = columnNames;
-            this.data = data;
-        }
-        
-        @Override
-        public int getRowCount() {
-            return data.length;
-        }
-        
-        @Override
-        public int getColumnCount() {
-            return columnNames.length;
-        }
-        
-        @Override
-        public String getColumnName(int column) {
-            return columnNames[column];
-        }
-        
-        @Override
-        public Object getValueAt(int rowIndex, int columnIndex) {
-            return data[rowIndex][columnIndex];
-        }
-        
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
         }
     }
     
