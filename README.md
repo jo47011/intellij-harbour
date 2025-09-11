@@ -39,6 +39,21 @@ the [MAKING-OF](./MAKING_OF.md).
 2. In PyCharm: **Settings** → **Plugins** → ⚙️ → **Install Plugin from Disk...**
 3. Select the downloaded plugin file and restart PyCharm
 
+### Important: File Size Limits Configuration
+
+By default, PyCharm/IntelliJ has file size limits that may be too small for large Harbour projects. To work with files larger than 2.5 MB, you need to manually configure these limits:
+
+1. Go to **Help** → **Edit Custom Properties**
+2. Add the following lines to the file:
+   ```
+   idea.max.intellisense.filesize=102400
+   idea.max.content.load.filesize=204800
+   ```
+   These values set the limits to 100 MB for code assistance and 200 MB for file opening.
+3. Save the file and restart the IDE
+
+**Note:** These are IDE-level settings that must be configured manually and cannot be changed by plugins at runtime.
+
 ### Syntax Highlighting
 
 Full color coding support for Harbour/Clipper syntax with customizable color schemes. Keywords, functions, comments,
