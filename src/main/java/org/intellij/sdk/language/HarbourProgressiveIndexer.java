@@ -49,9 +49,9 @@ public class HarbourProgressiveIndexer {
         if (INDEXING_IN_PROGRESS.compareAndSet(false, true)) {
             LOG.info("Starting progressive indexing of Harbour files");
 
-            ApplicationManager.getApplication().invokeLater(() -> {
-                // Start with a small indexing job in the background
-                ProgressManager.getInstance().run(new Task.Backgroundable(project, "Indexing Harbour Files", true) {
+            // Start indexing directly on background thread - no EDT involvement
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                ProgressManager.getInstance().run(new Task.Backgroundable(project, "Scanning Harbour project files", true) {
                     @Override
                     public void run(@NotNull ProgressIndicator indicator) {
                         try {
@@ -92,44 +92,26 @@ public class HarbourProgressiveIndexer {
                                 }
                             }
 
-                            // Skip indexing if only a few files
-                            if (harbourFiles.size() <= MAX_INITIAL_FILES) {
-                                LOG.info("Small project detected, indexing all " + harbourFiles.size() + " files");
-                                indexAllFiles(project, harbourFiles, indicator);
-                                return;
-                            }
-
-                            // Process in batches
-                            LOG.info("Large project detected, doing progressive indexing of " + harbourFiles.size() + " files");
+                            // Index ALL files in background - no limits
+                            LOG.info("Indexing all " + harbourFiles.size() + " Harbour files in background");
 
                             // First index open files - highest priority
                             indicator.setText("Indexing open Harbour files");
                             Set<VirtualFile> openFiles = ReadAction.compute(() -> getOpenHarbourFiles(project));
-                            indexFiles(project, openFiles, indicator, 0, openFiles.size());
-
-                            // Then index a limited set to improve initial performance
-                            indicator.setText("Initial indexing of Harbour files");
-                            Set<VirtualFile> initialFiles = new HashSet<>(openFiles);
-                            int initialCount = Math.min(MAX_INITIAL_FILES, harbourFiles.size());
-                            int counter = 0;
-
-                            for (VirtualFile file : harbourFiles) {
-                                if (!initialFiles.contains(file)) {
-                                    initialFiles.add(file);
-                                    counter++;
-                                    if (counter >= initialCount) break;
-                                }
+                            if (!openFiles.isEmpty()) {
+                                indexFiles(project, openFiles, indicator, 0, openFiles.size());
                             }
 
-                            indexFiles(project, initialFiles, indicator, openFiles.size(), initialCount);
-
-                            // Finally process the rest in the background with lower priority
-                            indicator.setText("Background indexing of remaining Harbour files");
-                            indicator.setFraction(0.5);
+                            // Then index ALL remaining files in background
+                            indicator.setText("Scanning all Harbour project files");
+                            indicator.setFraction(0.1);
 
                             Set<VirtualFile> remainingFiles = new HashSet<>(harbourFiles);
-                            remainingFiles.removeAll(initialFiles);
-
+                            remainingFiles.removeAll(openFiles);
+                            
+                            LOG.info("Indexing " + remainingFiles.size() + " remaining files in background");
+                            
+                            // Index all remaining files
                             indexFilesInBackground(project, remainingFiles);
                         } finally {
                             INDEXING_IN_PROGRESS.set(false);
@@ -145,6 +127,15 @@ public class HarbourProgressiveIndexer {
                                     LOG.error("Cannot save - cache service is null!");
                                 }
                             }
+                            
+                            // Show notification that indexing is complete
+                            com.intellij.notification.NotificationGroupManager.getInstance()
+                                .getNotificationGroup("Harbour Application")
+                                .createNotification("Harbour Indexing Complete", 
+                                    "All Harbour files have been indexed successfully.", 
+                                    com.intellij.notification.NotificationType.INFORMATION)
+                                .notify(project);
+                            LOG.info("Indexing complete notification shown");
                         }
                     }
                 });
@@ -407,10 +398,17 @@ public class HarbourProgressiveIndexer {
                     });
                 }
 
-                // Schedule next batch with delay to avoid UI freezes
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    processBatch(project, files, processedBatches, totalBatches);
-                }, o -> HarbourPerformanceOptimizer.isShuttingDown() || project.isDisposed());
+                // Schedule next batch on background thread with delay
+                ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                    try {
+                        Thread.sleep(100); // Small delay between batches
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    if (!HarbourPerformanceOptimizer.isShuttingDown() && !project.isDisposed()) {
+                        processBatch(project, files, processedBatches, totalBatches);
+                    }
+                });
 
             } catch (Exception e) {
                 if (!HarbourPerformanceOptimizer.isShuttingDown()) {

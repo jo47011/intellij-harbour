@@ -40,9 +40,9 @@ import java.util.regex.Pattern;
 public final class HarbourReferenceService {
     private static final Logger LOG = Logger.getInstance(HarbourReferenceService.class);
     
-    // Maximum results to prevent memory issues and hanging
-    private static final int MAX_RESULTS = 50;
-    private static final int MAX_CACHE_SIZE = 100;
+    // No limits - scan everything
+    private static final int MAX_RESULTS = Integer.MAX_VALUE;
+    private static final int MAX_CACHE_SIZE = 1000;
 
     // Cache of function name (lowercase) to list of declarations
     private final Map<String, List<PsiElement>> functionCaches = new ConcurrentHashMap<>();
@@ -627,7 +627,8 @@ public final class HarbourReferenceService {
      */
     private List<PsiElement> directSearch(String identifierName, boolean isFunction) {
         Instant start = Instant.now();
-        List<PsiElement> results = new ArrayList<>();
+        List<PsiElement> definitions = new ArrayList<>();
+        List<PsiElement> usages = new ArrayList<>();
 
         // Pattern for matching exact identifiers with word boundaries
         Pattern identifierPattern = Pattern.compile(
@@ -638,9 +639,9 @@ public final class HarbourReferenceService {
         Pattern callPattern = null;
 
         if (isFunction) {
-            // Create patterns for function and procedure declarations
+            // Create patterns for function and procedure declarations (including STATIC)
             functionPattern = Pattern.compile(
-                    "(?i)\\b(FUNCTION|PROCEDURE|METHOD)\\s+" + Pattern.quote(identifierName) + "\\b");
+                    "(?i)\\b(STATIC\\s+)?(FUNCTION|PROCEDURE|METHOD)\\s+" + Pattern.quote(identifierName) + "\\b");
 
             // Create pattern for function calls
             callPattern = Pattern.compile(
@@ -684,28 +685,38 @@ public final class HarbourReferenceService {
                         PsiElement element = psiFile.findElementAt(startOffset);
 
                         if (element != null) {
-                            // Try to get the full declaration
-                            PsiElement declaration = null;
-
+                            // Try to find the actual function name identifier after FUNCTION/PROCEDURE keyword
+                            PsiElement funcNameElement = null;
+                            
+                            // If we're on the FUNCTION/PROCEDURE keyword, look for the next identifier
                             if (element.getText().equalsIgnoreCase("FUNCTION") ||
-                                    element.getText().equalsIgnoreCase("PROCEDURE")) {
-                                declaration = PsiTreeUtil.getParentOfType(element, HarbourFunctionDeclaration.class);
+                                element.getText().equalsIgnoreCase("PROCEDURE") ||
+                                element.getText().equalsIgnoreCase("METHOD") ||
+                                element.getText().equalsIgnoreCase("STATIC")) {
+                                
+                                // Find the function name identifier
+                                PsiElement current = element;
+                                while (current != null && funcNameElement == null) {
+                                    current = current.getNextSibling();
+                                    if (current instanceof LeafPsiElement) {
+                                        LeafPsiElement leaf = (LeafPsiElement) current;
+                                        if (leaf.getElementType() == HarbourTypes.IDENT &&
+                                            leaf.getText().equalsIgnoreCase(identifierName)) {
+                                            funcNameElement = leaf;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
-
-                            // If we found a declaration, add it (with limit check)
-                            if (declaration != null) {
-                                results.add(declaration);
-                                if (results.size() >= MAX_RESULTS) {
-                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
-                                    return results;
-                                }
+                            
+                            // Add the function name element if found, otherwise the keyword element
+                            if (funcNameElement != null) {
+                                definitions.add(funcNameElement);
+                                HarbourLogger.log("ReferenceService", "Found function definition identifier for " + 
+                                    identifierName + " at line " + lineNumber);
                             } else {
-                                // Otherwise, add the element itself
-                                results.add(element);
-                                if (results.size() >= MAX_RESULTS) {
-                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
-                                    return results;
-                                }
+                                // Fallback to adding the element itself
+                                definitions.add(element);
                             }
                         }
                     }
@@ -727,18 +738,18 @@ public final class HarbourReferenceService {
                             // Check if this is a function call
                             PsiElement functionCall = PsiTreeUtil.getParentOfType(element, FunctionCallImpl.class);
                             if (functionCall != null) {
-                                results.add(functionCall);
-                                if (results.size() >= MAX_RESULTS) {
-                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
-                                    return results;
+                                usages.add(functionCall);
+                                // Stop collecting usages if we have too many
+                                if (usages.size() >= MAX_RESULTS) {
+                                    break;
                                 }
                             } else if (element instanceof LeafPsiElement &&
                                     ((LeafPsiElement) element).getElementType() == HarbourTypes.IDENT) {
                                 // Add identifier elements too
-                                results.add(element);
-                                if (results.size() >= MAX_RESULTS) {
-                                    HarbourLogger.log("ReferenceService", "Reached MAX_RESULTS limit (" + MAX_RESULTS + ") for " + identifierName);
-                                    return results;
+                                usages.add(element);
+                                // Stop collecting usages if we have too many
+                                if (usages.size() >= MAX_RESULTS) {
+                                    break;
                                 }
                             }
                         }
@@ -768,7 +779,11 @@ public final class HarbourReferenceService {
                             LeafPsiElement leafElement = (LeafPsiElement) element;
                             if (leafElement.getElementType() == HarbourTypes.IDENT &&
                                     leafElement.getText().equalsIgnoreCase(identifierName)) {
-                                results.add(element);
+                                usages.add(element);
+                                // Stop collecting if we have too many
+                                if (usages.size() >= MAX_RESULTS) {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -786,7 +801,24 @@ public final class HarbourReferenceService {
 
         Instant end = Instant.now();
         Duration duration = Duration.between(start, end);
-        HarbourLogger.log("ReferenceService", "Direct search took: " + duration.toMillis() + "ms");
+        
+        // Combine results: definitions first, then usages
+        List<PsiElement> results = new ArrayList<>();
+        results.addAll(definitions);
+        
+        // Add usages up to the limit
+        int remaining = MAX_RESULTS - results.size();
+        if (remaining > 0 && !usages.isEmpty()) {
+            results.addAll(usages.subList(0, Math.min(remaining, usages.size())));
+        }
+        
+        HarbourLogger.log("ReferenceService", "Direct search took: " + duration.toMillis() + "ms - Found " + 
+                definitions.size() + " definitions and " + usages.size() + " usages for " + identifierName);
+        
+        // Log if we found any definitions
+        if (!definitions.isEmpty()) {
+            HarbourLogger.log("ReferenceService", "Found " + definitions.size() + " definition(s) for " + identifierName);
+        }
 
         return results;
     }
