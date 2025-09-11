@@ -47,14 +47,20 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                 LeafPsiElement leaf = (LeafPsiElement) element;
 
                 if (leaf.getElementType() == HarbourCustomTypes.IDENT) {
-                    // Check if this looks like a function call
-                    if (isFollowedByParenthesis(leaf)) {
-                        // Get function name
-                        String functionName = leaf.getText();
+                    // Get function name
+                    String functionName = leaf.getText();
+                    
+                    // Get project
+                    Project project = element.getProject();
+                    
+                    // Check if this is a known external function/command (even without parentheses)
+                    HarbourFunctionClassificationService classificationService = 
+                        HarbourFunctionClassificationService.getInstance(project);
+                    boolean isKnownExternal = !classificationService.isInternalFunction(functionName);
+                    
+                    // Check if this looks like a function call (has parentheses) or is a known external command
+                    if (isFollowedByParenthesis(leaf) || (isKnownExternal && isStandaloneCommand(leaf))) {
                         TextRange range = leaf.getTextRange();
-
-                        // Get project
-                        Project project = element.getProject();
 
                         // Record function usage for tracking frequency
                         HarbourFunctionUsageTracker.recordFunctionUsage(project, functionName);
@@ -64,9 +70,6 @@ public class HarbourFunctionCallAnnotator implements Annotator {
                         EditorColorsScheme scheme = colorsManager.getGlobalScheme();
 
                         // Use dynamic classification to determine if function is internal or external
-                        HarbourFunctionClassificationService classificationService = 
-                            HarbourFunctionClassificationService.getInstance(project);
-                        
                         boolean isInternalFunction = classificationService.isInternalFunction(functionName);
 
                         TextAttributesKey attributesKey;
@@ -125,6 +128,52 @@ public class HarbourFunctionCallAnnotator implements Annotator {
         }
 
         return false;
+    }
+    
+    /**
+     * Check if an identifier is a standalone command (not followed by assignment or other operators).
+     * This is for commands like CLS that can be used without parentheses.
+     */
+    private boolean isStandaloneCommand(PsiElement element) {
+        // Check if this is at the beginning of a line or after a statement separator
+        PsiElement prev = element.getPrevSibling();
+        while (prev != null && prev instanceof LeafPsiElement) {
+            LeafPsiElement leaf = (LeafPsiElement) prev;
+            IElementType type = leaf.getElementType();
+            
+            if (type != com.intellij.psi.TokenType.WHITE_SPACE) {
+                // If previous token is not whitespace, check what it is
+                String text = leaf.getText();
+                // Allow after newline, semicolon, or at start of file
+                if (text.equals(";") || text.contains("\n")) {
+                    break;
+                }
+                // Not a standalone command if after other identifiers or operators
+                return false;
+            }
+            prev = prev.getPrevSibling();
+        }
+        
+        // Check what follows - should not be an assignment or operator
+        PsiElement next = element.getNextSibling();
+        while (next != null && next instanceof LeafPsiElement) {
+            LeafPsiElement leaf = (LeafPsiElement) next;
+            IElementType type = leaf.getElementType();
+            
+            if (type != com.intellij.psi.TokenType.WHITE_SPACE) {
+                String text = leaf.getText();
+                // Not standalone if followed by assignment or certain operators
+                if (text.equals(":=") || text.equals("=") || text.equals("(") || 
+                    text.equals(".") || text.equals("[") || text.equals("->")) {
+                    return false;
+                }
+                // OK if followed by newline, semicolon, or end of file
+                break;
+            }
+            next = next.getNextSibling();
+        }
+        
+        return true;
     }
     
     /**

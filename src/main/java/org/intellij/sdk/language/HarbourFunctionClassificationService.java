@@ -79,6 +79,7 @@ public final class HarbourFunctionClassificationService {
             "iif", "if", "empty", "eof", "bof", "recno", "lastrec", "fcount",
             "fieldname", "fieldget", "fieldput", "dbf", "alias", "select",
             "use", "close", "append", "delete", "recall", "pack", "zap",
+            "cls", "dbcommit",
             "seek", "found", "skip", "goto", "gotop", "gobottom",
             "index", "reindex", "set", "get", "readmodal", "clear",
             "qout", "qqout", "devpos", "devout", "setpos", "row", "col",

@@ -128,14 +128,7 @@ public class HarbourProgressiveIndexer {
                                 }
                             }
                             
-                            // Show notification that indexing is complete
-                            com.intellij.notification.NotificationGroupManager.getInstance()
-                                .getNotificationGroup("Harbour Application")
-                                .createNotification("Harbour Indexing Complete", 
-                                    "All Harbour files have been indexed successfully.", 
-                                    com.intellij.notification.NotificationType.INFORMATION)
-                                .notify(project);
-                            LOG.info("Indexing complete notification shown");
+                            LOG.info("Harbour indexing completed successfully");
                         }
                     }
                 });
