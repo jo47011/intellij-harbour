@@ -129,7 +129,7 @@ public class HarbourFunctionIndex extends FileBasedIndexExtension<String, Harbou
 
     @Override
     public int getVersion() {
-        return 5; // Force re-indexing with aggregated approach
+        return 6; // Optimized key retrieval for Windows performance
     }
 
     @NotNull

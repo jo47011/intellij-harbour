@@ -84,12 +84,13 @@ public class HarbourNavigationElement extends FakePsiElement implements PsiEleme
         this.isDefinition = isDefinition;
         this.isSeparator = isSeparator;
 
-        HarbourLogger.log(COMPONENT, "Created navigation element for " + elementName +
-                " in " + filePath + " at line " + lineNumber +
-                " hashcode: " + this.hashCode() +
-                " target hashcode: " + target.hashCode() +
-                " isDefinition: " + isDefinition +
-                " isSeparator: " + isSeparator);
+        // Logging disabled for performance - creating 1000+ elements causes significant delay
+        // HarbourLogger.log(COMPONENT, "Created navigation element for " + elementName +
+        //         " in " + filePath + " at line " + lineNumber +
+        //         " hashcode: " + this.hashCode() +
+        //         " target hashcode: " + target.hashCode() +
+        //         " isDefinition: " + isDefinition +
+        //         " isSeparator: " + isSeparator);
     }
 
     /**

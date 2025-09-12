@@ -679,27 +679,38 @@ public final class HarbourReferenceService {
             // Get the current element's file for smart ordering
             VirtualFile currentFile = null; // TODO: Get from context if available
             
-            // Get all keys from the index and filter for our function
-            // Keys are like "functionname#0", "functionname#1", etc.
+            // Optimized: Get all keys once and filter them into a list
+            // This avoids repeated filtering in nested loops
             Collection<String> allKeys = index.getAllKeys(HarbourFunctionIndex.INDEX_ID, project);
-            Set<VirtualFile> filesWithFunction = new HashSet<>();
+            List<String> matchingKeys = new ArrayList<>();
+            Map<VirtualFile, List<String>> fileToKeys = new HashMap<>();
             
+            // Filter keys and build file-to-keys mapping in a single pass
             for (String key : allKeys) {
                 if (key.startsWith(searchKey + "#") || key.equals(searchKey)) {
+                    matchingKeys.add(key);
+                    
+                    // Get files for this key and map them
                     Collection<VirtualFile> files = index.getContainingFiles(
                         HarbourFunctionIndex.INDEX_ID, key, scope);
-                    filesWithFunction.addAll(files);
+                    for (VirtualFile file : files) {
+                        fileToKeys.computeIfAbsent(file, k -> new ArrayList<>()).add(key);
+                    }
                 }
             }
             
-            if (filesWithFunction.isEmpty()) {
+            if (fileToKeys.isEmpty()) {
                 HarbourLogger.log("ReferenceService", "No files found in index for: " + functionName);
                 return null;
             }
             
             PsiManager psiManager = PsiManager.getInstance(project);
             
-            for (VirtualFile file : filesWithFunction) {
+            // Process each file with its associated keys
+            for (Map.Entry<VirtualFile, List<String>> entry : fileToKeys.entrySet()) {
+                VirtualFile file = entry.getKey();
+                List<String> keysForFile = entry.getValue();
+                
                 // Skip excluded files
                 if (isFileExcluded(file)) {
                     continue;
@@ -711,61 +722,58 @@ public final class HarbourReferenceService {
                 Document document = PsiDocumentManager.getInstance(project).getDocument(psiFile);
                 if (document == null) continue;
                 
-                // Process all values for this function in this file
-                // Need to check all keys that match our function
-                for (String key : allKeys) {
-                    if (key.startsWith(searchKey + "#") || key.equals(searchKey)) {
-                        index.processValues(
-                            HarbourFunctionIndex.INDEX_ID,
-                            key,
-                            file,
-                            (vf, info) -> {
-                        if (info.lineNumber > 0 && info.lineNumber <= document.getLineCount()) {
-                            int lineStartOffset = document.getLineStartOffset(info.lineNumber - 1);
-                            
-                            // Find the element at this line
-                            PsiElement element = psiFile.findElementAt(lineStartOffset);
-                            
-                            // Navigate to the actual identifier
-                            while (element != null) {
-                                if (element instanceof LeafPsiElement &&
-                                    ((LeafPsiElement)element).getElementType() == HarbourTypes.IDENT &&
-                                    element.getText().equalsIgnoreCase(functionName)) {
-                                    
-                                    if (info.isDeclaration) {
-                                        declarations.add(element);
-                                    } else {
-                                        usages.add(element);
-                                    }
-                                    break;
-                                }
+                // Process only the keys that are actually in this file
+                for (String key : keysForFile) {
+                    index.processValues(
+                        HarbourFunctionIndex.INDEX_ID,
+                        key,
+                        file,
+                        (vf, info) -> {
+                            if (info.lineNumber > 0 && info.lineNumber <= document.getLineCount()) {
+                                int lineStartOffset = document.getLineStartOffset(info.lineNumber - 1);
                                 
-                                // Try next sibling or child
-                                if (element.getFirstChild() != null) {
-                                    element = element.getFirstChild();
-                                } else if (element.getNextSibling() != null) {
-                                    element = element.getNextSibling();
-                                } else {
-                                    // Move up and try next sibling
-                                    element = element.getParent();
-                                    if (element != null && element != psiFile) {
+                                // Find the element at this line
+                                PsiElement element = psiFile.findElementAt(lineStartOffset);
+                                
+                                // Navigate to the actual identifier
+                                while (element != null) {
+                                    if (element instanceof LeafPsiElement &&
+                                        ((LeafPsiElement)element).getElementType() == HarbourTypes.IDENT &&
+                                        element.getText().equalsIgnoreCase(functionName)) {
+                                        
+                                        if (info.isDeclaration) {
+                                            declarations.add(element);
+                                        } else {
+                                            usages.add(element);
+                                        }
+                                        break;
+                                    }
+                                    
+                                    // Try next sibling or child
+                                    if (element.getFirstChild() != null) {
+                                        element = element.getFirstChild();
+                                    } else if (element.getNextSibling() != null) {
                                         element = element.getNextSibling();
                                     } else {
+                                        // Move up and try next sibling
+                                        element = element.getParent();
+                                        if (element != null && element != psiFile) {
+                                            element = element.getNextSibling();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Don't search too far from the line
+                                    if (element != null && element.getTextOffset() > lineStartOffset + 200) {
                                         break;
                                     }
                                 }
-                                
-                                // Don't search too far from the line
-                                if (element != null && element.getTextOffset() > lineStartOffset + 200) {
-                                    break;
-                                }
                             }
-                        }
-                                return true; // Continue processing
-                            },
-                            scope
-                        );
-                    }
+                            return true; // Continue processing
+                        },
+                        scope
+                    );
                 }
                 
                 // Apply result limits if not getting all

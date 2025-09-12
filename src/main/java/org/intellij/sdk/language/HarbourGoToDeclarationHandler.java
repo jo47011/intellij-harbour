@@ -681,8 +681,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         List<PsiElement> navigationElements = new ArrayList<>();
         List<PsiElement> definitionElements = new ArrayList<>();
         List<PsiElement> callElements = new ArrayList<>();
+        
+        // PERFORMANCE: Limit processing for very large result sets
+        // We only show 20 initially, so processing 200 is more than enough to handle duplicates
+        int maxElementsToProcess = foundElements.size() > 500 ? 200 : foundElements.size();
+        int elementsProcessed = 0;
 
         for (PsiElement foundElement : foundElements) {
+            // Stop processing after reasonable limit for large result sets
+            if (elementsProcessed >= maxElementsToProcess) {
+                HarbourLogger.log(COMPONENT, "Reached processing limit of " + maxElementsToProcess + 
+                        " elements out of " + foundElements.size() + " total");
+                break;
+            }
+            elementsProcessed++;
             if (foundElement != null && foundElement.isValid()) {
                 try {
                     PsiFile containingFile = foundElement.getContainingFile();
@@ -715,7 +727,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
                         // Skip if we've already added this exact location
                         if (locations.contains(locationKey)) {
-                            HarbourLogger.log(COMPONENT, "Skipping duplicate location: " + locationKey);
+                            // Only log duplicates for small result sets to avoid performance issues
+                            if (foundElements.size() <= 50) {
+                                HarbourLogger.log(COMPONENT, "Skipping duplicate location: " + locationKey);
+                            }
                             continue;
                         }
 
@@ -745,9 +760,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         HarbourNavigationElement navigationElement = new HarbourNavigationElement(
                                 foundElement, identifierName, filePath, lineNumber, context, isDefinition, false);
 
-                        HarbourLogger.log(COMPONENT, "Created navigation element for " + identifierName +
-                                " in " + containingFile.getName() + " at line " + lineNumber +
-                                " isDefinition: " + isDefinition);
+                        // Logging disabled for performance when creating 1000+ elements
+                        // HarbourLogger.log(COMPONENT, "Created navigation element for " + identifierName +
+                        //         " in " + containingFile.getName() + " at line " + lineNumber +
+                        //         " isDefinition: " + isDefinition);
 
                         // Add to definitions or calls list based on type
                         if (isDefinition) {
@@ -756,13 +772,24 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             // For functions, only add to callElements if it's actually a function call
                             // This filters out variable assignments like "message = something"
                             if (isFunction) {
-                                if (isFunctionCallAtLocation(foundElement, identifierName)) {
+                                // PERFORMANCE OPTIMIZATION: Skip expensive function call checking for large result sets
+                                // When we have > 100 results, trust the index and add all usages
+                                if (foundElements.size() > 100) {
                                     callElements.add(navigationElement);
-                                    HarbourLogger.log(COMPONENT, "Added function call for " + identifierName + 
-                                            " at " + containingFile.getName() + ":" + lineNumber);
+                                    // Logging disabled for performance with large result sets
+                                } else if (isFunctionCallAtLocation(foundElement, identifierName)) {
+                                    callElements.add(navigationElement);
+                                    // Only log for small result sets to avoid performance issues
+                                    if (foundElements.size() <= 20) {
+                                        HarbourLogger.log(COMPONENT, "Added function call for " + identifierName + 
+                                                " at " + containingFile.getName() + ":" + lineNumber);
+                                    }
                                 } else {
-                                    HarbourLogger.log(COMPONENT, "Skipped non-function call usage of " + identifierName + 
-                                            " at " + containingFile.getName() + ":" + lineNumber + " (variable assignment/usage)");
+                                    // Only log for small result sets to avoid performance issues
+                                    if (foundElements.size() <= 20) {
+                                        HarbourLogger.log(COMPONENT, "Skipped non-function call usage of " + identifierName + 
+                                                " at " + containingFile.getName() + ":" + lineNumber + " (variable assignment/usage)");
+                                    }
                                 }
                             } else {
                                 // For non-functions (variables), add all non-definition usages
