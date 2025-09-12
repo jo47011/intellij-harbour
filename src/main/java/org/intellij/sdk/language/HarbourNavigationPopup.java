@@ -168,10 +168,10 @@ public class HarbourNavigationPopup {
                             // Use the supplier to get all results
                             List<PsiElement> allResults = allResultsSupplier.get();
                             if (allResults != null && !allResults.isEmpty()) {
-                                HarbourLogger.log(COMPONENT, "Loading all " + allResults.size() + " results from supplier");
+                                // Load all results from supplier
                                 showNavigationPopup(allResults, editor, searchedFunctionName, true);
                             } else {
-                                HarbourLogger.log(COMPONENT, "Supplier returned null or empty results, falling back to current targets");
+                                // Fallback to current targets if supplier returns null
                                 showNavigationPopup(targets, editor, searchedFunctionName, true);
                             }
                         } else {

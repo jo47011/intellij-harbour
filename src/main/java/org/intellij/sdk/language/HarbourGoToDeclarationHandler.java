@@ -1087,7 +1087,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     final boolean finalIsFunctionForSupplier = finalIsFunction;
                     
                     allResultsSupplier = () -> {
-                        HarbourLogger.log(COMPONENT, "Load All clicked - processing all " + allFoundElements.size() + " results");
+                        // Process all elements without limit
                         List<PsiElement> allNavigationElements = new ArrayList<>();
                         List<PsiElement> allDefinitionElements = new ArrayList<>();
                         List<PsiElement> allCallElements = new ArrayList<>();
@@ -1142,7 +1142,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                                         allLocations.add(locationKey);
                                     }
                                 } catch (Exception e) {
-                                    HarbourLogger.log(COMPONENT, "Error processing element for Load All: " + e.getMessage());
+                                    // Skip element on error
                                 }
                             }
                         }
@@ -1188,7 +1188,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         }
                         allNavigationElements.addAll(allCallElements);
                         
-                        HarbourLogger.log(COMPONENT, "Load All processed: " + allNavigationElements.size() + " total elements");
+                        // Return all processed elements
                         return allNavigationElements;
                     };
                 }
