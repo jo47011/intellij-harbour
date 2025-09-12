@@ -102,6 +102,15 @@
         <!-- <applicationService serviceImplementation="org.intellij.sdk.language.HarbourSaveListenerService"/> -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
         
+        <!-- FileBasedIndex for Fast Navigation - Now indexes both declarations AND usages -->
+        <fileBasedIndex implementation="org.intellij.sdk.language.index.HarbourFunctionIndex"/>
+        
+        <!-- Stub Indexes for Fast Navigation - Disabled until PSI elements are updated
+        <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourFunctionNameIndex"/>
+        <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourProcedureNameIndex"/>
+        <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourClassNameIndex"/>
+        -->
+        
         <!-- Startup Activities - Disabled to prevent startup hang
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>

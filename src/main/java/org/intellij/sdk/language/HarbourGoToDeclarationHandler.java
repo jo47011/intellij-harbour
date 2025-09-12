@@ -555,8 +555,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (isFunction) {
             HarbourLogger.log(COMPONENT, "Searching for function: " + identifierName);
             try {
-                foundElements = service.findFunctions(identifierName);
-                HarbourLogger.log(COMPONENT, "Initial search result: " + foundElements.size() + " elements found");
+                // For navigation, always get ALL results - user explicitly requested navigation
+                foundElements = service.findFunctions(identifierName, true);
+                HarbourLogger.log(COMPONENT, "Initial search result: " + foundElements.size() + " elements found (ALL results)");
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during initial function search: " + e.getClass().getSimpleName() + " - " + e.getMessage());
                 // If we get a cancellation exception, return null to let other handlers try
@@ -578,14 +579,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         service.forceClearCaches();
                         service.registerFunctions((HarbourFile)file);
                         service.registerProcedures((HarbourFile)file);
-                        foundElements = service.findFunctions(identifierName);
-                        HarbourLogger.log(COMPONENT, "After reindex: " + foundElements.size() + " elements found");
+                        foundElements = service.findFunctions(identifierName, true);
+                        HarbourLogger.log(COMPONENT, "After reindex: " + foundElements.size() + " elements found (ALL results)");
                         
                         // If still nothing found after reindex, try broader project-wide search
                         if (foundElements.isEmpty()) {
                             HarbourLogger.log(COMPONENT, "Still nothing after reindex, trying project-wide search");
-                            foundElements = service.findSymbol(identifierName);
-                            HarbourLogger.log(COMPONENT, "Project-wide search result: " + foundElements.size() + " elements found");
+                            foundElements = service.findSymbol(identifierName, true);
+                            HarbourLogger.log(COMPONENT, "Project-wide search result: " + foundElements.size() + " elements found (ALL results)");
                         }
                     } catch (Exception e) {
                         HarbourLogger.log(COMPONENT, "Exception during reindex/project search: " + e.getClass().getSimpleName() + " - " + e.getMessage());

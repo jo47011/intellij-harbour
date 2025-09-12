@@ -16,13 +16,21 @@ import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.util.indexing.FileBasedIndex;
 import org.intellij.sdk.language.psi.ClassDeclaration;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.intellij.sdk.language.psi.HarbourTypes;
+import org.intellij.sdk.language.psi.HarbourProcedureDeclaration;
 import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
+import org.intellij.sdk.language.index.HarbourFunctionIndex;
+import org.intellij.sdk.language.psi.stub.HarbourFunctionNameIndex;
+import org.intellij.sdk.language.psi.stub.HarbourProcedureNameIndex;
+import org.intellij.sdk.language.psi.stub.HarbourClassNameIndex;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +38,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.editor.Document;
+import org.intellij.sdk.language.index.HarbourFunctionIndex;
 
 /**
  * Service for resolving references to functions and methods in the Harbour language.
@@ -40,9 +51,9 @@ import java.util.regex.Pattern;
 public final class HarbourReferenceService {
     private static final Logger LOG = Logger.getInstance(HarbourReferenceService.class);
     
-    // No limits - scan everything
-    private static final int MAX_RESULTS = Integer.MAX_VALUE;
+    // Result limits - configurable via settings
     private static final int MAX_CACHE_SIZE = 1000;
+    private static final int MAX_DEFINITIONS = 5;  // Limit definitions to show
 
     // Cache of function name (lowercase) to list of declarations
     private final Map<String, List<PsiElement>> functionCaches = new ConcurrentHashMap<>();
@@ -83,20 +94,39 @@ public final class HarbourReferenceService {
     }
 
     /**
-     * Find all functions with the given name.
+     * Find all functions with the given name using StubIndex for fast lookup.
      *
      * @param functionName The name of the function to find
      * @return A list of PSI elements for the function declarations
      */
     public List<PsiElement> findFunctions(String functionName) {
-        HarbourLogger.log("ReferenceService", "Searching for all occurrences of function: " + functionName);
+        return findFunctions(functionName, false);
+    }
+    
+    /**
+     * Find all functions with the given name using StubIndex for fast lookup.
+     *
+     * @param functionName The name of the function to find
+     * @param getAllResults If true, returns all results without limit
+     * @return A list of PSI elements for the function declarations
+     */
+    public List<PsiElement> findFunctions(String functionName, boolean getAllResults) {
+        HarbourLogger.log("ReferenceService", "Searching for all occurrences of function: " + functionName + 
+            (getAllResults ? " (getting ALL results)" : " (limited results)"));
 
         if (functionName == null || functionName.isEmpty()) {
             return Collections.emptyList();
         }
-
-        // Skip persistent cache check since it's disabled by default and convertCacheEntriesToPsiElements returns empty
-        // Go directly to runtime cache which is more reliable
+        
+        // Try the enhanced FileBasedIndex first (includes both declarations and usages)
+        List<PsiElement> indexResults = searchUsingEnhancedIndex(functionName, getAllResults);
+        if (indexResults != null && !indexResults.isEmpty()) {
+            HarbourLogger.log("ReferenceService", "Found " + indexResults.size() + " results via enhanced index for: " + functionName);
+            return indexResults;
+        }
+        
+        // If index is not available or empty, continue with cache and direct search
+        HarbourLogger.log("ReferenceService", "Enhanced index not available or empty for: " + functionName + ", falling back to direct search");
         
         // Log runtime cache state
         if (functionCaches.containsKey(functionName.toLowerCase())) {
@@ -119,7 +149,7 @@ public final class HarbourReferenceService {
         }
 
         HarbourLogger.log("ReferenceService", "Function not found in cache, trying direct search for: " + functionName);
-        List<PsiElement> result = directSearch(functionName, true);
+        List<PsiElement> result = directSearch(functionName, true, getAllResults);
 
         // Cache the result (limit cache size to prevent memory issues)
         if (!result.isEmpty()) {
@@ -145,6 +175,17 @@ public final class HarbourReferenceService {
      * @return A list of PSI elements for the variable usages
      */
     public List<PsiElement> findVariables(String variableName) {
+        return findVariables(variableName, false);
+    }
+    
+    /**
+     * Find all variables with the given name.
+     *
+     * @param variableName The name of the variable to find
+     * @param getAllResults If true, returns all results without limit
+     * @return A list of PSI elements for the variable usages
+     */
+    public List<PsiElement> findVariables(String variableName, boolean getAllResults) {
         HarbourLogger.log("ReferenceService", "Searching for all occurrences of variable: " + variableName);
 
         if (variableName == null || variableName.isEmpty()) {
@@ -164,7 +205,7 @@ public final class HarbourReferenceService {
 
         // Do a direct search
         HarbourLogger.log("ReferenceService", "Variable not found in cache, trying direct search for: " + variableName);
-        List<PsiElement> result = directSearch(variableName, false);
+        List<PsiElement> result = directSearch(variableName, false, getAllResults);
 
         // Cache the result
         if (!result.isEmpty()) {
@@ -183,6 +224,18 @@ public final class HarbourReferenceService {
      * @return A list of PSI elements for the symbol declarations
      */
     public List<PsiElement> findSymbol(String symbolName) {
+        return findSymbol(symbolName, false);
+    }
+    
+    /**
+     * Find all symbols with the given name.
+     * This includes functions, procedures, variables, etc.
+     *
+     * @param symbolName The name of the symbol to find
+     * @param getAllResults If true, returns all results without limit
+     * @return A list of PSI elements for the symbol declarations
+     */
+    public List<PsiElement> findSymbol(String symbolName, boolean getAllResults) {
         HarbourLogger.log("ReferenceService", "Searching for all occurrences of symbol: " + symbolName);
 
         if (symbolName == null || symbolName.isEmpty()) {
@@ -223,7 +276,7 @@ public final class HarbourReferenceService {
 
         // Do a direct search
         HarbourLogger.log("ReferenceService", "Symbol not found in cache, trying direct search for: " + symbolName);
-        List<PsiElement> result = directSearch(symbolName, true);
+        List<PsiElement> result = directSearch(symbolName, true, getAllResults);
 
         // Cache the result
         if (!result.isEmpty()) {
@@ -608,6 +661,230 @@ public final class HarbourReferenceService {
         return false;
     }
     
+    /**
+     * Search using the enhanced FileBasedIndex that indexes both declarations and usages.
+     * Returns null if the index is not available or on error.
+     */
+    @Nullable
+    private List<PsiElement> searchUsingEnhancedIndex(String functionName, boolean getAllResults) {
+        try {
+            Instant start = Instant.now();
+            List<PsiElement> declarations = new ArrayList<>();
+            List<PsiElement> usages = new ArrayList<>();
+            
+            FileBasedIndex index = FileBasedIndex.getInstance();
+            String searchKey = functionName.toLowerCase();
+            GlobalSearchScope scope = GlobalSearchScope.projectScope(project);
+            
+            // Get the current element's file for smart ordering
+            VirtualFile currentFile = null; // TODO: Get from context if available
+            
+            // Get all keys from the index and filter for our function
+            // Keys are like "functionname#0", "functionname#1", etc.
+            Collection<String> allKeys = index.getAllKeys(HarbourFunctionIndex.INDEX_ID, project);
+            Set<VirtualFile> filesWithFunction = new HashSet<>();
+            
+            for (String key : allKeys) {
+                if (key.startsWith(searchKey + "#") || key.equals(searchKey)) {
+                    Collection<VirtualFile> files = index.getContainingFiles(
+                        HarbourFunctionIndex.INDEX_ID, key, scope);
+                    filesWithFunction.addAll(files);
+                }
+            }
+            
+            if (filesWithFunction.isEmpty()) {
+                HarbourLogger.log("ReferenceService", "No files found in index for: " + functionName);
+                return null;
+            }
+            
+            PsiManager psiManager = PsiManager.getInstance(project);
+            
+            for (VirtualFile file : filesWithFunction) {
+                // Skip excluded files
+                if (isFileExcluded(file)) {
+                    continue;
+                }
+                
+                PsiFile psiFile = psiManager.findFile(file);
+                if (psiFile == null) continue;
+                
+                Document document = PsiDocumentManager.getInstance(project).getDocument(psiFile);
+                if (document == null) continue;
+                
+                // Process all values for this function in this file
+                // Need to check all keys that match our function
+                for (String key : allKeys) {
+                    if (key.startsWith(searchKey + "#") || key.equals(searchKey)) {
+                        index.processValues(
+                            HarbourFunctionIndex.INDEX_ID,
+                            key,
+                            file,
+                            (vf, info) -> {
+                        if (info.lineNumber > 0 && info.lineNumber <= document.getLineCount()) {
+                            int lineStartOffset = document.getLineStartOffset(info.lineNumber - 1);
+                            
+                            // Find the element at this line
+                            PsiElement element = psiFile.findElementAt(lineStartOffset);
+                            
+                            // Navigate to the actual identifier
+                            while (element != null) {
+                                if (element instanceof LeafPsiElement &&
+                                    ((LeafPsiElement)element).getElementType() == HarbourTypes.IDENT &&
+                                    element.getText().equalsIgnoreCase(functionName)) {
+                                    
+                                    if (info.isDeclaration) {
+                                        declarations.add(element);
+                                    } else {
+                                        usages.add(element);
+                                    }
+                                    break;
+                                }
+                                
+                                // Try next sibling or child
+                                if (element.getFirstChild() != null) {
+                                    element = element.getFirstChild();
+                                } else if (element.getNextSibling() != null) {
+                                    element = element.getNextSibling();
+                                } else {
+                                    // Move up and try next sibling
+                                    element = element.getParent();
+                                    if (element != null && element != psiFile) {
+                                        element = element.getNextSibling();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                
+                                // Don't search too far from the line
+                                if (element != null && element.getTextOffset() > lineStartOffset + 200) {
+                                    break;
+                                }
+                            }
+                        }
+                                return true; // Continue processing
+                            },
+                            scope
+                        );
+                    }
+                }
+                
+                // Apply result limits if not getting all
+                if (!getAllResults) {
+                    HarbourSettings settings = HarbourSettings.getInstance(project);
+                    int maxResults = settings.getMaxNavigationResults();
+                    if (maxResults > 0 && (declarations.size() + usages.size()) >= maxResults) {
+                        break;
+                    }
+                }
+            }
+            
+            // Combine results with declarations first
+            List<PsiElement> results = new ArrayList<>();
+            results.addAll(declarations);
+            results.addAll(usages);
+            
+            Duration duration = Duration.between(start, Instant.now());
+            HarbourLogger.log("ReferenceService", "Enhanced index search took: " + duration.toMillis() + 
+                "ms - Found " + declarations.size() + " declarations and " + usages.size() + 
+                " usages for: " + functionName);
+            
+            return results.isEmpty() ? null : results;
+            
+        } catch (Exception e) {
+            HarbourLogger.log("ReferenceService", "Enhanced index search failed: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Find functions using FileBasedIndex for ultra-fast lookup.
+     * This is orders of magnitude faster than directSearch.
+     */
+    private List<PsiElement> findFunctionsViaStubIndex(String functionName, boolean getAllResults) {
+        try {
+            Instant start = Instant.now();
+            List<PsiElement> results = new ArrayList<>();
+            
+            // Use FileBasedIndex for instant lookup
+            GlobalSearchScope scope = GlobalSearchScope.projectScope(project);
+            String key = functionName.toLowerCase();
+            
+            // Get all files containing this function
+            Collection<VirtualFile> files = FileBasedIndex.getInstance()
+                .getContainingFiles(HarbourFunctionIndex.INDEX_ID, key, scope);
+            
+            PsiManager psiManager = PsiManager.getInstance(project);
+            
+            for (VirtualFile file : files) {
+                // Get function info from index
+                List<HarbourFunctionIndex.FunctionInfo> infos = new ArrayList<>();
+                for (HarbourFunctionIndex.FunctionInfo info : 
+                     FileBasedIndex.getInstance().getValues(HarbourFunctionIndex.INDEX_ID, key, scope)) {
+                    infos.add(info);
+                }
+                
+                // Create PSI elements for the functions
+                PsiFile psiFile = psiManager.findFile(file);
+                if (psiFile != null) {
+                    for (HarbourFunctionIndex.FunctionInfo info : infos) {
+                        // Find the element at the line
+                        int offset = getOffsetForLine(psiFile, info.lineNumber);
+                        if (offset >= 0) {
+                            PsiElement element = psiFile.findElementAt(offset);
+                            if (element != null) {
+                                // Find the function/procedure declaration
+                                PsiElement funcDecl = PsiTreeUtil.getParentOfType(element, 
+                                    HarbourFunctionDeclaration.class, HarbourProcedureDeclaration.class);
+                                if (funcDecl != null) {
+                                    results.add(funcDecl);
+                                } else {
+                                    // Fallback to the element itself
+                                    results.add(element);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Apply limit if not getting all results
+                if (!getAllResults) {
+                    HarbourSettings settings = HarbourSettings.getInstance(project);
+                    int maxResults = settings.getMaxNavigationResults();
+                    if (maxResults > 0 && results.size() >= maxResults) {
+                        results = results.subList(0, maxResults);
+                        break;
+                    }
+                }
+            }
+            
+            Duration duration = Duration.between(start, Instant.now());
+            HarbourLogger.log("ReferenceService", "FileBasedIndex search took: " + duration.toMillis() + 
+                "ms - Found " + results.size() + " results for: " + functionName);
+            
+            return results;
+        } catch (Exception e) {
+            HarbourLogger.log("ReferenceService", "FileBasedIndex not ready or error: " + e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+    
+    /**
+     * Get offset for a specific line number in a file.
+     */
+    private int getOffsetForLine(PsiFile file, int lineNumber) {
+        String text = file.getText();
+        int line = 1;
+        for (int i = 0; i < text.length(); i++) {
+            if (line == lineNumber) {
+                return i;
+            }
+            if (text.charAt(i) == '\n') {
+                line++;
+            }
+        }
+        return -1;
+    }
+    
     private int getLineNumberFromOffset(String fileContent, int offset) {
         int lineNumber = 1;
         for (int i = 0; i < Math.min(offset, fileContent.length()); i++) {
@@ -626,9 +903,30 @@ public final class HarbourReferenceService {
      * @return A list of PSI elements matching the identifier
      */
     private List<PsiElement> directSearch(String identifierName, boolean isFunction) {
+        return directSearch(identifierName, isFunction, false);
+    }
+    
+    /**
+     * Search for identifiers with the given name directly in all Harbour files.
+     *
+     * @param identifierName The name of the identifier to find
+     * @param isFunction Whether to look for function declarations/calls or just identifiers
+     * @param getAllResults If true, returns all results without limit
+     * @return A list of PSI elements matching the identifier
+     */
+    private List<PsiElement> directSearch(String identifierName, boolean isFunction, boolean getAllResults) {
         Instant start = Instant.now();
         List<PsiElement> definitions = new ArrayList<>();
-        List<PsiElement> usages = new ArrayList<>();
+        List<PsiElement> sameFileUsages = new ArrayList<>();
+        List<PsiElement> otherFileUsages = new ArrayList<>();
+        
+        // Get max results from settings (unless getting all results)
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        int maxResults = getAllResults ? Integer.MAX_VALUE : settings.getMaxNavigationResults();
+        if (maxResults <= 0) maxResults = 20; // Default fallback
+        
+        // Track the file containing the definition for smart ordering
+        VirtualFile definitionFile = null;
 
         // Pattern for matching exact identifiers with word boundaries
         Pattern identifierPattern = Pattern.compile(
@@ -712,11 +1010,22 @@ public final class HarbourReferenceService {
                             // Add the function name element if found, otherwise the keyword element
                             if (funcNameElement != null) {
                                 definitions.add(funcNameElement);
+                                if (definitionFile == null) {
+                                    definitionFile = virtualFile;
+                                }
                                 HarbourLogger.log("ReferenceService", "Found function definition identifier for " + 
                                     identifierName + " at line " + lineNumber);
                             } else {
                                 // Fallback to adding the element itself
                                 definitions.add(element);
+                                if (definitionFile == null) {
+                                    definitionFile = virtualFile;
+                                }
+                            }
+                            
+                            // Early termination if we have enough definitions
+                            if (definitions.size() >= MAX_DEFINITIONS) {
+                                HarbourLogger.log("ReferenceService", "Reached max definitions limit (" + MAX_DEFINITIONS + "), continuing for usages");
                             }
                         }
                     }
@@ -738,18 +1047,33 @@ public final class HarbourReferenceService {
                             // Check if this is a function call
                             PsiElement functionCall = PsiTreeUtil.getParentOfType(element, FunctionCallImpl.class);
                             if (functionCall != null) {
-                                usages.add(functionCall);
-                                // Stop collecting usages if we have too many
-                                if (usages.size() >= MAX_RESULTS) {
-                                    break;
+                                // Categorize usage by file
+                                if (definitionFile != null && virtualFile.equals(definitionFile)) {
+                                    sameFileUsages.add(functionCall);
+                                } else {
+                                    otherFileUsages.add(functionCall);
+                                }
+                                // Stop collecting usages if we have too many (unless getting all)
+                                if (!getAllResults) {
+                                    int totalUsages = sameFileUsages.size() + otherFileUsages.size();
+                                    if (totalUsages >= maxResults * 2) {
+                                        break;
+                                    }
                                 }
                             } else if (element instanceof LeafPsiElement &&
                                     ((LeafPsiElement) element).getElementType() == HarbourTypes.IDENT) {
-                                // Add identifier elements too
-                                usages.add(element);
-                                // Stop collecting usages if we have too many
-                                if (usages.size() >= MAX_RESULTS) {
-                                    break;
+                                // Categorize usage by file
+                                if (definitionFile != null && virtualFile.equals(definitionFile)) {
+                                    sameFileUsages.add(element);
+                                } else {
+                                    otherFileUsages.add(element);
+                                }
+                                // Stop collecting usages if we have too many (unless getting all)
+                                if (!getAllResults) {
+                                    int totalUsages = sameFileUsages.size() + otherFileUsages.size();
+                                    if (totalUsages >= maxResults * 2) {
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -779,16 +1103,22 @@ public final class HarbourReferenceService {
                             LeafPsiElement leafElement = (LeafPsiElement) element;
                             if (leafElement.getElementType() == HarbourTypes.IDENT &&
                                     leafElement.getText().equalsIgnoreCase(identifierName)) {
-                                usages.add(element);
+                                // Categorize usage by file for non-function identifiers
+                                if (definitionFile != null && virtualFile.equals(definitionFile)) {
+                                    sameFileUsages.add(element);
+                                } else {
+                                    otherFileUsages.add(element);
+                                }
                                 // Stop collecting if we have too many
-                                if (usages.size() >= MAX_RESULTS) {
+                                int totalUsages = sameFileUsages.size() + otherFileUsages.size();
+                                if (totalUsages >= maxResults * 2) {
                                     break;
                                 }
                             }
                         }
                     }
                 }
-                }
+                } // End of for loop
             }
         } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
             // Rethrow ProcessCanceledException - these should never be caught and logged
@@ -802,23 +1132,49 @@ public final class HarbourReferenceService {
         Instant end = Instant.now();
         Duration duration = Duration.between(start, end);
         
-        // Combine results: definitions first, then usages
+        // Smart result ordering:
+        // 1. Definitions first (always include all definitions found)
+        // 2. Same file usages second
+        // 3. Other file usages last
         List<PsiElement> results = new ArrayList<>();
+        
+        // Add all definitions first (they are most important)
         results.addAll(definitions);
         
-        // Add usages up to the limit
-        int remaining = MAX_RESULTS - results.size();
-        if (remaining > 0 && !usages.isEmpty()) {
-            results.addAll(usages.subList(0, Math.min(remaining, usages.size())));
+        if (getAllResults) {
+            // When getting all results, add everything without limits
+            results.addAll(sameFileUsages);
+            results.addAll(otherFileUsages);
+        } else {
+            // Calculate remaining slots for usages
+            int remainingSlots = maxResults - results.size();
+            
+            if (remainingSlots > 0) {
+                // Add same-file usages first (up to half of remaining slots)
+                int sameFileLimit = Math.min(remainingSlots / 2, sameFileUsages.size());
+                if (sameFileLimit > 0) {
+                    results.addAll(sameFileUsages.subList(0, sameFileLimit));
+                    remainingSlots -= sameFileLimit;
+                }
+                
+                // Add other file usages with remaining slots
+                if (remainingSlots > 0 && !otherFileUsages.isEmpty()) {
+                    int otherFileLimit = Math.min(remainingSlots, otherFileUsages.size());
+                    results.addAll(otherFileUsages.subList(0, otherFileLimit));
+                }
+            }
         }
         
         HarbourLogger.log("ReferenceService", "Direct search took: " + duration.toMillis() + "ms - Found " + 
-                definitions.size() + " definitions and " + usages.size() + " usages for " + identifierName);
+                definitions.size() + " definitions, " + sameFileUsages.size() + " same-file usages, and " + 
+                otherFileUsages.size() + " other-file usages for " + identifierName);
         
         // Log if we found any definitions
         if (!definitions.isEmpty()) {
-            HarbourLogger.log("ReferenceService", "Found " + definitions.size() + " definition(s) for " + identifierName);
+            HarbourLogger.log("ReferenceService", "Prioritized " + definitions.size() + " definition(s) at top for " + identifierName);
         }
+        
+        HarbourLogger.log("ReferenceService", "Returning " + results.size() + " results (limit: " + maxResults + ")");
 
         return results;
     }
