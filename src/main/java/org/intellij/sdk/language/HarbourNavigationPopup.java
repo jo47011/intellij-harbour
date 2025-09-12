@@ -14,6 +14,7 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Custom navigation popup for Harbour elements with syntax highlighting support
@@ -37,11 +38,38 @@ public class HarbourNavigationPopup {
      * @param searchedFunctionName The function name being searched for (optional)
      */
     public static void showNavigationPopup(List<PsiElement> targets, Editor editor, String searchedFunctionName) {
-        HarbourLogger.log(COMPONENT, "Showing custom navigation popup with " + targets.size() + " targets");
+        showNavigationPopup(targets, editor, searchedFunctionName, -1);
+    }
+    
+    /**
+     * Show a custom navigation popup with syntax-highlighted code
+     * @param targets List of navigation targets (may be limited subset)
+     * @param editor The current editor
+     * @param searchedFunctionName The function name being searched for (optional)
+     * @param actualTotalCount The actual total count before limiting (-1 if same as targets.size())
+     */
+    public static void showNavigationPopup(List<PsiElement> targets, Editor editor, String searchedFunctionName, int actualTotalCount) {
+        showNavigationPopup(targets, editor, searchedFunctionName, actualTotalCount, null);
+    }
+    
+    /**
+     * Show a custom navigation popup with syntax-highlighted code
+     * @param targets List of navigation targets (may be limited subset)
+     * @param editor The current editor
+     * @param searchedFunctionName The function name being searched for (optional)
+     * @param actualTotalCount The actual total count before limiting (-1 if same as targets.size())
+     * @param allResultsSupplier Supplier to get all results when Load All is clicked (optional)
+     */
+    public static void showNavigationPopup(List<PsiElement> targets, Editor editor, String searchedFunctionName, int actualTotalCount, Supplier<List<PsiElement>> allResultsSupplier) {
+        HarbourLogger.log(COMPONENT, "Showing custom navigation popup with " + targets.size() + " targets" +
+                (actualTotalCount > 0 ? " (actual total: " + actualTotalCount + ")" : ""));
         
         // Get the max results setting
         HarbourSettings settings = HarbourSettings.getInstance(editor.getProject());
         int maxResults = settings.getMaxNavigationResults();
+        
+        // Use actual total count if provided, otherwise use targets size
+        int totalCount = actualTotalCount > 0 ? actualTotalCount : targets.size();
         
         // Check if we need to limit results
         boolean hasMore = targets.size() > maxResults;
@@ -54,8 +82,10 @@ public class HarbourNavigationPopup {
         
         // Add a special element to indicate there are more results
         if (hasMore) {
-            int remainingCount = targets.size() - maxResults;
-            String message = String.format("↓ ... and %d more results. Click to load all.", remainingCount);
+            int remainingCount = totalCount - maxResults;
+            String message = totalCount > targets.size() ? 
+                String.format("↓ ... and %d more results. Click to load all.", remainingCount) :
+                String.format("↓ ... and %d more results. Click to load all.", remainingCount);
             HarbourNavigationElement moreElement = HarbourNavigationElement.createLoadAllElement(
                 editor.getProject(), 
                 message
@@ -92,17 +122,31 @@ public class HarbourNavigationPopup {
             }
             
             // Create HTML title with function name on the left
-            String declarationText = hasMore ? 
-                String.format("Choose Declaration (showing %d of %d)", displayTargets.size() - 1, targets.size()) :
-                "Choose Declaration";
+            String declarationText;
+            if (hasMore) {
+                if (totalCount > targets.size()) {
+                    // We hit the processing limit, show approximate count
+                    declarationText = String.format("Choose Declaration (showing %d of %d)", displayTargets.size() - 1, totalCount);
+                } else {
+                    declarationText = String.format("Choose Declaration (showing %d of %d)", displayTargets.size() - 1, totalCount);
+                }
+            } else {
+                declarationText = "Choose Declaration";
+            }
             
             // Simple title: function name on left, declaration text stays centered by popup
             title = String.format("<html><b style='color:%s'>%s</b>&nbsp;&nbsp;&nbsp;&nbsp;%s</html>", 
                 functionColor, searchedFunctionName, declarationText);
         } else {
-            title = hasMore ? 
-                String.format("Choose Declaration (showing %d of %d)", displayTargets.size(), targets.size()) :
-                "Choose Declaration";
+            if (hasMore) {
+                if (totalCount > targets.size()) {
+                    title = String.format("Choose Declaration (showing %d of %d)", displayTargets.size(), totalCount);
+                } else {
+                    title = String.format("Choose Declaration (showing %d of %d)", displayTargets.size(), totalCount);
+                }
+            } else {
+                title = "Choose Declaration";
+            }
         }
         
         // Create and show the popup using the original working approach
@@ -120,7 +164,20 @@ public class HarbourNavigationPopup {
                         ((HarbourNavigationElement) selected).getElementName() != null &&
                         ((HarbourNavigationElement) selected).getElementName().contains("more results")) {
                         // Show all results
-                        showNavigationPopup(targets, editor, searchedFunctionName, true);
+                        if (allResultsSupplier != null) {
+                            // Use the supplier to get all results
+                            List<PsiElement> allResults = allResultsSupplier.get();
+                            if (allResults != null && !allResults.isEmpty()) {
+                                HarbourLogger.log(COMPONENT, "Loading all " + allResults.size() + " results from supplier");
+                                showNavigationPopup(allResults, editor, searchedFunctionName, true);
+                            } else {
+                                HarbourLogger.log(COMPONENT, "Supplier returned null or empty results, falling back to current targets");
+                                showNavigationPopup(targets, editor, searchedFunctionName, true);
+                            }
+                        } else {
+                            // Fallback to showing current targets if no supplier provided
+                            showNavigationPopup(targets, editor, searchedFunctionName, true);
+                        }
                     } else if (selected instanceof Navigatable) {
                         HarbourLogger.log(COMPONENT, "Navigating to selected target: " + selected);
                         ((Navigatable) selected).navigate(true);
