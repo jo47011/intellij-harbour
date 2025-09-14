@@ -459,29 +459,47 @@ public final class HarbourFunctionClassificationService {
                     return;
                 }
                 
+                // Log which file we're about to process
+                HarbourLogger.log("FunctionClassification", "Processing file " + (i+1) + "/" + totalFiles + ": " + virtualFile.getPath());
+                
+                // Update progress BEFORE processing to show which file we're working on
                 processedFiles++;
                 double progress = (double) processedFiles / totalFiles;
                 indicator.setFraction(progress);
                 indicator.setText("Scanning Harbour project files... (" + processedFiles + "/" + totalFiles + ")");
                 indicator.setText2(virtualFile.getName());
                 
-                // Force indicator update every 10 files
-                if (processedFiles % 10 == 0) {
-                    indicator.checkCanceled();
-                }
-
-                PsiFile psiFile = psiManager.findFile(virtualFile);
-                if (psiFile == null) continue;
-
-                // Process file content efficiently
-                String fileContent = psiFile.getText();
-                if (fileContent == null || fileContent.isEmpty()) continue;
+                // Force indicator update and cancellation check
+                indicator.checkCanceled();
                 
-                // Use optimized pattern matching
-                functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
-                proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
-                classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
-                methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
+                try {
+                    // Process file content with size check first
+                    if (virtualFile.getLength() > 5 * 1024 * 1024) { // Skip files larger than 5MB
+                        HarbourLogger.log("FunctionClassification", "Skipping large file: " + virtualFile.getName() + " (" + virtualFile.getLength() + " bytes)");
+                        continue;
+                    }
+                    
+                    PsiFile psiFile = ReadAction.compute(() -> psiManager.findFile(virtualFile));
+                    if (psiFile == null) {
+                        HarbourLogger.log("FunctionClassification", "Could not find PSI file for: " + virtualFile.getName());
+                        continue;
+                    }
+                    
+                    String fileContent = ReadAction.compute(() -> psiFile.getText());
+                    if (fileContent == null || fileContent.isEmpty()) {
+                        HarbourLogger.log("FunctionClassification", "Empty or null content for: " + virtualFile.getName());
+                        continue;
+                    }
+                
+                    // Use optimized pattern matching
+                    functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
+                    proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
+                    classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
+                    methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
+                } catch (Exception e) {
+                    HarbourLogger.log("FunctionClassification", "Error processing file " + virtualFile.getName() + ": " + e.getMessage());
+                    // Continue with next file
+                }
             }
 
             // Mark as initialized
