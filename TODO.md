@@ -15,6 +15,9 @@ Testen:
 - db viewer
   - dbf file open in project explorer, right click => not available
 
+- debugger
+  - harbour stack should display entire call history
+
 indentation:
 - endif return not unindented
 

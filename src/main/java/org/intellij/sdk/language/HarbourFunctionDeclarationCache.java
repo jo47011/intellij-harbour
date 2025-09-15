@@ -1,15 +1,18 @@
 package org.intellij.sdk.language;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.psi.PsiElement;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -20,8 +23,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HarbourFunctionDeclarationCache {
     private static final Logger LOG = Logger.getInstance(HarbourFunctionDeclarationCache.class);
 
+    // Use WeakHashMap to allow garbage collection of disposed projects
     // We use a tri-state cache: true = function exists, false = function doesn't exist, null = unknown
-    private static final Map<Project, Map<String, Boolean>> PROJECT_FUNCTION_STATUS = new ConcurrentHashMap<>();
+    private static final Map<Project, Map<String, Boolean>> PROJECT_FUNCTION_STATUS = 
+        Collections.synchronizedMap(new WeakHashMap<>());
 
     /**
      * Check if a function exists in the project.
@@ -33,6 +38,11 @@ public class HarbourFunctionDeclarationCache {
      */
     public static boolean functionExistsInProject(String functionName, Project project) {
         try {
+            // Skip if project is null or disposed
+            if (project == null || project.isDisposed()) {
+                return false;
+            }
+            
             // Check for standard functions first (they're external)
             if (HarbourStandardFunctionCache.isStandardFunction(functionName)) {
                 return false;
@@ -40,7 +50,11 @@ public class HarbourFunctionDeclarationCache {
 
             // Get or create the project's function cache
             Map<String, Boolean> functionCache = PROJECT_FUNCTION_STATUS.computeIfAbsent(
-                    project, p -> new ConcurrentHashMap<>());
+                    project, p -> {
+                        // Register cleanup when project is disposed
+                        registerProjectCleanup(p);
+                        return new ConcurrentHashMap<>();
+                    });
 
             // Normalize function name
             String normalizedName = functionName.toLowerCase();
@@ -87,8 +101,17 @@ public class HarbourFunctionDeclarationCache {
      */
     public static void updateFunctionStatus(String functionName, boolean exists, Project project) {
         try {
+            // Skip if project is null or disposed
+            if (project == null || project.isDisposed()) {
+                return;
+            }
+            
             Map<String, Boolean> functionCache = PROJECT_FUNCTION_STATUS.computeIfAbsent(
-                    project, p -> new ConcurrentHashMap<>());
+                    project, p -> {
+                        // Register cleanup when project is disposed
+                        registerProjectCleanup(p);
+                        return new ConcurrentHashMap<>();
+                    });
 
             functionCache.put(functionName.toLowerCase(), exists);
         } catch (Exception e) {
@@ -103,6 +126,20 @@ public class HarbourFunctionDeclarationCache {
      */
     public static void clearCache(Project project) {
         PROJECT_FUNCTION_STATUS.remove(project);
+    }
+    
+    /**
+     * Register cleanup for when project is disposed
+     */
+    private static void registerProjectCleanup(Project project) {
+        if (project != null && !project.isDisposed()) {
+            Disposer.register(project, new Disposable() {
+                @Override
+                public void dispose() {
+                    clearCache(project);
+                }
+            });
+        }
     }
 
     /**

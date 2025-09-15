@@ -473,12 +473,6 @@ public final class HarbourFunctionClassificationService {
                 indicator.checkCanceled();
                 
                 try {
-                    // Process file content with size check first
-                    if (virtualFile.getLength() > 5 * 1024 * 1024) { // Skip files larger than 5MB
-                        HarbourLogger.log("FunctionClassification", "Skipping large file: " + virtualFile.getName() + " (" + virtualFile.getLength() + " bytes)");
-                        continue;
-                    }
-                    
                     PsiFile psiFile = ReadAction.compute(() -> psiManager.findFile(virtualFile));
                     if (psiFile == null) {
                         HarbourLogger.log("FunctionClassification", "Could not find PSI file for: " + virtualFile.getName());
