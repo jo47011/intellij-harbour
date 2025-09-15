@@ -51,9 +51,12 @@ public class HarbourProgressiveIndexer {
 
             // Start indexing directly on background thread - no EDT involvement
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                ProgressManager.getInstance().run(new Task.Backgroundable(project, "Scanning Harbour project files", true) {
+                ProgressManager.getInstance().run(new Task.Backgroundable(project, "Scanning Harbour project files", false) {
                     @Override
                     public void run(@NotNull ProgressIndicator indicator) {
+                        long startTime = System.currentTimeMillis();
+                        long timeout = 60000; // 60 second timeout
+                        
                         try {
                             indicator.setIndeterminate(false);
 
@@ -111,8 +114,23 @@ public class HarbourProgressiveIndexer {
                             
                             LOG.info("Indexing " + remainingFiles.size() + " remaining files in background");
                             
-                            // Index all remaining files
-                            indexFilesInBackground(project, remainingFiles);
+                            // Mark progress as complete
+                            indicator.setFraction(1.0);
+                            indicator.setText("Harbour file scanning completed");
+                            indicator.setText2("");
+                            
+                            // Small delay to ensure UI updates
+                            try {
+                                Thread.sleep(500);
+                            } catch (InterruptedException e) {
+                                // Ignore
+                            }
+                            
+                            // Index all remaining files in background (after progress completes)
+                            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                                indexFilesInBackground(project, remainingFiles);
+                            });
+                            
                         } finally {
                             INDEXING_IN_PROGRESS.set(false);
                             
@@ -129,6 +147,7 @@ public class HarbourProgressiveIndexer {
                             }
                             
                             LOG.info("Harbour indexing completed successfully");
+                            HarbourLogger.log("Indexer", "Harbour indexing completed successfully");
                         }
                     }
                 });
@@ -186,11 +205,21 @@ public class HarbourProgressiveIndexer {
         HarbourReferenceService referenceService = HarbourReferenceService.getInstance(project);
         AtomicInteger processed = new AtomicInteger(processedFiles);
 
+        long indexingStartTime = System.currentTimeMillis();
+        long maxIndexingTime = 30000; // 30 seconds max per batch
+        
         for (VirtualFile file : files) {
             indicator.checkCanceled();
 
             if (HarbourPerformanceOptimizer.isShuttingDown() || project.isDisposed()) {
                 return;
+            }
+            
+            // Check for timeout
+            if (System.currentTimeMillis() - indexingStartTime > maxIndexingTime) {
+                HarbourLogger.log("Indexer", "Indexing timeout reached after processing " + processed.get() + " files");
+                LOG.warn("Indexing timeout reached, stopping batch");
+                break;
             }
             
             String fullPath = file.getPath();
@@ -282,8 +311,12 @@ public class HarbourProgressiveIndexer {
 
                 // Update progress outside read action
                 int count = processed.incrementAndGet();
-                indicator.setFraction((double) count / totalFiles);
+                double fraction = (double) count / totalFiles;
+                indicator.setFraction(fraction);
                 indicator.setText2("Processing " + file.getName() + " (" + count + "/" + totalFiles + ")");
+                
+                // Ensure the indicator is processing events
+                indicator.checkCanceled();
                 
                 // Log progress every 10 files or at important milestones
                 if (count % 10 == 0 || count == 1 || count == totalFiles) {

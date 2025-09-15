@@ -447,6 +447,47 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS in first switch - redirecting to multi-line handler");
                         // Fall through to multi-line handler below
                         break;
+                        
+                    default:
+                        // Check if this is a variable sent outside blocks (format: NAME:TYPE:VALUE)
+                        if (parts.length == 3) {
+                            String varName = parts[0];
+                            String varType = parts[1];
+                            String varValue = parts[2];
+                            
+                            // Log the variable for debugging
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "DEBUGGING: Variable outside block detected - Name: " + varName + 
+                                ", Type: " + varType + ", Value: " + varValue);
+                            
+                            // Check if this looks like a variable (type should be single letter)
+                            if (varType.length() == 1 && "CNLDAOHUP".contains(varType)) {
+                                // This is a variable sent outside standard blocks
+                                // Process ALL lines in the message as variables
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Processing " + lines.length + " lines of variables outside blocks");
+                                
+                                // Build a list of all valid variable lines
+                                java.util.List<String> validVarLines = new java.util.ArrayList<>();
+                                
+                                for (String line : lines) {
+                                    String[] lineParts = line.split(":", 3);
+                                    if (lineParts.length == 3 && lineParts[1].length() == 1 && 
+                                        "CNLDAOHUP".contains(lineParts[1])) {
+                                        validVarLines.add(line);
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Adding variable to LOCALS: " + line);
+                                    }
+                                }
+                                
+                                // Handle all valid variables at once
+                                // Pass special flag to indicate these are additional variables, not replacements
+                                if (!validVarLines.isEmpty()) {
+                                    handleVariablesAdditive("LOCALS", validVarLines.toArray(new String[0]));
+                                }
+                            }
+                        }
+                        break;
                 }
             }
             
@@ -1220,6 +1261,110 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Update the UI with the loaded children
         arrayVar.updateChildren();
+    }
+    
+    // New method that adds variables without clearing existing ones
+    private void handleVariablesAdditive(String scope, String[] varLines) {
+        try {
+            // Validate input parameters to prevent crashes
+            if (scope == null || scope.trim().isEmpty()) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Invalid scope for additive variables: " + scope);
+                return;
+            }
+            
+            if (varLines == null) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Variable lines are null for additive scope: " + scope);
+                return;
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Processing " + varLines.length + " additive variable lines for scope: " + scope);
+            
+            // DO NOT CLEAR existing variables - this is the key difference
+            // Just add new variables to the existing ones
+            
+            // Process each variable line with robust error handling
+            for (int i = 0; i < varLines.length; i++) {
+                try {
+                    String line = varLines[i];
+                    
+                    // Validate line
+                    if (line == null) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "WARNING: Null variable line at index " + i + " for additive scope " + scope);
+                        continue;
+                    }
+                    
+                    // Parse variable line with validation
+                    String[] parts = line.split(":", 3);
+                    if (parts.length >= 3) {
+                        String name = parts[0];
+                        String type = parts[1];
+                        String value = parts[2];
+                        
+                        // Create variable key and value
+                        String key = scope + "." + name;
+                        HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name, type, value);
+                        
+                        // Special handling for arrays
+                        if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                            try {
+                                String sizeStr = value.substring(6, value.length() - 1);
+                                int arraySize = Integer.parseInt(sizeStr);
+                                debugValue.setArrayInfo(scope, name, arraySize);
+                                debugValue.setDebugProcess(this);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Array detected: " + name + " with size " + arraySize);
+                            } catch (Exception e) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Failed to parse array size from: " + value);
+                            }
+                        }
+                        // Special handling for hashes
+                        else if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                            try {
+                                String sizeStr = value.substring(5, value.length() - 1);
+                                int hashSize = Integer.parseInt(sizeStr);
+                                debugValue.setHashInfo(scope, name, hashSize);
+                                debugValue.setDebugProcess(this);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Hash detected: " + name + " with size " + hashSize);
+                            } catch (Exception e) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Failed to parse hash size from: " + value);
+                            }
+                        }
+                        // Special handling for objects
+                        else if ("O".equals(type)) {
+                            debugValue.setObjectInfo(scope, name);
+                            debugValue.setDebugProcess(this);
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Object detected: " + name + " of type " + value);
+                        }
+                        
+                        // Add to variables map
+                        variables.put(key, debugValue);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Variable " + scope + ": " + name + " = " + value + " (" + type + ")");
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "ERROR: Exception processing additive variable line " + i + " for scope " + scope + ": " + e.getMessage());
+                }
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Finished processing additive variables for scope: " + scope + " (total variables: " + variables.size() + ")");
+            
+            // Increment variables received counter for synchronization
+            variablesReceived++;
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Received " + scope + " additive variables (" + variablesReceived + "/" + variablesExpected + ")");
+            
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "ERROR: Unhandled exception in handleVariablesAdditive for scope " + scope + ": " + e.getMessage());
+        }
     }
     
     private void handleVariables(String scope, String[] varLines) {
