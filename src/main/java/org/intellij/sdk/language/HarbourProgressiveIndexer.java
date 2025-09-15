@@ -6,7 +6,9 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.FileTypeIndex;
@@ -49,15 +51,14 @@ public class HarbourProgressiveIndexer {
         if (INDEXING_IN_PROGRESS.compareAndSet(false, true)) {
             LOG.info("Starting progressive indexing of Harbour files");
 
-            // Start indexing directly on background thread - no EDT involvement
-            ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                ProgressManager.getInstance().run(new Task.Backgroundable(project, "Scanning Harbour project files", false) {
-                    @Override
-                    public void run(@NotNull ProgressIndicator indicator) {
-                        long startTime = System.currentTimeMillis();
-                        long timeout = 60000; // 60 second timeout
-                        
-                        try {
+            // Create and run task asynchronously - no EDT blocking
+            Task.Backgroundable task = new Task.Backgroundable(project, "Scanning Harbour project files", false) {
+                @Override
+                public void run(@NotNull ProgressIndicator indicator) {
+                    long startTime = System.currentTimeMillis();
+                    long timeout = 60000; // 60 second timeout
+                    
+                    try {
                             indicator.setIndeterminate(false);
 
                             // First get all Harbour files in the project - MUST BE IN READ ACTION
@@ -105,16 +106,21 @@ public class HarbourProgressiveIndexer {
                                 indexFiles(project, openFiles, indicator, 0, openFiles.size());
                             }
 
-                            // Then index ALL remaining files in background
+                            // Then index ALL remaining files with progress tracking
                             indicator.setText("Scanning all Harbour project files");
                             indicator.setFraction(0.1);
 
                             Set<VirtualFile> remainingFiles = new HashSet<>(harbourFiles);
                             remainingFiles.removeAll(openFiles);
                             
-                            LOG.info("Indexing " + remainingFiles.size() + " remaining files in background");
+                            LOG.info("Indexing " + remainingFiles.size() + " remaining files");
                             
-                            // Mark progress as complete
+                            // Index remaining files WITH progress indicator
+                            if (!remainingFiles.isEmpty()) {
+                                indexFiles(project, remainingFiles, indicator, openFiles.size(), harbourFiles.size());
+                            }
+                            
+                            // NOW mark progress as complete after actual work is done
                             indicator.setFraction(1.0);
                             indicator.setText("Harbour file scanning completed");
                             indicator.setText2("");
@@ -125,11 +131,6 @@ public class HarbourProgressiveIndexer {
                             } catch (InterruptedException e) {
                                 // Ignore
                             }
-                            
-                            // Index all remaining files in background (after progress completes)
-                            ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                                indexFilesInBackground(project, remainingFiles);
-                            });
                             
                         } finally {
                             INDEXING_IN_PROGRESS.set(false);
@@ -150,8 +151,17 @@ public class HarbourProgressiveIndexer {
                             HarbourLogger.log("Indexer", "Harbour indexing completed successfully");
                         }
                     }
-                });
-            });
+                };
+            
+            // Run the task asynchronously to avoid EDT blocking
+            // Try using runProcessWithProgressAsynchronously with error handling
+            try {
+                ProgressManager.getInstance().runProcessWithProgressAsynchronously(task, 
+                    new com.intellij.openapi.progress.impl.BackgroundableProcessIndicator(task));
+            } catch (Exception e) {
+                HarbourLogger.error("Indexer", "Failed to start indexing task: " + e.getMessage());
+                LOG.error("Failed to start indexing task", e);
+            }
         } else {
             LOG.info("Progressive indexing already in progress");
         }
@@ -207,7 +217,6 @@ public class HarbourProgressiveIndexer {
 
         long indexingStartTime = System.currentTimeMillis();
         long maxIndexingTime = 30000; // 30 seconds max per batch
-        
         for (VirtualFile file : files) {
             indicator.checkCanceled();
 
@@ -224,13 +233,40 @@ public class HarbourProgressiveIndexer {
             
             String fullPath = file.getPath();
             int currentFileNum = processed.get() + 1; // Show 1-based numbering
-            LOG.info("Processing file " + currentFileNum + "/" + totalFiles + ": " + file.getName() + " (" + fullPath + ")");
-            HarbourLogger.log("Indexer", "Processing file " + currentFileNum + "/" + totalFiles + ": " + file.getName() + " at " + fullPath);
+            
+            // Update progress BEFORE processing the file
+            double fraction = (double) (processedFiles + processed.get()) / totalFiles;
+            
+            indicator.setFraction(fraction);
+            indicator.setText2("Processing " + file.getName() + " (" + currentFileNum + "/" + files.size() + ")");
+            
+            // Windows-specific: Force progress bar repaint
+            if (SystemInfo.isWindows) {
+                // On Windows, we need to ensure progress updates are visible
+                // Use invokeLater (non-blocking) instead of invokeAndWait (blocking)
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    // This allows the EDT to process pending paint events
+                    indicator.checkCanceled(); // Also check for cancellation
+                });
+                
+                // Small yield to allow UI thread to process the update
+                try {
+                    Thread.sleep(5); // Reduced delay, just enough for Windows
+                } catch (InterruptedException e) {
+                    // Ignore interruption
+                }
+            }
+            
+            LOG.info("Processing file " + currentFileNum + "/" + files.size() + ": " + file.getName() + " (" + fullPath + ")");
+            HarbourLogger.log("Indexer", "Processing file " + currentFileNum + "/" + files.size() + ": " + file.getName() + " at " + fullPath);
 
             try {
-                // Must use ReadAction for file operations
-                ReadAction.run(() -> {
+                // Use non-blocking read action to allow progress updates
+                ApplicationManager.getApplication().runReadAction(() -> {
                     try {
+                        // Allow progress updates during read action
+                        indicator.checkCanceled();
+                        
                         // Check file isn't excluded first
                         if (referenceService.isExcluded(file)) {
                             HarbourLogger.log("Indexer", "Skipping excluded file: " + file.getName());
@@ -267,29 +303,21 @@ public class HarbourProgressiveIndexer {
                             // Add timeout protection for registration
                             long startTime = System.currentTimeMillis();
                             
+                            // Check for cancellation before heavy operations
+                            indicator.checkCanceled();
+                            
                             // Register in runtime cache
                             try {
-                                long funcStart = System.currentTimeMillis();
                                 referenceService.registerFunctions(harbourFile);
-                                long funcElapsed = System.currentTimeMillis() - funcStart;
-                                if (funcElapsed > 500) {
-                                    HarbourLogger.warning("Indexer", "SLOW: Function registration took " + funcElapsed + "ms for: " + file.getName());
-                                }
                                 
-                                long procStart = System.currentTimeMillis();
+                                // Check cancellation between operations
+                                indicator.checkCanceled();
+                                
                                 referenceService.registerProcedures(harbourFile);
-                                long procElapsed = System.currentTimeMillis() - procStart;
-                                if (procElapsed > 500) {
-                                    HarbourLogger.warning("Indexer", "SLOW: Procedure registration took " + procElapsed + "ms for: " + file.getName());
-                                }
                             } catch (Exception e) {
                                 HarbourLogger.error("Indexer", "Failed to register for " + file.getName() + ": " + e.getMessage());
                             }
                             
-                            long elapsed = System.currentTimeMillis() - startTime;
-                            if (elapsed > 1000) {
-                                HarbourLogger.warning("Indexer", "SLOW: Total registration took " + elapsed + "ms for: " + file.getName());
-                            }
                             
                             // Update persistent cache if enabled
                             if (settings.isIndexCacheEnabled() && indexCache != null) {
@@ -309,21 +337,27 @@ public class HarbourProgressiveIndexer {
                     }
                 });
 
-                // Update progress outside read action
+                // Increment counter after successful processing
                 int count = processed.incrementAndGet();
-                double fraction = (double) count / totalFiles;
-                indicator.setFraction(fraction);
-                indicator.setText2("Processing " + file.getName() + " (" + count + "/" + totalFiles + ")");
                 
-                // Ensure the indicator is processing events
-                indicator.checkCanceled();
+                // Update progress AFTER processing completes too
+                double finalFraction = (double) (processedFiles + count) / totalFiles;
+                indicator.setFraction(finalFraction);
+                indicator.setText2("Completed " + file.getName() + " (" + count + "/" + files.size() + ")");
                 
-                // Log progress every 10 files or at important milestones
-                if (count % 10 == 0 || count == 1 || count == totalFiles) {
-                    HarbourLogger.log("Indexer", "Progress: " + count + "/" + totalFiles + " files indexed");
+                // Windows-specific: Force progress bar repaint after completion
+                if (SystemInfo.isWindows) {
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        // Allow UI update on Windows (non-blocking)
+                    });
                 }
                 
-                HarbourLogger.log("Indexer", "Completed processing file " + (count) + "/" + totalFiles + ": " + file.getName());
+                // Log progress every 10 files or at important milestones
+                if (count % 10 == 0 || count == 1 || count == files.size()) {
+                    HarbourLogger.log("Indexer", "Progress: " + count + "/" + files.size() + " files indexed");
+                }
+                
+                HarbourLogger.log("Indexer", "Completed processing file " + count + "/" + files.size() + ": " + file.getName());
 
             } catch (Exception e) {
                 LOG.warn("Error indexing file: " + file.getName(), e);
@@ -331,118 +365,6 @@ public class HarbourProgressiveIndexer {
         }
     }
 
-    /**
-     * Index remaining files in background with lower priority.
-     * This splits the work into batches to avoid freezing the UI.
-     *
-     * @param project The project
-     * @param files Files to index
-     */
-    private static void indexFilesInBackground(@NotNull Project project, @NotNull Collection<VirtualFile> files) {
-        if (files.isEmpty()) return;
-
-        LOG.info("Starting background indexing of " + files.size() + " remaining files");
-
-        // Convert to array for batch processing
-        VirtualFile[] filesArray = files.toArray(new VirtualFile[0]);
-        AtomicInteger processedBatches = new AtomicInteger(0);
-        int totalBatches = (filesArray.length + BATCH_SIZE - 1) / BATCH_SIZE;
-
-        // Process first batch immediately
-        processBatch(project, filesArray, processedBatches, totalBatches);
-    }
-
-    /**
-     * Process a batch of files, then schedule the next batch.
-     */
-    private static void processBatch(@NotNull Project project, @NotNull VirtualFile[] files,
-                                     @NotNull AtomicInteger processedBatches, int totalBatches) {
-        if (HarbourPerformanceOptimizer.isShuttingDown() || project.isDisposed()) {
-            return;
-        }
-
-        int batchIndex = processedBatches.getAndIncrement();
-        if (batchIndex >= totalBatches) {
-            LOG.info("Background indexing completed");
-            
-            // Force save the cache after all background indexing completes
-            HarbourSettings settings = HarbourSettings.getInstance(project);
-            if (settings.isIndexCacheEnabled()) {
-                HarbourIndexCache cache = HarbourIndexCache.getInstance(project);
-                cache.forceSave();
-                LOG.info("Forced cache save after background indexing completed");
-            }
-            return;
-        }
-
-        int startIndex = batchIndex * BATCH_SIZE;
-        int endIndex = Math.min(startIndex + BATCH_SIZE, files.length);
-
-        // Process this batch
-        HarbourPerformanceOptimizer.submitBackgroundTask(() -> {
-            try {
-                PsiManager psiManager = PsiManager.getInstance(project);
-                HarbourReferenceService referenceService = HarbourReferenceService.getInstance(project);
-
-                for (int i = startIndex; i < endIndex; i++) {
-                    if (HarbourPerformanceOptimizer.isShuttingDown() || project.isDisposed()) {
-                        return;
-                    }
-
-                    VirtualFile file = files[i];
-
-                    // Must use ReadAction for PSI operations
-                    ReadAction.run(() -> {
-                        try {
-                            if (!referenceService.isExcluded(file)) {
-                                // Check if file is already in cache and unchanged
-                                HarbourSettings settings = HarbourSettings.getInstance(project);
-                                HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
-                                
-                                if (settings.isIndexCacheEnabled() && indexCache.hasCachedData() && !indexCache.isFileModified(file)) {
-                                    // File is cached and unchanged - skip indexing
-                                    return;
-                                }
-                                
-                                com.intellij.psi.PsiFile psiFile = psiManager.findFile(file);
-                                if (psiFile instanceof HarbourFile harbourFile) {
-                                    // Register in runtime cache
-                                    referenceService.registerFunctions(harbourFile);
-                                    referenceService.registerProcedures(harbourFile);
-                                    
-                                    // Update persistent cache if enabled
-                                    if (settings.isIndexCacheEnabled()) {
-                                        updatePersistentCache(harbourFile, file, indexCache);
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                            if (!HarbourPerformanceOptimizer.isShuttingDown()) {
-                                LOG.warn("Error in background indexing: " + file.getName(), e);
-                            }
-                        }
-                    });
-                }
-
-                // Schedule next batch on background thread with delay
-                ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                    try {
-                        Thread.sleep(100); // Small delay between batches
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                    if (!HarbourPerformanceOptimizer.isShuttingDown() && !project.isDisposed()) {
-                        processBatch(project, files, processedBatches, totalBatches);
-                    }
-                });
-
-            } catch (Exception e) {
-                if (!HarbourPerformanceOptimizer.isShuttingDown()) {
-                    LOG.error("Error processing batch " + batchIndex, e);
-                }
-            }
-        });
-    }
 
     /**
      * Reindex a specific Harbour file after changes.
@@ -471,7 +393,7 @@ public class HarbourProgressiveIndexer {
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                ReadAction.run(() -> {
+                ApplicationManager.getApplication().runReadAction(() -> {
                     // Get the PSI file
                     PsiManager psiManager = PsiManager.getInstance(project);
                     com.intellij.psi.PsiFile psiFile = psiManager.findFile(file);

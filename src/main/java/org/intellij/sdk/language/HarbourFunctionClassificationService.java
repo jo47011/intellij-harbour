@@ -358,9 +358,8 @@ public final class HarbourFunctionClassificationService {
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setText("Indexing Harbour functions and procedures...");
                 indicator.setIndeterminate(false);
-                ReadAction.run(() -> {
-                    scanProjectForInternalFunctionsWithProgress(indicator);
-                });
+                // Don't wrap the entire scan in ReadAction - it blocks UI updates!
+                scanProjectForInternalFunctionsWithProgress(indicator);
             }
             
             @Override
@@ -427,9 +426,10 @@ public final class HarbourFunctionClassificationService {
         indicator.setFraction(0.0);
 
         try {
-            // Get all Harbour files in the project
-            Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
-                    HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+            // Get all Harbour files in the project - needs ReadAction
+            Collection<VirtualFile> virtualFiles = ReadAction.compute(() -> 
+                FileTypeIndex.getFiles(HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project))
+            );
             
             // Filter out excluded files
             List<VirtualFile> filesToProcess = virtualFiles.stream()
@@ -469,23 +469,27 @@ public final class HarbourFunctionClassificationService {
                 indicator.setText("Scanning Harbour project files... (" + processedFiles + "/" + totalFiles + ")");
                 indicator.setText2(virtualFile.getName());
                 
-                // Force indicator update and cancellation check
-                indicator.checkCanceled();
+                // CRITICAL: Use ProgressManager to allow UI updates
+                ProgressManager.checkCanceled(); // This allows the UI to update!
                 
                 try {
-                    PsiFile psiFile = ReadAction.compute(() -> psiManager.findFile(virtualFile));
-                    if (psiFile == null) {
-                        HarbourLogger.log("FunctionClassification", "Could not find PSI file for: " + virtualFile.getName());
-                        continue;
-                    }
+                    // Process file in smaller chunks to allow UI updates
+                    String fileContent = ApplicationManager.getApplication().runReadAction(
+                        (com.intellij.openapi.util.Computable<String>) () -> {
+                            PsiFile psiFile = psiManager.findFile(virtualFile);
+                            if (psiFile == null) {
+                                HarbourLogger.log("FunctionClassification", "Could not find PSI file for: " + virtualFile.getName());
+                                return null;
+                            }
+                            return psiFile.getText();
+                        });
                     
-                    String fileContent = ReadAction.compute(() -> psiFile.getText());
                     if (fileContent == null || fileContent.isEmpty()) {
                         HarbourLogger.log("FunctionClassification", "Empty or null content for: " + virtualFile.getName());
                         continue;
                     }
-                
-                    // Use optimized pattern matching
+                    
+                    // Process patterns outside of read action
                     functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
                     proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
                     classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
