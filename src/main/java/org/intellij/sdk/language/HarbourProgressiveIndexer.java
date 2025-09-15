@@ -6,7 +6,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
-import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -14,12 +13,6 @@ import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.intellij.sdk.language.psi.HarbourFile;
-import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
-import org.intellij.sdk.language.psi.ClassDeclaration;
-import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.PsiWhiteSpace;
-import org.intellij.sdk.language.psi.HarbourTypes;
-import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -37,8 +30,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class HarbourProgressiveIndexer {
     private static final Logger LOG = Logger.getInstance(HarbourProgressiveIndexer.class);
     private static final AtomicBoolean INDEXING_IN_PROGRESS = new AtomicBoolean(false);
-    private static final int BATCH_SIZE = 20;
-    private static final int MAX_INITIAL_FILES = 100;
 
     /**
      * Start progressive indexing of Harbour files.
@@ -55,8 +46,6 @@ public class HarbourProgressiveIndexer {
             Task.Backgroundable task = new Task.Backgroundable(project, "Scanning Harbour project files", false) {
                 @Override
                 public void run(@NotNull ProgressIndicator indicator) {
-                    long startTime = System.currentTimeMillis();
-                    long timeout = 60000; // 60 second timeout
                     
                     try {
                             indicator.setIndeterminate(false);
@@ -188,17 +177,6 @@ public class HarbourProgressiveIndexer {
         return openFiles;
     }
 
-    /**
-     * Index all files at once with progress indicator.
-     *
-     * @param project The project
-     * @param files Files to index
-     * @param indicator Progress indicator
-     */
-    private static void indexAllFiles(@NotNull Project project, @NotNull Collection<VirtualFile> files,
-                                      @NotNull ProgressIndicator indicator) {
-        indexFiles(project, files, indicator, 0, files.size());
-    }
 
     /**
      * Index files with progress indicator.
@@ -206,8 +184,8 @@ public class HarbourProgressiveIndexer {
      * @param project The project
      * @param files Files to index
      * @param indicator Progress indicator
-     * @param startProgress Starting progress value (0-1)
-     * @param count Number of files to process
+     * @param processedFiles Number of files already processed
+     * @param totalFiles Total number of files to process
      */
     private static void indexFiles(@NotNull Project project, @NotNull Collection<VirtualFile> files,
                                    @NotNull ProgressIndicator indicator, int processedFiles, int totalFiles) {
@@ -244,10 +222,9 @@ public class HarbourProgressiveIndexer {
             if (SystemInfo.isWindows) {
                 // On Windows, we need to ensure progress updates are visible
                 // Use invokeLater (non-blocking) instead of invokeAndWait (blocking)
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    // This allows the EDT to process pending paint events
-                    indicator.checkCanceled(); // Also check for cancellation
-                });
+                ApplicationManager.getApplication().invokeLater(() -> 
+                    indicator.checkCanceled() // Also check for cancellation
+                );
                 
                 // Small yield to allow UI thread to process the update
                 try {
@@ -301,8 +278,7 @@ public class HarbourProgressiveIndexer {
                         
                         if (psiFile instanceof HarbourFile harbourFile) {
                             // Add timeout protection for registration
-                            long startTime = System.currentTimeMillis();
-                            
+                                
                             // Check for cancellation before heavy operations
                             indicator.checkCanceled();
                             
@@ -504,7 +480,7 @@ public class HarbourProgressiveIndexer {
                 // Check for FUNCTION declaration (must be at start of line)
                 if (upperLine.startsWith("FUNCTION ") || upperLine.startsWith("STATIC FUNCTION ")) {
                     String name = extractFunctionName(trimmedLine);
-                    if (name != null && isValidIdentifier(name)) {
+                    if (isValidIdentifier(name)) {
                         entries.add(new HarbourIndexCache.CacheEntry(
                             name,
                             file.getPath(),
@@ -518,7 +494,7 @@ public class HarbourProgressiveIndexer {
                 // Check for PROCEDURE declaration (must be at start of line)
                 else if (upperLine.startsWith("PROCEDURE ") || upperLine.startsWith("STATIC PROCEDURE ")) {
                     String name = extractProcedureName(trimmedLine);
-                    if (name != null && isValidIdentifier(name)) {
+                    if (isValidIdentifier(name)) {
                         entries.add(new HarbourIndexCache.CacheEntry(
                             name,
                             file.getPath(),
@@ -532,7 +508,7 @@ public class HarbourProgressiveIndexer {
                 // Check for CLASS declaration (must be at start of line)
                 else if (upperLine.startsWith("CLASS ") || upperLine.startsWith("CREATE CLASS ")) {
                     String name = extractClassName(trimmedLine);
-                    if (name != null && isValidIdentifier(name)) {
+                    if (isValidIdentifier(name)) {
                         entries.add(new HarbourIndexCache.CacheEntry(
                             name,
                             file.getPath(),
@@ -646,15 +622,12 @@ public class HarbourProgressiveIndexer {
         
         // Reject if it's a Harbour keyword
         String upper = name.toUpperCase();
-        if (upper.equals("IF") || upper.equals("ELSE") || upper.equals("ENDIF") || 
+        return !(upper.equals("IF") || upper.equals("ELSE") || upper.equals("ENDIF") || 
             upper.equals("DO") || upper.equals("WHILE") || upper.equals("FOR") ||
             upper.equals("NEXT") || upper.equals("RETURN") || upper.equals("LOCAL") ||
             upper.equals("STATIC") || upper.equals("PRIVATE") || upper.equals("PUBLIC") ||
             upper.equals("NIL") || upper.equals("END") || upper.equals("CASE") ||
-            upper.equals("OTHERWISE") || upper.equals("SWITCH") || upper.equals("EXIT")) {
-            return false;
-        }
-        
-        return true;
+            upper.equals("OTHERWISE") || upper.equals("SWITCH") || upper.equals("EXIT"));
     }
 }
+
