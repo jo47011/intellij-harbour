@@ -91,6 +91,8 @@ public final class HarbourReferenceService {
      */
     public HarbourReferenceService(Project project) {
         this.project = project;
+        // Load excluded files from settings on initialization
+        refreshExclusions();
     }
 
     /**

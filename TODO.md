@@ -1,9 +1,5 @@
 # TODOs
 
-Testen:
-- startup: scanning harbour project files hangs at 8/111 or so
-- harbour dbf view icon -> always to "Bottom right"
-
 - navigation
   - CLASS NegVerfuegItem<= not navigatable pls fix
   - define definition in ch files not found, should be at top like func names etc.
@@ -15,17 +11,12 @@ Testen:
 - db viewer
   - dbf file open in project explorer, right click => not available
 
-
 indentation:
 - endif return not unindented
 
-new: tab completion: ctrl tab?
+- new: 
+- tab completion: ctrl tab?
 
----
 
-check:
-
-fyi the files defined as excluded in the harbour settings should also be discarded from indexing
----
 
 
