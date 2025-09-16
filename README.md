@@ -10,28 +10,14 @@ the [MAKING-OF](./MAKING_OF.md).
 
 ## Table of Contents
 
-- [Features](#features)
 - [Installation](#installation)
+- [Features](#features)
 - [Settings](#settings)
 - [Roadmap](#roadmap--todos)
 - [Known Issues](#known-issues)
 - [VS Code Users](#vs-code-users)
 - [Building Plugin](#building-plugin)
 - [License](#license)
-
-## Features
-
-- **[Syntax Highlighting](#syntax-highlighting)** - Complete color coding for Harbour/Clipper keywords, functions, and
-  syntax
-- **[Code Completion](#code-completion)** - Intelligent auto-completion for functions, methods, and variables
-- **[Function Navigation](#function-navigation)** - Go-to-declaration and reference resolution
-- **[Rename Refactoring](#rename-refactoring)** - Safe renaming of functions and variables across projects
-- **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
-- **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
-- **[Linting](#linting)** - Real-time code analysis and error detection
-- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications with database inspection
-- **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
-- **[Code Helpers](#code-helpers)** - Quick actions to improve code quality and reduce typing
 
 ## Installation
 
@@ -54,6 +40,20 @@ By default, PyCharm/IntelliJ has file size limits that may be too small for larg
 3. Save the file and restart the IDE
 
 **Note:** These are IDE-level settings that must be configured manually and cannot be changed by plugins at runtime.
+
+## Features
+
+- **[Syntax Highlighting](#syntax-highlighting)** - Complete color coding for Harbour/Clipper keywords, functions, and
+  syntax
+- **[Code Completion](#code-completion)** - Intelligent auto-completion for functions, methods, and variables
+- **[Function Navigation](#function-navigation)** - Go-to-declaration and reference resolution
+- **[Rename Refactoring](#rename-refactoring)** - Safe renaming of functions and variables across projects
+- **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
+- **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
+- **[Linting](#linting)** - Real-time code analysis and error detection
+- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications with database inspection
+- **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
+- **[Code Helpers](#code-helpers)** - Quick actions to improve code quality and reduce typing
 
 ### Syntax Highlighting
 
