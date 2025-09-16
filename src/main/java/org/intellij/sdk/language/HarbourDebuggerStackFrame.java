@@ -97,13 +97,20 @@ public class HarbourDebuggerStackFrame extends XStackFrame {
 
     @Override
     public void customizePresentation(@NotNull ColoredTextContainer component) {
-        if (functionName != null) {
-            component.append(functionName, SimpleTextAttributes.REGULAR_ATTRIBUTES);
-        }
+        // Display just the file:line format without function name or "at"
         if (filePath != null) {
-            component.append(" at ", SimpleTextAttributes.REGULAR_ATTRIBUTES);
-            component.append(filePath + ":" + lineNumber,
+            // Remove ".\" or "./" prefix from file path if present
+            String cleanPath = filePath;
+            if (cleanPath.startsWith(".\\")) {
+                cleanPath = cleanPath.substring(2);
+            } else if (cleanPath.startsWith("./")) {
+                cleanPath = cleanPath.substring(2);
+            }
+            component.append(cleanPath + ":" + lineNumber,
                     SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        } else if (functionName != null) {
+            // Fallback to function name if no file path
+            component.append(functionName, SimpleTextAttributes.REGULAR_ATTRIBUTES);
         }
         component.setIcon(AllIcons.Debugger.Frame);
     }

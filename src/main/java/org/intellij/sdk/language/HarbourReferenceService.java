@@ -1584,7 +1584,13 @@ public final class HarbourReferenceService {
      * Register functions found in a Harbour file to the cache.
      */
     public void registerFunctions(HarbourFile file) {
-        HarbourLogger.log("ReferenceService", "Registering functions from file: " + file.getName());
+        if (file == null) {
+            HarbourLogger.log("ReferenceService", "registerFunctions called with null file");
+            return;
+        }
+        
+        String fileName = file.getName() != null ? file.getName() : "<unnamed>";
+        HarbourLogger.log("ReferenceService", "Registering functions from file: " + fileName);
         
         try {
             long startTime = System.currentTimeMillis();
@@ -1595,7 +1601,7 @@ public final class HarbourReferenceService {
             
             long scanTime = System.currentTimeMillis() - startTime;
             if (scanTime > 500) {
-                HarbourLogger.warning("ReferenceService", "Slow PSI scan (" + scanTime + "ms) for: " + file.getName() + " found " + declarations.size() + " functions");
+                HarbourLogger.warning("ReferenceService", "Slow PSI scan (" + scanTime + "ms) for: " + fileName + " found " + declarations.size() + " functions");
             }
             
             int count = 0;
@@ -1610,10 +1616,10 @@ public final class HarbourReferenceService {
             }
             
             if (count > 0) {
-                HarbourLogger.log("ReferenceService", "Registered " + count + " functions from: " + file.getName());
+                HarbourLogger.log("ReferenceService", "Registered " + count + " functions from: " + fileName);
             }
         } catch (Exception e) {
-            HarbourLogger.error("ReferenceService", "Error registering functions from " + file.getName() + ": " + e.getMessage());
+            HarbourLogger.error("ReferenceService", "Error registering functions from " + fileName + ": " + e.getMessage());
         }
     }
 
@@ -1621,7 +1627,13 @@ public final class HarbourReferenceService {
      * Register classes found in a Harbour file to the cache.
      */
     public void registerClasses(HarbourFile file) {
-        HarbourLogger.log("ReferenceService", "Registering classes from file: " + file.getName());
+        if (file == null) {
+            HarbourLogger.log("ReferenceService", "registerClasses called with null file");
+            return;
+        }
+        
+        String fileName = file.getName() != null ? file.getName() : "<unnamed>";
+        HarbourLogger.log("ReferenceService", "Registering classes from file: " + fileName);
 
         // Find all CLASS declarations in the file
         Collection<ClassDeclaration> declarations = PsiTreeUtil.findChildrenOfType(file, ClassDeclaration.class);
@@ -1650,7 +1662,13 @@ public final class HarbourReferenceService {
      * Register procedures found in a Harbour file to the cache.
      */
     public void registerProcedures(HarbourFile file) {
-        HarbourLogger.log("ReferenceService", "Registering procedures from file: " + file.getName());
+        if (file == null) {
+            HarbourLogger.log("ReferenceService", "registerProcedures called with null file");
+            return;
+        }
+        
+        String fileName = file.getName() != null ? file.getName() : "<unnamed>";
+        HarbourLogger.log("ReferenceService", "Registering procedures from file: " + fileName);
 
         // Similar to registerFunctions but for procedures
         // Simplified implementation for now

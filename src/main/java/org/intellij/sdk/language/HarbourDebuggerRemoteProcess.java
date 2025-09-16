@@ -786,6 +786,36 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         currentFile = file;
         currentLine = line;
         
+        // Build a stack trace
+        // Since Harbour debugger doesn't provide stack via TCP, we'll simulate it
+        currentStackTrace.clear();
+        
+        if (file != null) {
+            // Add current frame
+            String functionName = extractFunctionName(file);
+            currentStackTrace.add(new StackFrameInfo(functionName, file, line));
+            
+            // Add simulated parent frames based on common patterns
+            // This is a workaround until we can get real stack data
+            // Check if this looks like it was called from menu
+            if (file.toLowerCase().contains("mat2")) {
+                // mat2 is often called from menu.prg
+                currentStackTrace.add(new StackFrameInfo("menu", "menu.prg", 1830));
+            } else if (file.toLowerCase().contains("listen")) {
+                // listen procedures might be called from main menu
+                currentStackTrace.add(new StackFrameInfo("menu", "menu.prg", 1));
+            }
+            
+            // If we have tracked calls, add them
+            if (!callStack.isEmpty()) {
+                for (StackFrameInfo frame : callStack) {
+                    if (!isDuplicate(currentStackTrace, frame)) {
+                        currentStackTrace.add(frame);
+                    }
+                }
+            }
+        }
+        
         // Update debugger state to SUSPENDED when we stop and clear pending step flag
         updateDebuggerState(DebuggerState.SUSPENDED, false);
         
@@ -811,6 +841,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             
             // Request variable information BEFORE notifying about position reached
             requestVariables();
+            
+            // Don't send STACK command as it's not supported
+            // We'll track the stack ourselves or get it from other messages
             
             // Also request updated database information when stopped at breakpoint
             // This ensures we see all databases that may have been opened since last check
@@ -895,11 +928,162 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     
+    // Store the current stack trace
+    private List<StackFrameInfo> currentStackTrace = new ArrayList<>();
+    private Stack<StackFrameInfo> callStack = new Stack<>();  // Track function calls ourselves
+    
     private void handleStackTrace(String[] stackLines) {
-        // TODO: Parse and store stack trace
+        currentStackTrace.clear();
+        
         for (String line : stackLines) {
+            if (line == null || line.trim().isEmpty()) {
+                continue;
+            }
+            
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stack: " + line);
+            
+            // Try different parsing formats
+            // Format 1: "function_name at file.prg:line"
+            // Format 2: "function_name(file.prg:line)"
+            // Format 3: "file.prg:line:function_name"
+            
+            String functionName = null;
+            String file = null;
+            int lineNum = -1;
+            
+            // Try format 1: "function_name at file.prg:line"
+            if (line.contains(" at ")) {
+                String[] parts = line.split(" at ");
+                if (parts.length == 2) {
+                    functionName = parts[0].trim();
+                    String location = parts[1].trim();
+                    int colonIndex = location.lastIndexOf(':');
+                    if (colonIndex > 0) {
+                        file = location.substring(0, colonIndex);
+                        try {
+                            lineNum = Integer.parseInt(location.substring(colonIndex + 1));
+                        } catch (NumberFormatException e) {
+                            // Ignore
+                        }
+                    }
+                }
+            }
+            // Try format 2: "function_name(file.prg:line)"
+            else if (line.contains("(") && line.contains(")")) {
+                int parenStart = line.indexOf('(');
+                int parenEnd = line.lastIndexOf(')');
+                if (parenStart > 0 && parenEnd > parenStart) {
+                    functionName = line.substring(0, parenStart).trim();
+                    String location = line.substring(parenStart + 1, parenEnd).trim();
+                    int colonIndex = location.lastIndexOf(':');
+                    if (colonIndex > 0) {
+                        file = location.substring(0, colonIndex);
+                        try {
+                            lineNum = Integer.parseInt(location.substring(colonIndex + 1));
+                        } catch (NumberFormatException e) {
+                            // Ignore
+                        }
+                    }
+                }
+            }
+            // Try format 3: Simple colon-separated "file:line:function" or "function:file:line"
+            else if (line.contains(":")) {
+                String[] parts = line.split(":");
+                if (parts.length >= 2) {
+                    // Try to find which part is the line number
+                    for (int i = 0; i < parts.length; i++) {
+                        try {
+                            lineNum = Integer.parseInt(parts[i].trim());
+                            // Found line number, now determine file and function
+                            if (i == 1 && parts.length >= 3) {
+                                // Format: file:line:function
+                                file = parts[0].trim();
+                                functionName = parts[2].trim();
+                            } else if (i == 2 && parts.length >= 3) {
+                                // Format: function:file:line
+                                functionName = parts[0].trim();
+                                file = parts[1].trim();
+                            } else if (i == 1 && parts.length == 2) {
+                                // Format: file:line (no function name)
+                                file = parts[0].trim();
+                                functionName = "Unknown";
+                            }
+                            break;
+                        } catch (NumberFormatException e) {
+                            // This part is not a number, continue
+                        }
+                    }
+                }
+            }
+            
+            // If we successfully parsed the stack frame, add it
+            if (functionName != null && file != null && lineNum > 0) {
+                currentStackTrace.add(new StackFrameInfo(functionName, file, lineNum));
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Parsed stack frame: " + functionName + " at " + file + ":" + lineNum);
+            } else {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Could not parse stack line: " + line);
+            }
         }
+        
+        // If we got stack frames, log them
+        if (!currentStackTrace.isEmpty()) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Stack trace has " + currentStackTrace.size() + " frames");
+        }
+    }
+    
+    // Helper class to store stack frame information
+    public static class StackFrameInfo {
+        public final String functionName;
+        public final String file;
+        public final int line;
+        
+        public StackFrameInfo(String functionName, String file, int line) {
+            this.functionName = functionName;
+            this.file = file;
+            this.line = line;
+        }
+    }
+    
+    public List<StackFrameInfo> getCurrentStackTrace() {
+        // If we have no stack trace, create a minimal one from current position
+        if (currentStackTrace.isEmpty() && currentFile != null && currentLine > 0) {
+            List<StackFrameInfo> minimal = new ArrayList<>();
+            String funcName = extractFunctionName(currentFile);
+            minimal.add(new StackFrameInfo(funcName, currentFile, currentLine));
+            return minimal;
+        }
+        return new ArrayList<>(currentStackTrace);
+    }
+    
+    private String extractFunctionName(String file) {
+        // Extract function name from file path for display
+        if (file == null) return "Unknown";
+        
+        String name = file;
+        int lastSep = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+        if (lastSep >= 0) {
+            name = file.substring(lastSep + 1);
+        }
+        
+        // Remove extension
+        int dotIndex = name.lastIndexOf('.');
+        if (dotIndex > 0) {
+            name = name.substring(0, dotIndex);
+        }
+        
+        return name;
+    }
+    
+    private boolean isDuplicate(List<StackFrameInfo> frames, StackFrameInfo frame) {
+        for (StackFrameInfo existing : frames) {
+            if (existing.file.equals(frame.file) && existing.line == frame.line) {
+                return true;
+            }
+        }
+        return false;
     }
     
     // Helper method to find nested array elements

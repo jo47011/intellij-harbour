@@ -28,7 +28,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
 - **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
 - **[Linting](#linting)** - Real-time code analysis and error detection
-- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
+- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications with database inspection
 - **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
 - **[Code Helpers](#code-helpers)** - Quick actions to improve code quality and reduce typing
 
@@ -182,6 +182,27 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
   <br>
   <em>GUI debugging with PyCharm debugger and variable inspection</em>
 </p>
+
+### Database View
+
+During debugging, the plugin provides a Database View tool window that shows all currently open database workareas in your Harbour application. This allows you to inspect database state while stepping through code.
+
+<p align="center">
+  <img src="img/db-view.png" alt="Database View"/>
+  <br>
+  <em>Database workarea browser showing open databases during debugging</em>
+</p>
+
+**Features:**
+- View all open database workareas (Area 1, Area 2, etc.)
+- Inspect current record data and field values
+- See field structure (name, type, size)
+- Navigate between records using Previous/Next buttons
+- Jump to specific record numbers
+- View indexes and schema information
+- Refresh data to see updates
+
+The Database View automatically updates when you step through code that opens, closes, or modifies database records.
 
 ### Limitations
 
