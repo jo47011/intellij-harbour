@@ -13,10 +13,11 @@ the [MAKING-OF](./MAKING_OF.md).
 - [Features](#features)
 - [Installation](#installation)
 - [Settings](#settings)
-- [License](#license)
-- [VS Code Users](#vs-code-users)
 - [Roadmap](#roadmap--todos)
 - [Known Issues](#known-issues)
+- [VS Code Users](#vs-code-users)
+- [Building Plugin](#building-plugin)
+- [License](#license)
 
 ## Features
 
@@ -208,10 +209,6 @@ The Database View automatically updates when you step through code that opens, c
 
 - **Static Variables**: Static variables are not visible in the debugger due to Harbour VM
   compilation-unit scoping
-- **Complex Objects**: Limited support for complex object inspection
-- **Remote Debugging**: Currently supports local debugging only (debugging programs running on the
-  same machine). Remote debugging would allow debugging Harbour programs running on different
-  machines over a network connection.
 
 ### Automatic Error Monitoring
 
@@ -284,7 +281,69 @@ FUNCTION TestFunction()
 - Uses indentation from code style settings
 - Shows helpful notifications for errors or success
 
-## Building from Source
+## Settings
+
+Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
+
+<p align="center">
+  <img src="img/settings-tools.png" alt="Tools Settings"/>
+  <br>
+  <em>Configure Harbour tools, paths, and debugging options</em>
+</p>
+
+### Configuration Options
+
+- **Documentation URL** - Base URL for external Harbour documentation
+- **Debug Log Directory** - Location for debug logs (empty to disable)
+- **Build Output Directory** - Default `.hbmk` for build artifacts
+- **Auto-completion** - Enable while typing (default: Ctrl+Space only)
+- **Include Paths** - Add directories for #include file resolution
+- **Excluded Files** - Files to exclude from navigation and indexing
+- **Commands** - Customize code completion command list
+
+### Code Style Settings
+
+Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
+
+<p align="center">
+  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
+  <br>
+  <em>Configure indentation, spacing, and formatting rules</em>
+</p>
+
+### Color Scheme Settings
+
+Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
+
+<p align="center">
+  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings"/>
+  <br>
+  <em>Customize syntax highlighting colors and themes</em>
+</p>
+
+## Roadmap / TODOs
+
+- **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
+- **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
+  as well.
+- **Tests** - write tests.
+
+## Known Issues
+
+- **Ctrl+hover** should not show tooltip
+- **Ctrl-click**: Internal function navigation may jump to function definition instead of showing a declaration dialog
+  if the file w/ the function definition misses some include file or if the list of usages is very long.
+  Subsequent click on function declaration itself work.
+- most function/procedure features do not work yet for truncated keywords func/proce.
+
+## VS Code Users
+
+For Visual Studio Code users, there's an
+excellent <a href="https://github.com/APerricone/harbourCodeExtension" target="_blank">Harbour Code Extension</a>
+available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing
+valuable insights into Harbour language support implementation.
+
+## Building Plugin
 
 ### Prerequisites
 
@@ -333,70 +392,3 @@ This launches PyCharm with the plugin pre-installed for testing.
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
-
-## Settings
-
-Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
-
-<p align="center">
-  <img src="img/settings-tools.png" alt="Tools Settings"/>
-  <br>
-  <em>Configure Harbour tools, paths, and debugging options</em>
-</p>
-
-### Configuration Options
-
-- **Documentation URL** - Base URL for external Harbour documentation
-- **Debug Log Directory** - Location for debug logs (empty to disable)
-- **Build Output Directory** - Default `.hbmk` for build artifacts
-- **Auto-completion** - Enable while typing (default: Ctrl+Space only)
-- **Include Paths** - Add directories for #include file resolution
-- **Excluded Files** - Files to exclude from navigation and indexing
-- **Commands** - Customize code completion command list
-
-### Code Style Settings
-
-Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
-
-<p align="center">
-  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
-  <br>
-  <em>Configure indentation, spacing, and formatting rules</em>
-</p>
-
-### Color Scheme Settings
-
-Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
-
-<p align="center">
-  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings"/>
-  <br>
-  <em>Customize syntax highlighting colors and themes</em>
-</p>
-
-## VS Code Users
-
-For Visual Studio Code users, there's an
-excellent <a href="https://github.com/APerricone/harbourCodeExtension" target="_blank">Harbour Code Extension</a>
-available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing
-valuable insights into Harbour language support implementation.
-
-## Roadmap / TODOs
-
-- **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
-- **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
-  as well.
-- **Tests** - write tests.
-
-## Known Issues
-
-- **Ctrl+hover** should not show tooltip
-- **Ctrl-click**: Internal function navigation may jump to function definition instead of showing a declaration dialog
-  if the file w/ the function definition misses some include file or if the list of usages is very long.
-  Subsequent click on function declaration itself work.
-- most function/procedure features do not work yet for truncated keywords func/proce.
-
-
-
-
-
