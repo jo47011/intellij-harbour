@@ -367,7 +367,7 @@ public final class HarbourFunctionClassificationService {
             
             HarbourLogger.log("FunctionClassification", 
                     String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
-                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
+                            duration.toMillis(), processedFiles.get(), functionsFound, proceduresFound, classesFound, methodsFound));
             
             HarbourLogger.log("FunctionClassification", String.format("Service initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
                     functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
@@ -458,7 +458,7 @@ public final class HarbourFunctionClassificationService {
             
             HarbourLogger.log("FunctionClassification", 
                     String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
-                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
+                            duration.toMillis(), processedFiles.get(), functionsFound, proceduresFound, classesFound, methodsFound));
             
             HarbourLogger.log("FunctionClassification", String.format("Service initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
                     functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));

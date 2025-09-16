@@ -30,14 +30,4 @@ check:
 fyi the files defined as excluded in the harbour settings should also be discarded from indexing
 ---
 
-unix plugin:
-
-Scanning harbour project files hangs, see screenshot
-see logs in workspace/log-unix
-and workspace/hbmiki-test for idea log
-
-2. File size limit - Skips files > 5MB to prevent memory issues
-
-=> this is not an option pls undo
------
 
