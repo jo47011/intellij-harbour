@@ -77,7 +77,15 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     private String linterExclusionComment = "noqa"; // Comment text to exclude lines from linting
     
     // Navigation settings
-    private int maxNavigationResults = 20; // Maximum results to preload initially (with "load all" button for more)
+    private int maxNavigationResults = 20; // Maximum results to preload initially for navigation (with "load all" button for more)
+    
+    // Grid view settings
+    private int maxGridPreloadResults = 100; // Maximum results to preload in grid view
+    
+    // Index cache settings
+    private boolean indexCacheEnabled = true; // Enable persistent index cache for performance
+    private int indexCacheMaxSizeMB = 10; // Maximum cache size in MB
+    private boolean indexCacheAutoCleanup = true; // Enable automatic cache cleanup
 
 
     public HarbourSettings() {
@@ -404,6 +412,39 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
         this.maxNavigationResults = maxNavigationResults;
     }
     
+    // Grid view settings methods
+    public int getMaxGridPreloadResults() {
+        return maxGridPreloadResults;
+    }
+    
+    public void setMaxGridPreloadResults(int maxGridPreloadResults) {
+        this.maxGridPreloadResults = maxGridPreloadResults;
+    }
+    
+    // Index cache settings methods
+    public boolean isIndexCacheEnabled() {
+        return indexCacheEnabled;
+    }
+    
+    public void setIndexCacheEnabled(boolean indexCacheEnabled) {
+        this.indexCacheEnabled = indexCacheEnabled;
+    }
+    
+    public int getIndexCacheMaxSizeMB() {
+        return indexCacheMaxSizeMB;
+    }
+    
+    public void setIndexCacheMaxSizeMB(int indexCacheMaxSizeMB) {
+        this.indexCacheMaxSizeMB = indexCacheMaxSizeMB;
+    }
+    
+    public boolean isIndexCacheAutoCleanup() {
+        return indexCacheAutoCleanup;
+    }
+    
+    public void setIndexCacheAutoCleanup(boolean indexCacheAutoCleanup) {
+        this.indexCacheAutoCleanup = indexCacheAutoCleanup;
+    }
 
 
     /**

@@ -1,13 +1,17 @@
 package org.intellij.sdk.language;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiElement;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.WeakHashMap;
+import java.util.Collections;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -18,11 +22,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class HarbourFunctionUsageTracker {
     private static final Logger LOG = Logger.getInstance(HarbourFunctionUsageTracker.class);
 
-    // Map of function name to usage count across the project
-    private static final Map<Project, Map<String, AtomicInteger>> FUNCTION_USAGE = new ConcurrentHashMap<>();
+    // Use WeakHashMap to allow garbage collection of disposed projects
+    // Synchronized because WeakHashMap is not thread-safe
+    private static final Map<Project, Map<String, AtomicInteger>> FUNCTION_USAGE = 
+        Collections.synchronizedMap(new WeakHashMap<>());
 
-    // Map of function name to discovered status (true if found in project)
-    private static final Map<Project, Map<String, Boolean>> FUNCTION_STATUS = new ConcurrentHashMap<>();
+    // Use WeakHashMap to allow garbage collection of disposed projects
+    private static final Map<Project, Map<String, Boolean>> FUNCTION_STATUS = 
+        Collections.synchronizedMap(new WeakHashMap<>());
 
     // Threshold for considering a function as "frequently used"
     private static final int FREQUENCY_THRESHOLD = 3;
@@ -35,7 +42,7 @@ public class HarbourFunctionUsageTracker {
      */
     public static void recordFunctionUsage(Project project, String functionName) {
         // Skip if the project is disposed
-        if (project.isDisposed()) {
+        if (project == null || project.isDisposed()) {
             return;
         }
 
@@ -43,11 +50,29 @@ public class HarbourFunctionUsageTracker {
 
         // Get or create project map
         Map<String, AtomicInteger> projectUsage = FUNCTION_USAGE.computeIfAbsent(
-                project, p -> new ConcurrentHashMap<>());
+                project, p -> {
+                    // Register cleanup when project is disposed
+                    registerProjectCleanup(p);
+                    return new ConcurrentHashMap<>();
+                });
 
         // Increment usage count
         projectUsage.computeIfAbsent(normalizedName, k -> new AtomicInteger(0))
                 .incrementAndGet();
+    }
+    
+    /**
+     * Register cleanup for when project is disposed
+     */
+    private static void registerProjectCleanup(Project project) {
+        if (project != null && !project.isDisposed()) {
+            Disposer.register(project, new Disposable() {
+                @Override
+                public void dispose() {
+                    clearProject(project);
+                }
+            });
+        }
     }
 
     /**
@@ -58,8 +83,8 @@ public class HarbourFunctionUsageTracker {
      * @return true if the function is frequently used
      */
     public static boolean isFrequentlyUsed(Project project, String functionName) {
-        // Skip if the project is disposed
-        if (project.isDisposed()) {
+        // Skip if the project is null or disposed
+        if (project == null || project.isDisposed()) {
             return false;
         }
 
@@ -82,8 +107,8 @@ public class HarbourFunctionUsageTracker {
      * @param isLocal Whether it's actually a local function
      */
     public static void updateFunctionStatus(Project project, String functionName, boolean isLocal) {
-        // Skip if the project is disposed
-        if (project.isDisposed()) {
+        // Skip if the project is null or disposed
+        if (project == null || project.isDisposed()) {
             return;
         }
 
@@ -91,7 +116,11 @@ public class HarbourFunctionUsageTracker {
 
         // Get or create project map
         Map<String, Boolean> statusMap = FUNCTION_STATUS.computeIfAbsent(
-                project, p -> new ConcurrentHashMap<>());
+                project, p -> {
+                    // Register cleanup when project is disposed if not already registered
+                    registerProjectCleanup(p);
+                    return new ConcurrentHashMap<>();
+                });
 
         // Set status
         statusMap.put(normalizedName, isLocal);
@@ -106,8 +135,8 @@ public class HarbourFunctionUsageTracker {
      * @return true if the function has been found in the project, false otherwise
      */
     public static boolean isFunctionLocal(Project project, String functionName) {
-        // Skip if the project is disposed
-        if (project.isDisposed()) {
+        // Skip if the project is null or disposed
+        if (project == null || project.isDisposed()) {
             return false;
         }
 
@@ -140,6 +169,9 @@ public class HarbourFunctionUsageTracker {
      * @return Set of frequently used function names
      */
     public static Set<String> getFrequentlyUsedFunctions(Project project, int limit) {
+        if (project == null || project.isDisposed()) {
+            return new HashSet<>();
+        }
         Map<String, AtomicInteger> projectUsage = FUNCTION_USAGE.get(project);
         Set<String> result = new HashSet<>();
 

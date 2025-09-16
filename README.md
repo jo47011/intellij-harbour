@@ -10,13 +10,36 @@ the [MAKING-OF](./MAKING_OF.md).
 
 ## Table of Contents
 
-- [Features](#features)
 - [Installation](#installation)
+- [Features](#features)
 - [Settings](#settings)
-- [License](#license)
-- [VS Code Users](#vs-code-users)
 - [Roadmap](#roadmap--todos)
 - [Known Issues](#known-issues)
+- [VS Code Users](#vs-code-users)
+- [Building Plugin](#building-plugin)
+- [License](#license)
+
+## Installation
+
+1. Download the latest plugin from the <a href="https://github.com/jo47011/intellij-harbour/releases/" target="_blank">
+   releases page</a>
+2. In PyCharm: **Settings** → **Plugins** → ⚙️ → **Install Plugin from Disk...**
+3. Select the downloaded plugin file and restart PyCharm
+
+### Important: File Size Limits Configuration
+
+By default, PyCharm/IntelliJ has file size limits that may be too small for large Harbour projects. To work with files larger than 2.5 MB, you need to manually configure these limits:
+
+1. Go to **Help** → **Edit Custom Properties**
+2. Add the following lines to the file:
+   ```
+   idea.max.intellisense.filesize=102400
+   idea.max.content.load.filesize=204800
+   ```
+   These values set the limits to 100 MB for code assistance and 200 MB for file opening.
+3. Save the file and restart the IDE
+
+**Note:** These are IDE-level settings that must be configured manually and cannot be changed by plugins at runtime.
 
 ## Features
 
@@ -28,16 +51,9 @@ the [MAKING-OF](./MAKING_OF.md).
 - **[Structure View](#structure-view)** - Tree view of functions, procedures, and classes
 - **[Code Formatting](#code-formatting)** - Automatic code indentation and formatting
 - **[Linting](#linting)** - Real-time code analysis and error detection
-- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications
+- **[Debugging](#debugging)** - Full breakpoint debugging for console and GUI applications with database inspection
 - **[Automatic Error Monitoring](#automatic-error-monitoring)** - Clickable stack traces for runtime errors
 - **[Code Helpers](#code-helpers)** - Quick actions to improve code quality and reduce typing
-
-## Installation
-
-1. Download the latest plugin from the <a href="https://github.com/jo47011/intellij-harbour/releases/" target="_blank">
-   releases page</a>
-2. In PyCharm: **Settings** → **Plugins** → ⚙️ → **Install Plugin from Disk...**
-3. Select the downloaded plugin file and restart PyCharm
 
 ### Syntax Highlighting
 
@@ -168,14 +184,31 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
   <em>GUI debugging with PyCharm debugger and variable inspection</em>
 </p>
 
+### Database View
+
+During debugging, the plugin provides a Database View tool window that shows all currently open database workareas in your Harbour application. This allows you to inspect database state while stepping through code.
+
+<p align="center">
+  <img src="img/db-view.png" alt="Database View"/>
+  <br>
+  <em>Database workarea browser showing open databases during debugging</em>
+</p>
+
+**Features:**
+- View all open database workareas (Area 1, Area 2, etc.)
+- Inspect current record data and field values
+- See field structure (name, type, size)
+- Navigate between records using Previous/Next buttons
+- Jump to specific record numbers
+- View indexes and schema information
+- Refresh data to see updates
+
+The Database View automatically updates when you step through code that opens, closes, or modifies database records.
+
 ### Limitations
 
 - **Static Variables**: Static variables are not visible in the debugger due to Harbour VM
   compilation-unit scoping
-- **Complex Objects**: Limited support for complex object inspection
-- **Remote Debugging**: Currently supports local debugging only (debugging programs running on the
-  same machine). Remote debugging would allow debugging Harbour programs running on different
-  machines over a network connection.
 
 ### Automatic Error Monitoring
 
@@ -248,7 +281,69 @@ FUNCTION TestFunction()
 - Uses indentation from code style settings
 - Shows helpful notifications for errors or success
 
-## Building from Source
+## Settings
+
+Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
+
+<p align="center">
+  <img src="img/settings-tools.png" alt="Tools Settings"/>
+  <br>
+  <em>Configure Harbour tools, paths, and debugging options</em>
+</p>
+
+### Configuration Options
+
+- **Documentation URL** - Base URL for external Harbour documentation
+- **Debug Log Directory** - Location for debug logs (empty to disable)
+- **Build Output Directory** - Default `.hbmk` for build artifacts
+- **Auto-completion** - Enable while typing (default: Ctrl+Space only)
+- **Include Paths** - Add directories for #include file resolution
+- **Excluded Files** - Files to exclude from navigation and indexing
+- **Commands** - Customize code completion command list
+
+### Code Style Settings
+
+Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
+
+<p align="center">
+  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
+  <br>
+  <em>Configure indentation, spacing, and formatting rules</em>
+</p>
+
+### Color Scheme Settings
+
+Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
+
+<p align="center">
+  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings"/>
+  <br>
+  <em>Customize syntax highlighting colors and themes</em>
+</p>
+
+## Roadmap / TODOs
+
+- **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
+- **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
+  as well.
+- **Tests** - write tests.
+
+## Known Issues
+
+- **Ctrl+hover** should not show tooltip
+- **Ctrl-click**: Internal function navigation may jump to function definition instead of showing a declaration dialog
+  if the file w/ the function definition misses some include file or if the list of usages is very long.
+  Subsequent click on function declaration itself work.
+- most function/procedure features do not work yet for truncated keywords func/proce.
+
+## VS Code Users
+
+For Visual Studio Code users, there's an
+excellent <a href="https://github.com/APerricone/harbourCodeExtension" target="_blank">Harbour Code Extension</a>
+available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing
+valuable insights into Harbour language support implementation.
+
+## Building Plugin
 
 ### Prerequisites
 
@@ -297,72 +392,3 @@ This launches PyCharm with the plugin pre-installed for testing.
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
-
-## Settings
-
-Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
-
-<p align="center">
-  <img src="img/settings-tools.png" alt="Tools Settings"/>
-  <br>
-  <em>Configure Harbour tools, paths, and debugging options</em>
-</p>
-
-### Configuration Options
-
-- **Documentation URL** - Base URL for external Harbour documentation
-- **Debug Log Directory** - Location for debug logs (empty to disable)
-- **Build Output Directory** - Default `.hbmk` for build artifacts
-- **Auto-completion** - Enable while typing (default: Ctrl+Space only)
-- **Include Paths** - Add directories for #include file resolution
-- **Excluded Files** - Files to exclude from navigation and indexing
-- **Commands** - Customize code completion command list
-
-### Code Style Settings
-
-Customize code formatting: **Settings** → **Editor** → **Code Style** → **Harbour**
-
-<p align="center">
-  <img src="img/settings-codestyle.png" alt="Code Style Settings"/>
-  <br>
-  <em>Configure indentation, spacing, and formatting rules</em>
-</p>
-
-### Color Scheme Settings
-
-Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** → **Harbour**
-
-<p align="center">
-  <img src="img/settings-colorscheme.png" alt="Color Scheme Settings"/>
-  <br>
-  <em>Customize syntax highlighting colors and themes</em>
-</p>
-
-## VS Code Users
-
-For Visual Studio Code users, there's an
-excellent <a href="https://github.com/APerricone/harbourCodeExtension" target="_blank">Harbour Code Extension</a>
-available. This VS Code plugin was a great help and inspiration during the development of our PyCharm plugin, providing
-valuable insights into Harbour language support implementation.
-
-## Roadmap / TODOs
-
-- **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
-- **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
-  as well.
-- **Tests** - write tests.
-
-## Known Issues
-
-- **Ctrl+hover** should not show tooltip
-- **Ctrl-click**: sometimes on 1st click navigates to function directly instead of opening dialog. 2nd and further
-  clicks work fine.
-- most function/procedure features do not work yet for truncated keywords func/proce.
-- Internal function navigation may jump to function definition instead of showing a declaration dialog
-  if the file w/ the function definition misses some include file or if the list of usages is very long.
-  Subsequent click on function declaration itself work.
-
-
-
-
-

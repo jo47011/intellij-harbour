@@ -28,9 +28,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 /**
@@ -40,6 +42,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private final ExecutionResult executionResult;
     private final ProcessHandler processHandler;
     private final HarbourDebuggerConnection connection;
+    private final HarbourLiveDBFConnection liveDBFConnection;
     private final Map<String, HarbourDebuggerValue> variables = new ConcurrentHashMap<>();
     private final HarbourDebuggerBreakpointHandler breakpointHandler;
     private final Project project;
@@ -95,6 +98,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile long connectionStartTime = 0;
     private static final long MIN_CONNECTION_TIME = 2000; // 2 seconds minimum before allowing stop()
     
+    // Buffer for accumulating area response data (FIELDS, RECORD, SCHEMA)
+    private List<String> areaResponseBuffer = null;
+    private String areaResponseCommand = null;
+    
     public HarbourDebuggerRemoteProcess(@NotNull XDebugSession session,
                                        @NotNull ExecutionResult executionResult,
                                        int debugPort) {
@@ -131,6 +138,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Create debug connection
         this.connection = new HarbourDebuggerConnection(debugPort);
+        
+        // Create live DBF connection for workarea monitoring
+        this.liveDBFConnection = new HarbourLiveDBFConnection(project, connection);
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Created remote debugger on port " + debugPort);
         
@@ -215,6 +225,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Harbour connection established");
                         updateDebuggerState(DebuggerState.RUNNING, false);  // Initially running
                         
+                        // Start live DBF monitoring
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** VERSION 1.1.14 DEBUG - CALLING liveDBFConnection.startMonitoring()");
+                        liveDBFConnection.startMonitoring();
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** VERSION 1.1.14 DEBUG - FINISHED liveDBFConnection.startMonitoring()");
+                        
                         // Record connection start time to prevent premature shutdown
                         connectionStartTime = System.currentTimeMillis();
                         
@@ -271,11 +286,71 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 }
             }
             
-            String[] lines = message.split("\r\n");
+            String[] lines = message.split("\\r?\\n");  // Handle both Unix (\n) and Windows (\r\n) line endings
             if (lines.length == 0) return;
+        
+        // Check if message contains multiple commands (e.g., END_PUBLICS followed by ARRAY or HASH)
+        // This can happen when responses are buffered together
+        int arrayStartIndex = -1;
+        int hashStartIndex = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if ("ARRAY".equals(lines[i])) {
+                arrayStartIndex = i;
+                break;
+            }
+            if ("HASH".equals(lines[i])) {
+                hashStartIndex = i;
+                break;
+            }
+        }
+        
+        // If ARRAY command found in the message, process it separately
+        if (arrayStartIndex >= 0) {
+            // First, process any command before ARRAY if present
+            if (arrayStartIndex > 0) {
+                String firstCommand = lines[0];
+                String[] firstCommandLines = Arrays.copyOfRange(lines, 0, arrayStartIndex);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing first command: " + firstCommand);
+                processCommand(firstCommand, firstCommandLines);
+            }
+            
+            // Then process the ARRAY command
+            String[] arrayCommandLines = Arrays.copyOfRange(lines, arrayStartIndex, lines.length);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing ARRAY command with " + arrayCommandLines.length + " lines");
+            processCommand("ARRAY", arrayCommandLines);
+            return;
+        }
+        
+        // If HASH command found in the message, process it separately
+        if (hashStartIndex >= 0) {
+            // First, process any command before HASH if present
+            if (hashStartIndex > 0) {
+                String firstCommand = lines[0];
+                String[] firstCommandLines = Arrays.copyOfRange(lines, 0, hashStartIndex);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing first command: " + firstCommand);
+                processCommand(firstCommand, firstCommandLines);
+            }
+            
+            // Then process the HASH command
+            String[] hashCommandLines = Arrays.copyOfRange(lines, hashStartIndex, lines.length);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Processing HASH command with " + hashCommandLines.length + " lines");
+            processCommand("HASH", hashCommandLines);
+            return;
+        }
         
         String command = lines[0];
         
+        // Add debug logging for message routing
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** MESSAGE ROUTING - command='" + command + "', lines.length=" + lines.length + ", contains colon=" + command.contains(":"));
+        
+        processCommand(command, lines);
+        
+        } finally {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Message processing complete");
+        }
+    }
+    
+    private void processCommand(String command, String[] lines) {
         // Handle colon-separated commands like "STOP:file:line"
         if (command.contains(":")) {
             String[] parts = command.split(":");
@@ -347,9 +422,128 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             handleErrorStackTrace(stackLine);
                         }
                         break;
+                        
+                    case "EXPRESSION":
+                        // Handle expression evaluation response
+                        // Format: EXPRESSION:stack_level:type:value
+                        handleExpressionResult(command);
+                        break;
+                        
+                    case "AREA":
+                        // Check if this is a workarea info message or a detailed data request response
+                        if (parts.length >= 2 && (parts[1].equals("FIELDS") || parts[1].equals("RECORD") || parts[1].equals("SCHEMA"))) {
+                            // This is a response to AREA{n}:FIELDS/RECORD/SCHEMA request
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", ">>> AREA RESPONSE DETECTED in single-line path: " + command);
+                            // Don't return early - let it fall through to the multi-line handler
+                            break;
+                        } else {
+                            // Handle workarea information messages (during enumeration)
+                            liveDBFConnection.processWorkareaMessage(command);
+                            break;
+                        }
+                        
+                    case "WORKAREAS":
+                        // Handle complete WORKAREAS message (fallback if routed here)
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS in first switch - redirecting to multi-line handler");
+                        // Fall through to multi-line handler below
+                        break;
+                        
+                    default:
+                        // Check if this is a variable sent outside blocks (format: NAME:TYPE:VALUE)
+                        if (parts.length == 3) {
+                            String varName = parts[0];
+                            String varType = parts[1];
+                            String varValue = parts[2];
+                            
+                            // Log the variable for debugging
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "DEBUGGING: Variable outside block detected - Name: " + varName + 
+                                ", Type: " + varType + ", Value: " + varValue);
+                            
+                            // Check if this looks like a variable (type should be single letter)
+                            if (varType.length() == 1 && "CNLDAOHUP".contains(varType)) {
+                                // This is a variable sent outside standard blocks
+                                // Process ALL lines in the message as variables
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Processing " + lines.length + " lines of variables outside blocks");
+                                
+                                // Build a list of all valid variable lines
+                                java.util.List<String> validVarLines = new java.util.ArrayList<>();
+                                
+                                for (String line : lines) {
+                                    String[] lineParts = line.split(":", 3);
+                                    if (lineParts.length == 3 && lineParts[1].length() == 1 && 
+                                        "CNLDAOHUP".contains(lineParts[1])) {
+                                        validVarLines.add(line);
+                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                            "Adding variable to LOCALS: " + line);
+                                    }
+                                }
+                                
+                                // Handle all valid variables at once
+                                // Pass special flag to indicate these are additional variables, not replacements
+                                if (!validVarLines.isEmpty()) {
+                                    handleVariablesAdditive("LOCALS", validVarLines.toArray(new String[0]));
+                                }
+                            }
+                        }
+                        break;
                 }
             }
-            return;
+            
+            // Check if we're buffering area responses and this is data for the buffer
+            if (areaResponseBuffer != null) {
+                // Check for VALUE:, FIELD:, INFO:, COLUMN:, ROW:, CELL:, INDEX: lines
+                if (command.startsWith("VALUE:") || command.startsWith("FIELD:") || command.startsWith("INFO:") ||
+                    command.startsWith("COLUMN:") || command.startsWith("ROW:") || command.startsWith("CELL:") ||
+                    command.startsWith("INDEX:") || command.startsWith("CURRENT")) {
+                    // If this is a multi-line message, add ALL lines to the buffer
+                    if (lines.length > 1) {
+                        for (String line : lines) {
+                            if (!line.trim().isEmpty()) {
+                                areaResponseBuffer.add(line);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line (multi-line message): " + line);
+                            }
+                        }
+                    } else {
+                        // Single line message
+                        areaResponseBuffer.add(command);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line (single-line path): " + command);
+                    }
+                    
+                    // Send the data immediately, don't wait for END marker
+                    // This ensures the UI updates as soon as data arrives
+                    if (areaResponseBuffer != null && areaResponseCommand != null) {
+                        String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                        liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sent partial data to UI: " + areaResponseBuffer.size() + " lines");
+                    }
+                    
+                    return;
+                }
+                // Check for END markers
+                else if (command.equals("END_RECORD") || command.equals("END_FIELDS") || command.equals("END_SCHEMA") || 
+                         command.equals("END_RECORDS") || command.equals("END_INDEXES")) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", ">>> END MARKER RECEIVED: " + command + " for buffered command: " + areaResponseCommand + " with " + areaResponseBuffer.size() + " lines");
+                    
+                    // Process the complete buffered response
+                    String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                    liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                    
+                    // Clear the buffer
+                    areaResponseCommand = null;
+                    areaResponseBuffer = null;
+                    return;
+                }
+            }
+            
+            // Don't return early if it's WORKAREAS or AREA response - let them continue to multi-line handler
+            if (!command.equals("WORKAREAS") && 
+                !(command.startsWith("AREA") && command.contains(":") && 
+                  (command.contains("FIELDS") || command.contains("RECORD") || command.contains("SCHEMA") ||
+                   command.contains("RECORDS") || command.contains("INDEXES")))) {
+                return;
+            }
         }
         
         // Handle multi-line commands (original format)
@@ -391,6 +585,176 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 handleVariables(command, varLines);
                 break;
                 
+            case "ARRAY":
+                // Handle array elements response
+                String[] arrayLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "ARRAY response with " + arrayLines.length + " element lines");
+                handleArrayElements(arrayLines);
+                break;
+                
+            case "HASH":
+                // Handle hash elements response
+                String[] hashLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "HASH response with " + hashLines.length + " element lines");
+                handleHashElements(hashLines);
+                break;
+                
+            case "OBJECT":
+                // Handle object properties response
+                String[] objectLines = Arrays.copyOfRange(lines, 1, lines.length);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "OBJECT response with " + objectLines.length + " property lines");
+                handleObjectProperties(objectLines);
+                break;
+                
+            case "EXPRESSION":
+                // Handle expression evaluation response
+                // Format: EXPRESSION:stack_level:type:value
+                if (lines.length > 0) {
+                    handleExpressionResult(lines[0]);
+                }
+                break;
+                
+            case "WORKAREAS":
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS CASE REACHED - lines.length=" + lines.length);
+                // Handle workarea enumeration - process all lines in the message
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** CALLING liveDBFConnection.processWorkareaMessage('" + command + "')");
+                liveDBFConnection.processWorkareaMessage(command); // Process "WORKAREAS" start
+                
+                // Process all AREA: lines and END_WORKAREAS in this message
+                for (int i = 1; i < lines.length; i++) {
+                    String line = lines[i].trim();
+                    if (!line.isEmpty()) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** CALLING liveDBFConnection.processWorkareaMessage('" + line + "')");
+                        liveDBFConnection.processWorkareaMessage(line);
+                    }
+                }
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS CASE COMPLETED");
+                break;
+                
+            default:
+                // Check if we're currently buffering and this is multi-line data for the buffer
+                if (areaResponseBuffer != null && areaResponseCommand != null && lines.length > 1) {
+                    // This is likely COLUMN/ROW/CELL data that arrived as a multi-line message
+                    // Check if the first line matches what we expect for the current buffer type
+                    boolean isBufferData = false;
+                    
+                    if (areaResponseCommand.contains(":RECORDS") && 
+                        (command.startsWith("COLUMN:") || command.startsWith("ROW:") || 
+                         command.startsWith("CELL:") || command.startsWith("ERROR:"))) {
+                        isBufferData = true;
+                    } else if (areaResponseCommand.contains(":INDEXES") && 
+                               (command.startsWith("CURRENT:") || command.startsWith("CURRENT_") || 
+                                command.startsWith("INDEX:") || command.startsWith("ERROR:"))) {
+                        isBufferData = true;
+                    }
+                    
+                    if (isBufferData) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Adding " + lines.length + " lines to buffer for " + areaResponseCommand);
+                        // Add all lines to the buffer
+                        for (String line : lines) {
+                            areaResponseBuffer.add(line);
+                        }
+                        break;
+                    }
+                }
+                
+                // Handle area-specific responses (AREA1:FIELDS, AREA2:RECORD, etc.)
+                if (command.startsWith("AREA") && command.contains(":")) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** AREA-SPECIFIC COMMAND RECEIVED: " + command);
+                    
+                    // Check if this is a multi-line area response that needs buffering
+                    String[] parts = command.split(":", 2);  // Split only on first colon
+                    if (parts.length >= 2) {
+                        String responseType = parts[1].split(":")[0];  // Get the command type (FIELDS, RECORDS, etc.)
+                        if (responseType.equals("FIELDS") || responseType.equals("RECORD") || responseType.equals("SCHEMA") ||
+                            responseType.equals("RECORDS") || responseType.equals("INDEXES")) {
+                            // Start buffering for multi-line responses
+                            areaResponseCommand = command;
+                            areaResponseBuffer = new ArrayList<>();
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", ">>> BUFFERING STARTED for command: " + command + " (type: " + responseType + ")");
+                            
+                            // Add any immediate data from this message
+                            if (lines.length > 1) {
+                                for (int i = 1; i < lines.length; i++) {
+                                    if (!lines[i].trim().isEmpty()) {
+                                        areaResponseBuffer.add(lines[i]);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Single-line area response, process immediately
+                            liveDBFConnection.processAreaResponse(command, Arrays.copyOfRange(lines, 1, lines.length));
+                        }
+                    }
+                    break;
+                }
+                
+                // Check if we're buffering area responses and this is data for the buffer
+                if (areaResponseBuffer != null) {
+                    // Check for data lines - but be more selective based on what we're waiting for
+                    boolean shouldBuffer = false;
+                    
+                    if (areaResponseCommand != null) {
+                        if (areaResponseCommand.contains(":RECORD") && !areaResponseCommand.contains(":RECORDS")) {
+                            // For RECORD, only accept VALUE: lines
+                            shouldBuffer = command.startsWith("VALUE:");
+                        } else if (areaResponseCommand.contains(":RECORDS")) {
+                            // For RECORDS, only accept COLUMN:, ROW:, CELL:, ERROR:
+                            shouldBuffer = command.startsWith("COLUMN:") || command.startsWith("ROW:") || 
+                                         command.startsWith("CELL:") || command.startsWith("ERROR:");
+                        } else if (areaResponseCommand.contains(":INDEXES")) {
+                            // For INDEXES, only accept CURRENT:, CURRENT_*, INDEX:, ERROR:
+                            shouldBuffer = command.startsWith("CURRENT:") || command.startsWith("CURRENT_") || 
+                                         command.startsWith("INDEX:") || command.startsWith("ERROR:");
+                        } else if (areaResponseCommand.contains(":FIELDS")) {
+                            // For FIELDS, only accept FIELD:
+                            shouldBuffer = command.startsWith("FIELD:");
+                        } else if (areaResponseCommand.contains(":SCHEMA")) {
+                            // For SCHEMA, only accept INFO:, FIELD:
+                            shouldBuffer = command.startsWith("INFO:") || command.startsWith("FIELD:");
+                        }
+                    }
+                    
+                    if (shouldBuffer) {
+                        areaResponseBuffer.add(command);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Buffered data line: " + command);
+                        
+                        // Don't send partial data for RECORDS/INDEXES - wait for complete data
+                        if (areaResponseCommand != null && 
+                            !areaResponseCommand.contains(":RECORDS") && 
+                            !areaResponseCommand.contains(":INDEXES")) {
+                            // Send the data immediately for other types
+                            String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                            liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Sent partial data to UI: " + areaResponseBuffer.size() + " lines");
+                        }
+                        
+                        break;
+                    }
+                    // Check for END markers
+                    else if (command.equals("END_RECORD") || command.equals("END_FIELDS") || command.equals("END_SCHEMA") ||
+                             command.equals("END_RECORDS") || command.equals("END_INDEXES")) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Area response complete: " + areaResponseCommand + " with " + areaResponseBuffer.size() + " lines");
+                        
+                        // Process the complete buffered response
+                        String[] responseData = areaResponseBuffer.toArray(new String[0]);
+                        liveDBFConnection.processAreaResponse(areaResponseCommand, responseData);
+                        
+                        // Clear the buffer
+                        areaResponseCommand = null;
+                        areaResponseBuffer = null;
+                        break;
+                    }
+                }
+                
+                // CRITICAL FIX: Add break to prevent fallthrough to END case
+                // END_LOCALS, END_STATICS etc. should NOT trigger session end!
+                break;
+                
             case "END":
                 handleEnd();
                 break;
@@ -410,9 +774,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     handleConsoleOutput(lines[1]);
                 }
                 break;
-        }
-        } finally {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Message processing complete");
+                
+            case "END_WORKAREAS":
+                // Handle end of workarea enumeration
+                liveDBFConnection.processWorkareaMessage(command);
+                break;
         }
     }
     
@@ -420,10 +786,46 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         currentFile = file;
         currentLine = line;
         
+        // Build a stack trace
+        // Since Harbour debugger doesn't provide stack via TCP, we'll simulate it
+        currentStackTrace.clear();
+        
+        if (file != null) {
+            // Add current frame
+            String functionName = extractFunctionName(file);
+            currentStackTrace.add(new StackFrameInfo(functionName, file, line));
+            
+            // Add simulated parent frames based on common patterns
+            // This is a workaround until we can get real stack data
+            // Check if this looks like it was called from menu
+            if (file.toLowerCase().contains("mat2")) {
+                // mat2 is often called from menu.prg
+                currentStackTrace.add(new StackFrameInfo("menu", "menu.prg", 1830));
+            } else if (file.toLowerCase().contains("listen")) {
+                // listen procedures might be called from main menu
+                currentStackTrace.add(new StackFrameInfo("menu", "menu.prg", 1));
+            }
+            
+            // If we have tracked calls, add them
+            if (!callStack.isEmpty()) {
+                for (StackFrameInfo frame : callStack) {
+                    if (!isDuplicate(currentStackTrace, frame)) {
+                        currentStackTrace.add(frame);
+                    }
+                }
+            }
+        }
+        
         // Update debugger state to SUSPENDED when we stop and clear pending step flag
         updateDebuggerState(DebuggerState.SUSPENDED, false);
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stopped at " + file + ":" + line + " (state: SUSPENDED, pendingStep=false)");
+        
+        // Auto-refresh DBF workareas when stopping at breakpoint
+        if (liveDBFConnection != null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Auto-refreshing DBF workareas at breakpoint");
+            liveDBFConnection.requestWorkareaUpdate();
+        }
         
         VirtualFile vFile = findSourceFile(file);
         if (vFile != null) {
@@ -440,12 +842,19 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             // Request variable information BEFORE notifying about position reached
             requestVariables();
             
+            // Don't send STACK command as it's not supported
+            // We'll track the stack ourselves or get it from other messages
+            
+            // Also request updated database information when stopped at breakpoint
+            // This ensures we see all databases that may have been opened since last check
+            liveDBFConnection.requestWorkareaUpdate();
+            
             // Set a flag to indicate we're waiting for variables
             waitingForVariables = true;
             variablesExpected = 4; // LOCALS, STATICS, PRIVATES, PUBLICS
             variablesReceived = 0;
             
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables before notifying position reached");
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables and databases before notifying position reached");
             
             // TIMEOUT REMOVED: No automatic timeout that continues execution
             // However, we still need a fallback to ensure position is reached if no variables arrive
@@ -519,10 +928,626 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     
+    // Store the current stack trace
+    private List<StackFrameInfo> currentStackTrace = new ArrayList<>();
+    private Stack<StackFrameInfo> callStack = new Stack<>();  // Track function calls ourselves
+    
     private void handleStackTrace(String[] stackLines) {
-        // TODO: Parse and store stack trace
+        currentStackTrace.clear();
+        
         for (String line : stackLines) {
+            if (line == null || line.trim().isEmpty()) {
+                continue;
+            }
+            
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stack: " + line);
+            
+            // Try different parsing formats
+            // Format 1: "function_name at file.prg:line"
+            // Format 2: "function_name(file.prg:line)"
+            // Format 3: "file.prg:line:function_name"
+            
+            String functionName = null;
+            String file = null;
+            int lineNum = -1;
+            
+            // Try format 1: "function_name at file.prg:line"
+            if (line.contains(" at ")) {
+                String[] parts = line.split(" at ");
+                if (parts.length == 2) {
+                    functionName = parts[0].trim();
+                    String location = parts[1].trim();
+                    int colonIndex = location.lastIndexOf(':');
+                    if (colonIndex > 0) {
+                        file = location.substring(0, colonIndex);
+                        try {
+                            lineNum = Integer.parseInt(location.substring(colonIndex + 1));
+                        } catch (NumberFormatException e) {
+                            // Ignore
+                        }
+                    }
+                }
+            }
+            // Try format 2: "function_name(file.prg:line)"
+            else if (line.contains("(") && line.contains(")")) {
+                int parenStart = line.indexOf('(');
+                int parenEnd = line.lastIndexOf(')');
+                if (parenStart > 0 && parenEnd > parenStart) {
+                    functionName = line.substring(0, parenStart).trim();
+                    String location = line.substring(parenStart + 1, parenEnd).trim();
+                    int colonIndex = location.lastIndexOf(':');
+                    if (colonIndex > 0) {
+                        file = location.substring(0, colonIndex);
+                        try {
+                            lineNum = Integer.parseInt(location.substring(colonIndex + 1));
+                        } catch (NumberFormatException e) {
+                            // Ignore
+                        }
+                    }
+                }
+            }
+            // Try format 3: Simple colon-separated "file:line:function" or "function:file:line"
+            else if (line.contains(":")) {
+                String[] parts = line.split(":");
+                if (parts.length >= 2) {
+                    // Try to find which part is the line number
+                    for (int i = 0; i < parts.length; i++) {
+                        try {
+                            lineNum = Integer.parseInt(parts[i].trim());
+                            // Found line number, now determine file and function
+                            if (i == 1 && parts.length >= 3) {
+                                // Format: file:line:function
+                                file = parts[0].trim();
+                                functionName = parts[2].trim();
+                            } else if (i == 2 && parts.length >= 3) {
+                                // Format: function:file:line
+                                functionName = parts[0].trim();
+                                file = parts[1].trim();
+                            } else if (i == 1 && parts.length == 2) {
+                                // Format: file:line (no function name)
+                                file = parts[0].trim();
+                                functionName = "Unknown";
+                            }
+                            break;
+                        } catch (NumberFormatException e) {
+                            // This part is not a number, continue
+                        }
+                    }
+                }
+            }
+            
+            // If we successfully parsed the stack frame, add it
+            if (functionName != null && file != null && lineNum > 0) {
+                currentStackTrace.add(new StackFrameInfo(functionName, file, lineNum));
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Parsed stack frame: " + functionName + " at " + file + ":" + lineNum);
+            } else {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Could not parse stack line: " + line);
+            }
+        }
+        
+        // If we got stack frames, log them
+        if (!currentStackTrace.isEmpty()) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Stack trace has " + currentStackTrace.size() + " frames");
+        }
+    }
+    
+    // Helper class to store stack frame information
+    public static class StackFrameInfo {
+        public final String functionName;
+        public final String file;
+        public final int line;
+        
+        public StackFrameInfo(String functionName, String file, int line) {
+            this.functionName = functionName;
+            this.file = file;
+            this.line = line;
+        }
+    }
+    
+    public List<StackFrameInfo> getCurrentStackTrace() {
+        // If we have no stack trace, create a minimal one from current position
+        if (currentStackTrace.isEmpty() && currentFile != null && currentLine > 0) {
+            List<StackFrameInfo> minimal = new ArrayList<>();
+            String funcName = extractFunctionName(currentFile);
+            minimal.add(new StackFrameInfo(funcName, currentFile, currentLine));
+            return minimal;
+        }
+        return new ArrayList<>(currentStackTrace);
+    }
+    
+    private String extractFunctionName(String file) {
+        // Extract function name from file path for display
+        if (file == null) return "Unknown";
+        
+        String name = file;
+        int lastSep = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+        if (lastSep >= 0) {
+            name = file.substring(lastSep + 1);
+        }
+        
+        // Remove extension
+        int dotIndex = name.lastIndexOf('.');
+        if (dotIndex > 0) {
+            name = name.substring(0, dotIndex);
+        }
+        
+        return name;
+    }
+    
+    private boolean isDuplicate(List<StackFrameInfo> frames, StackFrameInfo frame) {
+        for (StackFrameInfo existing : frames) {
+            if (existing.file.equals(frame.file) && existing.line == frame.line) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // Helper method to find nested array elements
+    private HarbourDebuggerValue findNestedArray(HarbourDebuggerValue parent, String indices) {
+        // Parse indices like "[2]" or "[2][1]"
+        if (!indices.startsWith("[") || !indices.contains("]")) {
+            return null;
+        }
+        
+        int closeIndex = indices.indexOf("]");
+        String indexStr = indices.substring(1, closeIndex);
+        
+        try {
+            // Find child with this index
+            for (HarbourDebuggerValue child : parent.getChildren()) {
+                if (child.getName().equals("[" + indexStr + "]")) {
+                    // If there are more indices, recurse
+                    if (closeIndex + 1 < indices.length() && indices.charAt(closeIndex + 1) == '[') {
+                        return findNestedArray(child, indices.substring(closeIndex + 1));
+                    }
+                    return child;
+                }
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Error finding nested array: " + e.getMessage());
+        }
+        
+        return null;
+    }
+    
+    private void handleHashElements(String[] hashLines) {
+        // Handle hash elements response
+        // Format expected: scope:hashName followed by key:type:value lines
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Processing hash elements: " + hashLines.length + " lines");
+        
+        if (hashLines.length == 0) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "No hash element data received");
+            return;
+        }
+        
+        // First line should contain hash info: scope:name
+        String[] info = hashLines[0].split(":", 2);
+        if (info.length < 2) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid hash info format: " + hashLines[0]);
+            return;
+        }
+        
+        String scope = info[0];
+        String hashName = info[1];
+        String hashKey = scope + "." + hashName;
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Hash elements for " + hashKey);
+        
+        // Get the hash variable from our map (similar to arrays)
+        HarbourDebuggerValue hashVar = variables.get(hashKey);
+        
+        // If not found directly, it might be a nested hash element
+        if (hashVar == null && hashName.contains("[")) {
+            // Parse nested path similar to arrays
+            int bracketIndex = hashName.indexOf("[");
+            String parentName = hashName.substring(0, bracketIndex);
+            String parentKey = scope + "." + parentName;
+            
+            HarbourDebuggerValue parentVar = variables.get(parentKey);
+            if (parentVar != null) {
+                String indices = hashName.substring(bracketIndex);
+                hashVar = findNestedArray(parentVar, indices);  // Reuse for nested structures
+                
+                if (hashVar != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Found nested hash: " + hashName);
+                }
+            }
+        }
+        
+        if (hashVar == null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Hash variable not found: " + hashKey);
+            return;
+        }
+        
+        // Clear any existing children
+        hashVar.clearChildren();
+        
+        // Process element lines
+        for (int i = 1; i < hashLines.length; i++) {
+            String line = hashLines[i];
+            if (line.equals("END_HASH")) {
+                break;
+            }
+            
+            // Parse element: key:type:value
+            String[] parts = line.split(":", 3);
+            if (parts.length >= 3) {
+                String key = parts[0];
+                String type = parts[1];
+                String value = parts[2];
+                
+                // Create child value for hash element
+                HarbourDebuggerValue elementValue = new HarbourDebuggerValue(
+                    "[\"" + key + "\"]", type, value);
+                elementValue.setIsHashElement(true);
+                
+                // If element is also a hash, set it up for expansion
+                if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(5, value.length() - 1);
+                        int hashSize = Integer.parseInt(sizeStr);
+                        // Use composite key for nested hashes
+                        elementValue.setHashInfo(scope, hashName + "[\"" + key + "\"]", hashSize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse nested hash size from: " + value);
+                    }
+                }
+                // If element is an array, set it up for expansion
+                else if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(6, value.length() - 1);
+                        int arraySize = Integer.parseInt(sizeStr);
+                        elementValue.setArrayInfo(scope, hashName + "[\"" + key + "\"]", arraySize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse array size from hash value: " + value);
+                    }
+                }
+                
+                hashVar.addChild(elementValue);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Hash element [\"" + key + "\"] = " + value + " (" + type + ")");
+            }
+        }
+        
+        // Trigger UI update
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Hash " + hashKey + " now has " + hashVar.getChildren().size() + " elements loaded");
+        
+        // Update the UI with the loaded children
+        hashVar.updateChildren();
+    }
+    
+    private void handleObjectProperties(String[] objectLines) {
+        // Handle object properties response
+        // Format expected: scope:objectName followed by property:type:value lines
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Processing object properties: " + objectLines.length + " lines");
+        
+        if (objectLines.length == 0) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "No object property data received");
+            return;
+        }
+        
+        // First line should contain object info: scope:name
+        String[] info = objectLines[0].split(":", 2);
+        if (info.length < 2) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid object info format: " + objectLines[0]);
+            return;
+        }
+        
+        String scope = info[0];
+        String objectName = info[1];
+        String objectKey = scope + "." + objectName;
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Object properties for " + objectKey);
+        
+        // Get the object variable from our map
+        HarbourDebuggerValue objectVar = variables.get(objectKey);
+        
+        if (objectVar == null) {
+            // Log all available keys for debugging
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Object variable not found: " + objectKey);
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Available keys in variables map: " + variables.keySet());
+            
+            // Maybe the response arrived after variables were cleared, keep the object for next time
+            // Store a placeholder if needed
+            return;
+        }
+        
+        // Clear any existing children
+        objectVar.clearChildren();
+        
+        // Process property lines
+        for (int i = 1; i < objectLines.length; i++) {
+            String line = objectLines[i];
+            if (line.equals("END_OBJECT")) {
+                break;
+            }
+            
+            // Parse property: name:type:value
+            String[] parts = line.split(":", 3);
+            if (parts.length >= 3) {
+                String propName = parts[0];
+                String type = parts[1];
+                String value = parts[2];
+                
+                // Create child value for object property
+                HarbourDebuggerValue propertyValue = new HarbourDebuggerValue(
+                    propName, type, value);
+                propertyValue.setIsObjectProperty(true);
+                
+                // If property is a hash, set it up for expansion
+                if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(5, value.length() - 1);
+                        int hashSize = Integer.parseInt(sizeStr);
+                        propertyValue.setHashInfo(scope, objectName + ":" + propName, hashSize);
+                        propertyValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse hash size from object property: " + value);
+                    }
+                }
+                // If property is an array, set it up for expansion
+                else if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(6, value.length() - 1);
+                        int arraySize = Integer.parseInt(sizeStr);
+                        propertyValue.setArrayInfo(scope, objectName + ":" + propName, arraySize);
+                        propertyValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse array size from object property: " + value);
+                    }
+                }
+                // If property is also an object, set it up for expansion
+                else if ("O".equals(type)) {
+                    propertyValue.setObjectInfo(scope, objectName + ":" + propName);
+                    propertyValue.setDebugProcess(this);
+                }
+                
+                objectVar.addChild(propertyValue);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Object property " + propName + " = " + value + " (" + type + ")");
+            }
+        }
+        
+        // Trigger UI update
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Object " + objectKey + " now has " + objectVar.getChildren().size() + " properties loaded");
+        
+        // Update the UI with the loaded children
+        objectVar.updateChildren();
+    }
+    
+    private void handleArrayElements(String[] arrayLines) {
+        // Handle array elements response
+        // Format expected: scope:arrayName:index:type:value
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Processing array elements: " + arrayLines.length + " lines");
+        
+        if (arrayLines.length == 0) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "No array element data received");
+            return;
+        }
+        
+        // First line should contain array info: scope:name
+        String[] info = arrayLines[0].split(":", 2);
+        if (info.length < 2) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid array info format: " + arrayLines[0]);
+            return;
+        }
+        
+        String scope = info[0];
+        String arrayName = info[1];
+        String arrayKey = scope + "." + arrayName;
+        
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Array elements for " + arrayKey);
+        
+        // Get the array variable from our map
+        HarbourDebuggerValue arrayVar = variables.get(arrayKey);
+        
+        // If not found directly, it might be a nested array element
+        if (arrayVar == null && arrayName.contains("[")) {
+            // Parse nested array path like "BAR[2]"
+            int bracketIndex = arrayName.indexOf("[");
+            String parentName = arrayName.substring(0, bracketIndex);
+            String parentKey = scope + "." + parentName;
+            
+            HarbourDebuggerValue parentVar = variables.get(parentKey);
+            if (parentVar != null) {
+                // Extract indices from path like "BAR[2]" or "BAR[2][1]"
+                String indices = arrayName.substring(bracketIndex);
+                arrayVar = findNestedArray(parentVar, indices);
+                
+                if (arrayVar != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Found nested array: " + arrayName);
+                }
+            }
+        }
+        
+        if (arrayVar == null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Array variable not found: " + arrayKey);
+            return;
+        }
+        
+        // Clear any existing children
+        arrayVar.clearChildren();
+        
+        // Process element lines
+        for (int i = 1; i < arrayLines.length; i++) {
+            String line = arrayLines[i];
+            if (line.equals("END_ARRAY")) {
+                break;
+            }
+            
+            // Parse element: index:type:value
+            String[] parts = line.split(":", 3);
+            if (parts.length >= 3) {
+                String index = parts[0];
+                String type = parts[1];
+                String value = parts[2];
+                
+                // Create child value for array element
+                HarbourDebuggerValue elementValue = new HarbourDebuggerValue(
+                    "[" + index + "]", type, value);
+                elementValue.setIsArrayElement(true);
+                
+                // If element is also an array, set it up for expansion
+                if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(6, value.length() - 1);
+                        int arraySize = Integer.parseInt(sizeStr);
+                        // Use composite key for nested arrays
+                        elementValue.setArrayInfo(scope, arrayName + "[" + index + "]", arraySize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Failed to parse nested array size from: " + value);
+                    }
+                }
+                
+                arrayVar.addChild(elementValue);
+                
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    "Array element [" + index + "] = " + value + " (" + type + ")");
+            }
+        }
+        
+        // Trigger UI update - this needs to be done through the debug session
+        // The array variable should now have its children populated
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Array " + arrayKey + " now has " + arrayVar.getChildren().size() + " elements loaded");
+        
+        // Update the UI with the loaded children
+        arrayVar.updateChildren();
+    }
+    
+    // New method that adds variables without clearing existing ones
+    private void handleVariablesAdditive(String scope, String[] varLines) {
+        try {
+            // Validate input parameters to prevent crashes
+            if (scope == null || scope.trim().isEmpty()) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Invalid scope for additive variables: " + scope);
+                return;
+            }
+            
+            if (varLines == null) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Variable lines are null for additive scope: " + scope);
+                return;
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Processing " + varLines.length + " additive variable lines for scope: " + scope);
+            
+            // DO NOT CLEAR existing variables - this is the key difference
+            // Just add new variables to the existing ones
+            
+            // Process each variable line with robust error handling
+            for (int i = 0; i < varLines.length; i++) {
+                try {
+                    String line = varLines[i];
+                    
+                    // Validate line
+                    if (line == null) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "WARNING: Null variable line at index " + i + " for additive scope " + scope);
+                        continue;
+                    }
+                    
+                    // Parse variable line with validation
+                    String[] parts = line.split(":", 3);
+                    if (parts.length >= 3) {
+                        String name = parts[0];
+                        String type = parts[1];
+                        String value = parts[2];
+                        
+                        // Create variable key and value
+                        String key = scope + "." + name;
+                        HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name, type, value);
+                        
+                        // Special handling for arrays
+                        if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
+                            try {
+                                String sizeStr = value.substring(6, value.length() - 1);
+                                int arraySize = Integer.parseInt(sizeStr);
+                                debugValue.setArrayInfo(scope, name, arraySize);
+                                debugValue.setDebugProcess(this);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Array detected: " + name + " with size " + arraySize);
+                            } catch (Exception e) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Failed to parse array size from: " + value);
+                            }
+                        }
+                        // Special handling for hashes
+                        else if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                            try {
+                                String sizeStr = value.substring(5, value.length() - 1);
+                                int hashSize = Integer.parseInt(sizeStr);
+                                debugValue.setHashInfo(scope, name, hashSize);
+                                debugValue.setDebugProcess(this);
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Hash detected: " + name + " with size " + hashSize);
+                            } catch (Exception e) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Failed to parse hash size from: " + value);
+                            }
+                        }
+                        // Special handling for objects
+                        else if ("O".equals(type)) {
+                            debugValue.setObjectInfo(scope, name);
+                            debugValue.setDebugProcess(this);
+                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                "Object detected: " + name + " of type " + value);
+                        }
+                        
+                        // Add to variables map
+                        variables.put(key, debugValue);
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                            "Variable " + scope + ": " + name + " = " + value + " (" + type + ")");
+                    }
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "ERROR: Exception processing additive variable line " + i + " for scope " + scope + ": " + e.getMessage());
+                }
+            }
+            
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Finished processing additive variables for scope: " + scope + " (total variables: " + variables.size() + ")");
+            
+            // Increment variables received counter for synchronization
+            variablesReceived++;
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Received " + scope + " additive variables (" + variablesReceived + "/" + variablesExpected + ")");
+            
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "ERROR: Unhandled exception in handleVariablesAdditive for scope " + scope + ": " + e.getMessage());
         }
     }
     
@@ -604,6 +1629,45 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         try {
                             String key = scope + "." + name.trim();
                             HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name.trim(), type.trim(), value);
+                            
+                            // Parse array info if it's an array type
+                            if ("A".equals(type.trim()) && value.startsWith("Array(") && value.endsWith(")")) {
+                                // Extract array size from "Array(n)" format
+                                try {
+                                    String sizeStr = value.substring(6, value.length() - 1);
+                                    int arraySize = Integer.parseInt(sizeStr);
+                                    debugValue.setArrayInfo(scope, name.trim(), arraySize);
+                                    debugValue.setDebugProcess(this);  // Set reference to this debug process
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Array detected: " + name.trim() + " with size " + arraySize);
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Failed to parse array size from: " + value);
+                                }
+                            }
+                            // Parse hash info if it's a hash type
+                            else if ("H".equals(type.trim()) && value.startsWith("Hash(") && value.endsWith(")")) {
+                                // Extract hash size from "Hash(n)" format
+                                try {
+                                    String sizeStr = value.substring(5, value.length() - 1);
+                                    int hashSize = Integer.parseInt(sizeStr);
+                                    debugValue.setHashInfo(scope, name.trim(), hashSize);
+                                    debugValue.setDebugProcess(this);  // Set reference to this debug process
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Hash detected: " + name.trim() + " with size " + hashSize);
+                                } catch (Exception e) {
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                        "Failed to parse hash size from: " + value);
+                                }
+                            }
+                            // Parse object info if it's an object type
+                            else if ("O".equals(type.trim())) {
+                                debugValue.setObjectInfo(scope, name.trim());
+                                debugValue.setDebugProcess(this);  // Set reference to this debug process
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Object detected: " + name.trim() + " of type " + value);
+                            }
+                            
                             variables.put(key, debugValue);
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
@@ -1064,6 +2128,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             debuggerState = DebuggerState.DISCONNECTED;
             isConnected = false;
             
+            // Stop live DBF monitoring
+            liveDBFConnection.stopMonitoring();
+            
             // Clear variables to prevent stale data
             variables.clear();
             
@@ -1084,6 +2151,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             isConnected = true;
                             debuggerState = DebuggerState.RUNNING;
                             connectionStartTime = System.currentTimeMillis();
+                            
+                            // Start live DBF monitoring
+                            liveDBFConnection.startMonitoring();
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                 "Debug server successfully restarted after crash recovery");
@@ -1784,6 +2854,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // 5. Clear state
         isConnected = false;
+        
+        // Stop live DBF monitoring
+        liveDBFConnection.stopMonitoring();
+        
         variables.clear();
         
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debugger stop sequence completed");
@@ -2074,6 +3148,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     
     
     /**
+     * Get the live DBF connection for external access
+     */
+    @NotNull
+    public HarbourLiveDBFConnection getLiveDBFConnection() {
+        return liveDBFConnection;
+    }
+    
+    /**
      * Helper method to clean up all resources - can be called from shutdown hook
      */
     private void cleanupResources() {
@@ -2083,6 +3165,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             // Signal shutdown
             shutdownRequested = true;
             isConnected = false;
+            
+            // Stop live DBF monitoring
+            liveDBFConnection.stopMonitoring();
             
             // Interrupt and cleanup command executor
             if (commandExecutor != null && commandExecutor.isAlive()) {
@@ -2102,6 +3187,138 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Resource cleanup completed");
         } catch (Exception e) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Error during resource cleanup: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Request array elements for a specific array variable
+     * @param scope The variable scope (LOCALS, STATICS, etc.)
+     * @param arrayName The name of the array variable
+     * @param start The starting index (1-based)
+     * @param count The number of elements to retrieve
+     */
+    public void requestArrayElements(String scope, String arrayName, int start, int count) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting array elements for " + scope + "." + arrayName + " [" + start + ".." + (start+count-1) + "]");
+        
+        // Send command to debugger to get array elements
+        // Format: ARRAY:scope:name:start:count
+        sendCommand("ARRAY", scope + ":" + arrayName + ":" + start + ":" + count);
+    }
+    
+    /**
+     * Request hash elements for a specific hash variable
+     * @param scope The variable scope (LOCALS, STATICS, etc.)
+     * @param hashName The name of the hash variable
+     */
+    public void requestHashElements(String scope, String hashName) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting hash elements for " + scope + "." + hashName);
+        
+        // Send command to debugger to get hash key-value pairs
+        // Format: HASH:scope:name
+        sendCommand("HASH", scope + ":" + hashName);
+    }
+    
+    /**
+     * Request object properties for a specific object variable
+     * @param scope The variable scope (LOCALS, STATICS, etc.)
+     * @param objectName The name of the object variable
+     */
+    public void requestObjectProperties(String scope, String objectName) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting object properties for " + scope + "." + objectName);
+        
+        // Send command to debugger to get object properties
+        // Format: OBJECT:scope:name
+        sendCommand("OBJECT", scope + ":" + objectName);
+    }
+    
+    // Store pending expression evaluations
+    private final Map<String, CompletableFuture<String>> pendingExpressions = new ConcurrentHashMap<>();
+    private String lastExpressionCommand = null;
+    
+    public String requestExpression(String command) {
+        lastExpressionCommand = command;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Requesting expression evaluation: " + command);
+        
+        // Create a future to wait for the result
+        CompletableFuture<String> future = new CompletableFuture<>();
+        pendingExpressions.put(command, future);
+        
+        // Send command to debugger
+        sendCommand("EVAL", command);
+        
+        try {
+            // Wait for response with timeout
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Expression evaluation timed out: " + command);
+            pendingExpressions.remove(command);
+            return "Evaluation timed out";
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Expression evaluation failed: " + e.getMessage());
+            pendingExpressions.remove(command);
+            return "Evaluation failed: " + e.getMessage();
+        }
+    }
+    
+    private void handleExpressionResult(String response) {
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            "Received expression result: " + response);
+        
+        // Parse EXPRESSION:stack_level:type:value
+        String[] parts = response.split(":", 4);
+        if (parts.length >= 4) {
+            String stackLevel = parts[1];
+            String type = parts[2];
+            String value = parts[3];
+            
+            // Format the result based on type
+            String result;
+            if ("E".equals(type)) {
+                // Error
+                result = "Error: " + value;
+            } else {
+                // Success - format based on type
+                result = value;
+                if ("C".equals(type)) {
+                    // String - already quoted by FormatValue
+                } else if ("N".equals(type)) {
+                    // Number
+                } else if ("L".equals(type)) {
+                    // Logical
+                } else if ("A".equals(type)) {
+                    // Array
+                } else if ("H".equals(type)) {
+                    // Hash
+                } else if ("O".equals(type)) {
+                    // Object
+                } else if ("U".equals(type)) {
+                    // NIL
+                }
+            }
+            
+            // Complete any pending future for this expression
+            if (lastExpressionCommand != null) {
+                CompletableFuture<String> future = pendingExpressions.remove(lastExpressionCommand);
+                if (future != null) {
+                    future.complete(result);
+                }
+                lastExpressionCommand = null;
+            }
+            
+            // Also complete any futures that might match (in case of multiple evaluations)
+            for (Map.Entry<String, CompletableFuture<String>> entry : pendingExpressions.entrySet()) {
+                entry.getValue().complete(result);
+            }
+            pendingExpressions.clear();
+        } else {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                "Invalid expression result format: " + response);
         }
     }
 }

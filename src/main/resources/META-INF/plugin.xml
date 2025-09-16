@@ -23,6 +23,7 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
+    <!-- Database plugin dependency removed - using custom implementation -->
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
@@ -90,6 +91,9 @@
         <!-- Settings Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourSettings"/>
         
+        <!-- Index Cache Service for persistent caching -->
+        <projectService serviceImplementation="org.intellij.sdk.language.HarbourIndexCache" preload="true"/>
+        
         <!-- Breakpoint Properties Storage Service -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourBreakpointPropertiesStorage"/>
         
@@ -98,10 +102,22 @@
         <!-- <applicationService serviceImplementation="org.intellij.sdk.language.HarbourSaveListenerService"/> -->
         <projectService serviceImplementation="org.intellij.sdk.language.HarbourFunctionClassificationService"/>
         
+        <!-- FileBasedIndex for Fast Navigation - Now indexes both declarations AND usages -->
+        <fileBasedIndex implementation="org.intellij.sdk.language.index.HarbourFunctionIndex"/>
+        
+        <!-- Stub Indexes for Fast Navigation - Disabled until PSI elements are updated
+        <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourFunctionNameIndex"/>
+        <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourProcedureNameIndex"/>
+        <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourClassNameIndex"/>
+        -->
+        
         <!-- Startup Activities - Disabled to prevent startup hang
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourFunctionClassificationService$Initializer"/>
         <postStartupActivity implementation="org.intellij.sdk.language.HarbourReferenceService$HarbourReferenceServiceInitializer"/>
         -->
+        
+        <!-- Cache Initializer to ensure cache service starts early -->
+        <projectActivity implementation="org.intellij.sdk.language.HarbourCacheInitializer"/>
 
         <!-- Settings -->
         <applicationConfigurable parentId="tools" instance="org.intellij.sdk.language.HarbourApplicationSettingsConfigurable"
@@ -138,6 +154,15 @@
         
         <!-- Notification Group -->
         <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
+        
+        <!-- Database Support - Custom implementation for Community Edition -->
+        <!-- <com.intellij.database.dialect implementation="org.intellij.sdk.language.HarbourDBFDialect"/>
+        <com.intellij.database.dataSourceProvider implementation="org.intellij.sdk.language.HarbourDBFDataSourceProvider"/> -->
+        
+        <!-- Tool Window -->
+        <toolWindow id="Harbour DBF" secondary="true" anchor="bottom" 
+                    factoryClass="org.intellij.sdk.language.HarbourDBFToolWindow"
+                    icon="/icons/harbour.png"/>
     </extensions>
 
     <actions>
@@ -148,6 +173,13 @@
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ReformatCode"/>
             <add-to-group group-id="RefactoringMenu" anchor="after" relative-to-action="IntroduceVariable"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift L"/>
+        </action>
+        
+        <!-- DBF File Action -->
+        <action id="HarbourOpenDBFTool" class="org.intellij.sdk.language.HarbourDBFFileAction"
+                text="Open in DBF Tool" description="Open DBF file in Harbour DBF tool window">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
 
         <!-- Next Error Action -->

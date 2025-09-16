@@ -86,7 +86,7 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
     private static final Map<String, LintCache> cache = new ConcurrentHashMap<>();
     private static final Map<String, Long> lastLintTime = new ConcurrentHashMap<>();
     private static final long DEBOUNCE_DELAY_MS = 3000; // 3 second debounce for better performance
-    private static final int MAX_FILE_SIZE_FOR_REALTIME = 100000; // 100KB limit for real-time linting
+    // private static final int MAX_FILE_SIZE_FOR_REALTIME = Integer.MAX_VALUE; // No limit - commented out
     
     // Track files that have shown missing include notification
     private static final Set<String> notifiedMissingIncludes = new HashSet<>();
@@ -520,30 +520,7 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
             return null;
         }
 
-        // Check file size for performance
-        long fileSize = virtualFile.getLength();
-        if (fileSize > MAX_FILE_SIZE_FOR_REALTIME) {
-            HarbourLogger.log("HarbourLinter", "File too large for real-time linting: " + fileSize + " bytes (limit: " + MAX_FILE_SIZE_FOR_REALTIME + " bytes)");
-            
-            // For large files, do full linting if:
-            // 1. Save was triggered
-            // 2. File has obvious syntax errors
-            // Otherwise, only do quick syntax check
-            if (!isSaveTriggered && !hasObviousSyntaxError) {
-                HarbourLogger.log("HarbourLinter", "Large file: using quick syntax check only");
-                return new HarbourLintInfo(
-                    filePath,
-                    "QUICK_CHECK:" + fileContent,
-                    project,
-                    compilerPath,
-                    settings.getIncludePaths(),
-                    settings.getLintExtraOptions(),
-                    settings.getLintWarningLevel()
-                );
-            } else {
-                HarbourLogger.log("HarbourLinter", "Large file but important lint needed: doing full lint");
-            }
-        }
+        // No file size check - lint all files regardless of size
 
         // Check cache - but be more careful about when to use it
         long modificationStamp = virtualFile.getModificationStamp();

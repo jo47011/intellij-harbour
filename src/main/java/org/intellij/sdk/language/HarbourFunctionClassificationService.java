@@ -8,7 +8,6 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
-import com.intellij.openapi.startup.ProjectActivity;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
@@ -22,9 +21,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Service for classifying Harbour functions as internal (declared in project) or external.
@@ -55,7 +54,7 @@ public final class HarbourFunctionClassificationService {
     
     // Progress tracking
     private volatile int totalFiles = 0;
-    private volatile int processedFiles = 0;
+    private final AtomicInteger processedFiles = new AtomicInteger(0);
 
     // Project instance
     private final Project project;
@@ -79,6 +78,7 @@ public final class HarbourFunctionClassificationService {
             "iif", "if", "empty", "eof", "bof", "recno", "lastrec", "fcount",
             "fieldname", "fieldget", "fieldput", "dbf", "alias", "select",
             "use", "close", "append", "delete", "recall", "pack", "zap",
+            "cls", "dbcommit",
             "seek", "found", "skip", "goto", "gotop", "gobottom",
             "index", "reindex", "set", "get", "readmodal", "clear",
             "qout", "qqout", "devpos", "devout", "setpos", "row", "col",
@@ -124,9 +124,7 @@ public final class HarbourFunctionClassificationService {
         
         if (!initialized && !scanning) {
             // Lazy initialization - start scan on first use
-            ApplicationManager.getApplication().invokeLater(() -> {
-                initializeWithProgress();
-            });
+            ApplicationManager.getApplication().invokeLater(this::initializeWithProgress);
             // Return true (internal) as default during initialization
             // This prevents the "all functions light blue" issue during startup
             return !KNOWN_EXTERNAL_FUNCTIONS.contains(normalizedName);
@@ -154,28 +152,6 @@ public final class HarbourFunctionClassificationService {
         return !isInternalFunction(functionName);
     }
 
-    /**
-     * Get all internal function names.
-     * 
-     * @return Set of all internal function names
-     */
-    public Set<String> getAllInternalFunctions() {
-        Set<String> allInternal = ConcurrentHashMap.newKeySet();
-        allInternal.addAll(internalFunctions);
-        allInternal.addAll(internalProcedures);
-        allInternal.addAll(internalClasses);
-        allInternal.addAll(internalMethods);
-        return allInternal;
-    }
-
-    /**
-     * Get count of internal functions found.
-     * 
-     * @return Total count of internal functions, procedures, and classes
-     */
-    public int getInternalFunctionCount() {
-        return internalFunctions.size() + internalProcedures.size() + internalClasses.size();
-    }
 
     /**
      * Check if the service is initialized.
@@ -186,106 +162,7 @@ public final class HarbourFunctionClassificationService {
         return initialized;
     }
     
-    /**
-     * Check if the service is currently scanning.
-     * 
-     * @return true if scanning is in progress
-     */
-    public boolean isScanning() {
-        return scanning;
-    }
 
-    /**
-     * Add a function to the internal function registry.
-     * 
-     * @param functionName The function name to add
-     */
-    public void addInternalFunction(@NotNull String functionName) {
-        String normalizedName = functionName.toLowerCase();
-        internalFunctions.add(normalizedName);
-        HarbourLogger.log("FunctionClassification", "Added internal function: " + functionName);
-    }
-
-    /**
-     * Add a procedure to the internal procedure registry.
-     * 
-     * @param procedureName The procedure name to add
-     */
-    public void addInternalProcedure(@NotNull String procedureName) {
-        String normalizedName = procedureName.toLowerCase();
-        internalProcedures.add(normalizedName);
-        HarbourLogger.log("FunctionClassification", "Added internal procedure: " + procedureName);
-    }
-
-    /**
-     * Add a class to the internal class registry.
-     * 
-     * @param className The class name to add
-     */
-    public void addInternalClass(@NotNull String className) {
-        String normalizedName = className.toLowerCase();
-        internalClasses.add(normalizedName);
-        HarbourLogger.log("FunctionClassification", "Added internal class: " + className);
-    }
-
-    /**
-     * Add a method to the internal method registry.
-     * 
-     * @param methodName The method name to add
-     */
-    public void addInternalMethod(@NotNull String methodName) {
-        String normalizedName = methodName.toLowerCase();
-        internalMethods.add(normalizedName);
-        HarbourLogger.log("FunctionClassification", "Added internal method: " + methodName);
-    }
-
-    /**
-     * Remove a function from the internal function registry.
-     * 
-     * @param functionName The function name to remove
-     */
-    public void removeInternalFunction(@NotNull String functionName) {
-        String normalizedName = functionName.toLowerCase();
-        if (internalFunctions.remove(normalizedName)) {
-            HarbourLogger.log("FunctionClassification", "Removed internal function: " + functionName);
-        }
-    }
-
-    /**
-     * Remove a procedure from the internal procedure registry.
-     * 
-     * @param procedureName The procedure name to remove
-     */
-    public void removeInternalProcedure(@NotNull String procedureName) {
-        String normalizedName = procedureName.toLowerCase();
-        if (internalProcedures.remove(normalizedName)) {
-            HarbourLogger.log("FunctionClassification", "Removed internal procedure: " + procedureName);
-        }
-    }
-
-    /**
-     * Remove a class from the internal class registry.
-     * 
-     * @param className The class name to remove
-     */
-    public void removeInternalClass(@NotNull String className) {
-        String normalizedName = className.toLowerCase();
-        if (internalClasses.remove(normalizedName)) {
-            HarbourLogger.log("FunctionClassification", "Removed internal class: " + className);
-        }
-    }
-
-    /**
-     * Remove a method from the internal method registry.
-     * 
-     * @param methodName The method name to remove
-     */
-    public void removeInternalMethod(@NotNull String methodName) {
-        String normalizedName = methodName.toLowerCase();
-        if (internalMethods.remove(normalizedName)) {
-            HarbourLogger.log("FunctionClassification", "Removed internal method: " + methodName);
-        }
-    }
 
     /**
      * Scan a single file and update the internal function registries based on its current content.
@@ -352,14 +229,13 @@ public final class HarbourFunctionClassificationService {
         scanning = true;
         
         // Use Backgroundable task but with explicit progress dialog
-        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Harbour Plugin Initialization", true) {
+        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Harbour plugin initialization", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setText("Indexing Harbour functions and procedures...");
                 indicator.setIndeterminate(false);
-                ReadAction.run(() -> {
-                    scanProjectForInternalFunctionsWithProgress(indicator);
-                });
+                // Don't wrap the entire scan in ReadAction - it blocks UI updates!
+                scanProjectForInternalFunctionsWithProgress(indicator);
             }
             
             @Override
@@ -367,10 +243,7 @@ public final class HarbourFunctionClassificationService {
                 scanning = false;
                 HarbourLogger.log("FunctionClassification", "Project scan completed successfully");
                 // Force re-highlighting after scan complete
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    // Trigger re-highlighting by clearing the cache
-                    HarbourStandardFunctionCache.clearCache();
-                });
+                ApplicationManager.getApplication().invokeLater(HarbourStandardFunctionCache::clearCache);
             }
             
             @Override
@@ -389,24 +262,6 @@ public final class HarbourFunctionClassificationService {
         });
     }
     
-    /**
-     * Initialize the service by scanning the project for internal functions.
-     * This runs in the background to avoid blocking the UI.
-     */
-    private void initializeInBackground() {
-        if (initialized || scanning) {
-            return;
-        }
-        
-        scanning = true;
-
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            ReadAction.run(() -> {
-                scanProjectForInternalFunctions();
-                scanning = false;
-            });
-        });
-    }
 
     /**
      * Scan all Harbour files in the project to find internal function declarations with progress indication.
@@ -426,9 +281,10 @@ public final class HarbourFunctionClassificationService {
         indicator.setFraction(0.0);
 
         try {
-            // Get all Harbour files in the project
-            Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
-                    HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+            // Get all Harbour files in the project - needs ReadAction
+            Collection<VirtualFile> virtualFiles = ReadAction.compute(() -> 
+                FileTypeIndex.getFiles(HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project))
+            );
             
             // Filter out excluded files
             List<VirtualFile> filesToProcess = virtualFiles.stream()
@@ -436,7 +292,7 @@ public final class HarbourFunctionClassificationService {
                 .toList();
             
             totalFiles = filesToProcess.size();
-            processedFiles = 0;
+            processedFiles.set(0);
             
             if (totalFiles == 0) {
                 initialized = true;
@@ -458,29 +314,45 @@ public final class HarbourFunctionClassificationService {
                     return;
                 }
                 
-                processedFiles++;
-                double progress = (double) processedFiles / totalFiles;
+                // Log which file we're about to process
+                HarbourLogger.log("FunctionClassification", "Processing file " + (i+1) + "/" + totalFiles + ": " + virtualFile.getPath());
+                
+                // Update progress BEFORE processing to show which file we're working on
+                int processed = processedFiles.incrementAndGet();
+                double progress = (double) processed / totalFiles;
                 indicator.setFraction(progress);
-                indicator.setText("Scanning Harbour project files... (" + processedFiles + "/" + totalFiles + ")");
+                indicator.setText("Scanning Harbour project files... (" + processed + "/" + totalFiles + ")");
                 indicator.setText2(virtualFile.getName());
                 
-                // Force indicator update every 10 files
-                if (processedFiles % 10 == 0) {
-                    indicator.checkCanceled();
-                }
-
-                PsiFile psiFile = psiManager.findFile(virtualFile);
-                if (psiFile == null) continue;
-
-                // Process file content efficiently
-                String fileContent = psiFile.getText();
-                if (fileContent == null || fileContent.isEmpty()) continue;
+                // CRITICAL: Use ProgressManager to allow UI updates
+                ProgressManager.checkCanceled(); // This allows the UI to update!
                 
-                // Use optimized pattern matching
-                functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
-                proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
-                classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
-                methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
+                try {
+                    // Process file in smaller chunks to allow UI updates
+                    String fileContent = ApplicationManager.getApplication().runReadAction(
+                        (com.intellij.openapi.util.Computable<String>) () -> {
+                            PsiFile psiFile = psiManager.findFile(virtualFile);
+                            if (psiFile == null) {
+                                HarbourLogger.log("FunctionClassification", "Could not find PSI file for: " + virtualFile.getName());
+                                return null;
+                            }
+                            return psiFile.getText();
+                        });
+                    
+                    if (fileContent == null || fileContent.isEmpty()) {
+                        HarbourLogger.log("FunctionClassification", "Empty or null content for: " + virtualFile.getName());
+                        continue;
+                    }
+                    
+                    // Process patterns outside of read action
+                    functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
+                    proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
+                    classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
+                    methodsFound += findAndAddMatches(fileContent, METHOD_PATTERN, internalMethods, "METHOD", virtualFile.getName());
+                } catch (Exception e) {
+                    HarbourLogger.log("FunctionClassification", "Error processing file " + virtualFile.getName() + ": " + e.getMessage());
+                    // Continue with next file
+                }
             }
 
             // Mark as initialized
@@ -495,7 +367,7 @@ public final class HarbourFunctionClassificationService {
             
             HarbourLogger.log("FunctionClassification", 
                     String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
-                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
+                            duration.toMillis(), processedFiles.get(), functionsFound, proceduresFound, classesFound, methodsFound));
             
             HarbourLogger.log("FunctionClassification", String.format("Service initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
                     functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
@@ -525,84 +397,12 @@ public final class HarbourFunctionClassificationService {
         }
         return found;
     }
-    
-    /**
-     * Scan all Harbour files in the project to find internal function declarations.
-     * This method must be called within a read action.
-     */
-    private void scanProjectForInternalFunctions() {
-        if (initialized) {
-            return;
-        }
-
-        Instant start = Instant.now();
-        HarbourLogger.log("FunctionClassification", "Starting project scan for internal functions");
-
-        try {
-            // Get all Harbour files in the project
-            Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
-                    HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
-            
-            // Filter out excluded files
-            List<VirtualFile> filesToProcess = virtualFiles.stream()
-                .filter(file -> !HarbourFileUtils.isFileExcluded(project, file))
-                .toList();
-            
-            totalFiles = filesToProcess.size();
-            processedFiles = 0;
-            
-            if (totalFiles == 0) {
-                initialized = true;
-                return;
-            }
-
-            PsiManager psiManager = PsiManager.getInstance(project);
-            int functionsFound = 0;
-            int proceduresFound = 0;
-            int classesFound = 0;
-            int methodsFound = 0;
-            
-            for (VirtualFile virtualFile : filesToProcess) {
-                processedFiles++;
-
-                PsiFile psiFile = psiManager.findFile(virtualFile);
-                if (psiFile == null) continue;
-
-                // Process file content efficiently
-                String fileContent = psiFile.getText();
-                if (fileContent == null || fileContent.isEmpty()) continue;
-                
-                // Use optimized pattern matching
-                functionsFound += findAndAddMatches(fileContent, FUNCTION_PATTERN, internalFunctions, "FUNCTION", virtualFile.getName());
-                proceduresFound += findAndAddMatches(fileContent, PROCEDURE_PATTERN, internalProcedures, "PROCEDURE", virtualFile.getName());
-                classesFound += findAndAddMatches(fileContent, CLASS_PATTERN, internalClasses, "CLASS", virtualFile.getName());
-            }
-
-            // Mark as initialized
-            initialized = true;
-
-            Instant end = Instant.now();
-            Duration duration = Duration.between(start, end);
-            
-            HarbourLogger.log("FunctionClassification", 
-                    String.format("Project scan completed in %d ms. Scanned %d files, found %d functions, %d procedures, %d classes, %d methods",
-                            duration.toMillis(), processedFiles, functionsFound, proceduresFound, classesFound, methodsFound));
-            
-            HarbourLogger.log("FunctionClassification", String.format("Service initialized: %d functions, %d procedures, %d classes, %d methods in %d ms",
-                    functionsFound, proceduresFound, classesFound, methodsFound, duration.toMillis()));
-
-        } catch (Exception e) {
-            HarbourLogger.error("FunctionClassification", "Error during project scan for internal functions: " + e.getMessage());
-            HarbourLogger.log("FunctionClassification", "Error during project scan: " + e.getMessage());
-        }
-    }
-    
 
     /**
      * Initializer for the service that runs on project startup.
      * DISABLED - Now using lazy initialization to prevent startup hang.
      */
-    public static class Initializer implements StartupActivity.Background {
+    public static class Initializer implements StartupActivity.DumbAware {
         @Override
         public void runActivity(@NotNull Project project) {
             // DISABLED - Service now initializes lazily on first use
@@ -610,3 +410,4 @@ public final class HarbourFunctionClassificationService {
         }
     }
 }
+

@@ -58,6 +58,7 @@ public class HarbourSettingsConfigurable implements Configurable {
     
     // Navigation settings components
     private JSpinner myMaxNavigationResultsSpinner;
+    private JSpinner myMaxGridPreloadResultsSpinner;
 
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
@@ -146,12 +147,12 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridx = 0;
         constraints.gridy = 4;
         constraints.gridwidth = 2;
-        JLabel maxNavResultsLabel = new JLabel("Max preload results:");
+        JLabel maxNavResultsLabel = new JLabel("Navigation - Max preload results:");
         generalPanel.add(maxNavResultsLabel, constraints);
         
         // Explanation below the label
         constraints.gridy = 5;
-        JLabel navResultsExplanation = new JLabel("<html><i>Number of results to show before 'Load All' button appears</i></html>");
+        JLabel navResultsExplanation = new JLabel("<html><i>Number of results to show in navigation before 'Load All' button appears</i></html>");
         navResultsExplanation.setFont(navResultsExplanation.getFont().deriveFont(Font.ITALIC));
         generalPanel.add(navResultsExplanation, constraints);
         
@@ -160,12 +161,33 @@ public class HarbourSettingsConfigurable implements Configurable {
         constraints.gridwidth = 1;
         SpinnerModel navResultsModel = new SpinnerNumberModel(20, 10, 500, 10);
         myMaxNavigationResultsSpinner = new JSpinner(navResultsModel);
-        myMaxNavigationResultsSpinner.setToolTipText("Initial results to show before 'Load All' button appears");
+        myMaxNavigationResultsSpinner.setToolTipText("Initial results to show in navigation before 'Load All' button appears");
         generalPanel.add(myMaxNavigationResultsSpinner, constraints);
+
+        // Grid view preload results limit
+        constraints.gridx = 0;
+        constraints.gridy = 7;
+        constraints.gridwidth = 2;
+        JLabel maxGridResultsLabel = new JLabel("Grid View - Max preload results:");
+        generalPanel.add(maxGridResultsLabel, constraints);
+        
+        // Explanation below the label
+        constraints.gridy = 8;
+        JLabel gridResultsExplanation = new JLabel("<html><i>Number of records to preload in DBF grid view</i></html>");
+        gridResultsExplanation.setFont(gridResultsExplanation.getFont().deriveFont(Font.ITALIC));
+        generalPanel.add(gridResultsExplanation, constraints);
+        
+        // Spinner on next line
+        constraints.gridy = 9;
+        constraints.gridwidth = 1;
+        SpinnerModel gridResultsModel = new SpinnerNumberModel(100, 1, 10000, 1);
+        myMaxGridPreloadResultsSpinner = new JSpinner(gridResultsModel);
+        myMaxGridPreloadResultsSpinner.setToolTipText("Number of records to preload in DBF grid view");
+        generalPanel.add(myMaxGridPreloadResultsSpinner, constraints);
 
         // Add spacer to general panel
         constraints.gridx = 0;
-        constraints.gridy = 7;
+        constraints.gridy = 10;
         constraints.weighty = 1.0;
         constraints.gridwidth = 2;
         constraints.fill = GridBagConstraints.BOTH;
@@ -716,7 +738,8 @@ public class HarbourSettingsConfigurable implements Configurable {
                 settings.getLintWarningLevel() != (Integer) myLintWarningLevelSpinner.getValue() ||
                 !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText()) ||
                 !settings.getLinterExclusionComment().equals(myLinterExclusionCommentField.getText()) ||
-                settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue();
+                settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue() ||
+                settings.getMaxGridPreloadResults() != (Integer) myMaxGridPreloadResultsSpinner.getValue();
     }
 
     @Override
@@ -748,6 +771,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         
         // Save navigation settings
         settings.setMaxNavigationResults((Integer) myMaxNavigationResultsSpinner.getValue());
+        settings.setMaxGridPreloadResults((Integer) myMaxGridPreloadResultsSpinner.getValue());
 
         // Notify HarbourReferenceService to update exclusions
         HarbourReferenceService service = HarbourReferenceService.getInstance(myProject);
@@ -812,6 +836,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         
         // Load navigation settings
         myMaxNavigationResultsSpinner.setValue(settings.getMaxNavigationResults());
+        myMaxGridPreloadResultsSpinner.setValue(settings.getMaxGridPreloadResults());
 
         // Default scan path to the project base path
         String defaultScanPath = myProject.getBasePath();
