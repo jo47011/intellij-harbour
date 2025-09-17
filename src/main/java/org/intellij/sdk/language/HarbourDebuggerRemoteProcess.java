@@ -68,9 +68,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private final Thread commandExecutor;
     private volatile boolean shutdownRequested = false;
     
-    // Command throttling settings - tuned for optimal stability
-    private static final long MIN_COMMAND_INTERVAL = 200; // Minimum ms between commands
-    private static final long NEXT_COMMAND_DELAY = 350;   // Extra delay for NEXT commands
+    // Command throttling settings - optimized for faster stepping
+    private static final long MIN_COMMAND_INTERVAL = 50;  // Minimum ms between commands (reduced from 200)
+    private static final long NEXT_COMMAND_DELAY = 100;   // Extra delay for NEXT commands (reduced from 350)
     
     // Debugger state management - prevents rapid command execution
     public enum DebuggerState {
@@ -2936,6 +2936,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     /**
+     * Check if the debugger is ready to accept breakpoint commands
+     * Breakpoints can be sent anytime when connected, regardless of state
+     */
+    public boolean canAcceptBreakpoints() {
+        return isConnected && connection != null && connection.isConnected();
+    }
+    
+    /**
      * TEST METHOD: Generate a realistic Harbour debugging error for console logging verification
      * This simulates common debugging errors that could occur during real debugging sessions
      */
@@ -3084,8 +3092,8 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         while (!shutdownRequested) {
             try {
-                // Wait for a command with timeout
-                DebugCommand cmd = commandQueue.poll(200, TimeUnit.MILLISECONDS);
+                // Wait for a command with timeout - reduced for faster response
+                DebugCommand cmd = commandQueue.poll(50, TimeUnit.MILLISECONDS);
                 
                 if (cmd == null) {
                     continue;
@@ -3099,14 +3107,25 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     continue;
                 }
                 
-                // Calculate required delay
+                // Calculate required delay - optimize for step commands
                 long now = System.currentTimeMillis();
                 long timeSinceLastCommand = now - lastExecutionTime;
                 long requiredDelay = MIN_COMMAND_INTERVAL;
                 
-                // Extra delay for consecutive NEXT commands
+                // Check if this is a step command (NEXT, STEP, OUT)
+                boolean isStepCommand = "NEXT".equals(cmd.command) || 
+                                       "STEP".equals(cmd.command) || 
+                                       "OUT".equals(cmd.command);
+                
+                // Only apply extra delay for consecutive NEXT commands
                 if ("NEXT".equals(cmd.command) && "NEXT".equals(lastCommand)) {
                     requiredDelay = NEXT_COMMAND_DELAY;
+                }
+                
+                // Skip throttling for step commands if switching between different step types
+                // This allows fast transitions between STEP, NEXT, and OUT
+                if (isStepCommand && lastCommand != null && !cmd.command.equals(lastCommand)) {
+                    requiredDelay = 20; // Minimal delay for different step commands
                 }
                 
                 // Apply throttling if needed

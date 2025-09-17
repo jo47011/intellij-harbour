@@ -63,9 +63,10 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             // Only send enabled breakpoints to remote debugger
             if (isRemoteDebugger && isEnabled) {
                 HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
-                if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                // Use the new canAcceptBreakpoints method for more reliable checking
+                if (remoteProcess.canAcceptBreakpoints()) {
                     HarbourLogger.log(project, "HarbourDebugger",
-                            "Connection is active, sending breakpoint immediately");
+                            "Connection is active, sending breakpoint immediately during runtime");
                     String fileName = breakpoint.getSourcePosition().getFile().getName();
                     
                     // Build breakpoint command with conditional support following harbourCodeExtension protocol
@@ -172,11 +173,14 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
             // Remove breakpoint from remote debugger if using remote debugging
             if (isRemoteDebugger) {
                 HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
-                if (remoteProcess.getConnection() != null && remoteProcess.getConnection().isConnected()) {
+                // Use the new canAcceptBreakpoints method for more reliable checking
+                if (remoteProcess.canAcceptBreakpoints()) {
                     String fileName = breakpoint.getSourcePosition().getFile().getName();
                     // Use harbourCodeExtension protocol
                     debugProcess.sendCommand("BREAKPOINT");
                     debugProcess.sendCommand("-:" + fileName + ":" + line);
+                    HarbourLogger.log(project, "HarbourDebugger",
+                            "Removed breakpoint during runtime: " + fileName + ":" + line);
                 }
             }
         }

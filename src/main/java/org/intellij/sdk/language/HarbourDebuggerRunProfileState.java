@@ -9,6 +9,8 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.filters.TextConsoleBuilder;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.process.OSProcessHandler;
+import com.intellij.execution.process.ProcessAdapter;
+import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.ConsoleView;
@@ -53,6 +55,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     private final Project project;
     private String originalWorkingDir; // Store original working directory for GUI executable launch
     private boolean isDebugMode = false; // Track whether we're running in debug vs run mode
+    private volatile Thread errorMonitorThread; // Store error monitor thread for cleanup
 
     public HarbourDebuggerRunProfileState(ExecutionEnvironment env,
                                           HarbourDebuggerRunConfig runConfig) {
@@ -1594,6 +1597,23 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Attach console immediately after process creation to ensure no output is lost
         console.attachToProcess(processHandler);
         
+        // Add process termination listener to clean up error monitor thread
+        processHandler.addProcessListener(new ProcessAdapter() {
+            @Override
+            public void processTerminated(@NotNull ProcessEvent event) {
+                if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger", "Process terminated, stopping error monitor thread");
+                    errorMonitorThread.interrupt();
+                    try {
+                        errorMonitorThread.join(1000); // Wait up to 1 second for thread to stop
+                    } catch (InterruptedException e) {
+                        // Ignore
+                    }
+                    errorMonitorThread = null;
+                }
+            }
+        });
+        
         // Set the console in HarbourLogger
         HarbourLogger.setConsole(console);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled", HarbourLogger.LogLevel.DEBUG);
@@ -2129,6 +2149,19 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         errorMonitor.setDaemon(true);
         errorMonitor.setName("Harbour-Error-Monitor");
+        
+        // Stop any existing error monitor thread before starting a new one
+        if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
+            HarbourLogger.log(project, "HarbourDebugger", "Stopping existing error monitor thread");
+            errorMonitorThread.interrupt();
+            try {
+                errorMonitorThread.join(1000); // Wait up to 1 second for thread to stop
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }
+        
+        errorMonitorThread = errorMonitor;
         errorMonitor.start();
         
         HarbourLogger.log(project, "HarbourDebugger", "Error file monitor started successfully");
