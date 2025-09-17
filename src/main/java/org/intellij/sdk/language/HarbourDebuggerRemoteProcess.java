@@ -68,9 +68,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private final Thread commandExecutor;
     private volatile boolean shutdownRequested = false;
     
-    // Command throttling settings - optimized for faster stepping
-    private static final long MIN_COMMAND_INTERVAL = 50;  // Minimum ms between commands (reduced from 200)
-    private static final long NEXT_COMMAND_DELAY = 100;   // Extra delay for NEXT commands (reduced from 350)
+    // Command throttling settings - highly optimized for maximum speed
+    private static final long MIN_COMMAND_INTERVAL = 10;  // Minimum ms between commands (reduced from 50)
+    private static final long NEXT_COMMAND_DELAY = 20;    // Extra delay for NEXT commands (reduced from 100)
     
     // Debugger state management - prevents rapid command execution
     public enum DebuggerState {
@@ -896,6 +896,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             
                             getSession().positionReached(suspendContext);
                             
+                            // Auto-open Frames/Variables tab when hitting breakpoint
+                            try {
+                                getSession().showExecutionPoint();
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Auto-opened Frames/Variables tab on breakpoint (fallback)");
+                            } catch (Exception e) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Failed to auto-open debug tabs: " + e.getMessage());
+                            }
+                            
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended via fallback - program will wait indefinitely");
                         });
                     }
@@ -921,6 +931,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     "Calling positionReached without source position for " + file + ":" + line);
                 
                 getSession().positionReached(suspendContext);
+                
+                // Auto-open Frames/Variables tab when hitting breakpoint
+                try {
+                    getSession().showExecutionPoint();
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Auto-opened Frames/Variables tab on breakpoint (no source)");
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Failed to auto-open debug tabs: " + e.getMessage());
+                }
                 
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended (no source file found)");
             });
@@ -1795,6 +1815,20 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                     // Wrap in additional try-catch to detect crashes
                                     try {
                                         getSession().positionReached(suspendContext);
+                                        
+                                        // Auto-open Frames/Variables tab when hitting breakpoint
+                                        ApplicationManager.getApplication().invokeLater(() -> {
+                                            try {
+                                                // Show the debugger content and select the Frames tab
+                                                getSession().showExecutionPoint();
+                                                // The Variables tab is typically shown together with Frames
+                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                    "Auto-opened Frames/Variables tab on breakpoint");
+                                            } catch (Exception e) {
+                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                    "Failed to auto-open debug tabs: " + e.getMessage());
+                                            }
+                                        });
                                     } catch (Exception positionReachedException) {
                                         HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                             "CRASH DETECTED: Exception during positionReached: " + positionReachedException.getMessage());
@@ -3092,8 +3126,8 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         while (!shutdownRequested) {
             try {
-                // Wait for a command with timeout - reduced for faster response
-                DebugCommand cmd = commandQueue.poll(50, TimeUnit.MILLISECONDS);
+                // Wait for a command with timeout - minimal for maximum speed
+                DebugCommand cmd = commandQueue.poll(10, TimeUnit.MILLISECONDS);
                 
                 if (cmd == null) {
                     continue;
@@ -3125,7 +3159,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 // Skip throttling for step commands if switching between different step types
                 // This allows fast transitions between STEP, NEXT, and OUT
                 if (isStepCommand && lastCommand != null && !cmd.command.equals(lastCommand)) {
-                    requiredDelay = 20; // Minimal delay for different step commands
+                    requiredDelay = 5; // Almost no delay for different step commands
+                }
+                
+                // For step commands, use minimal delays for maximum speed
+                if (isStepCommand) {
+                    requiredDelay = Math.min(requiredDelay, 10); // Cap at 10ms for any step command
                 }
                 
                 // Apply throttling if needed
