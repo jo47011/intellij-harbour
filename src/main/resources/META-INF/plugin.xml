@@ -105,6 +105,9 @@
         <!-- FileBasedIndex for Fast Navigation - Now indexes both declarations AND usages -->
         <fileBasedIndex implementation="org.intellij.sdk.language.index.HarbourFunctionIndex"/>
         
+        <!-- FileBasedIndex for #define navigation -->
+        <fileBasedIndex implementation="org.intellij.sdk.language.index.HarbourDefineIndex"/>
+        
         <!-- Stub Indexes for Fast Navigation - Disabled until PSI elements are updated
         <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourFunctionNameIndex"/>
         <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourProcedureNameIndex"/>

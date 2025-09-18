@@ -13,11 +13,6 @@
 - db viewer
   - dbf file open in project explorer, right click => not available
 
-- debugger
-  - setting bp during runtime (important) 
-  - stepping very slow
-  - when hitting breakpoint open tab: Frames|Variables
-
 indentation:
 - endif return not unindented
 

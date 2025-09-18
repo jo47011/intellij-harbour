@@ -129,6 +129,37 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
         return false;
     }
+    
+    /**
+     * Check if an identifier is the name of a class in a CLASS declaration line
+     *
+     * @param file The containing file
+     * @param element The element to check
+     * @param identifierName The name of the identifier
+     * @return True if this is a class name in a CLASS declaration
+     */
+    private boolean isClassDeclarationName(PsiFile file, PsiElement element, String identifierName) {
+        String lineText = getLineText(file, element);
+        if (lineText == null) {
+            return false;
+        }
+
+        // Use regex to find the class name
+        Pattern pattern = Pattern.compile("(?i)CLASS\\s+(\\w+)");
+        Matcher matcher = pattern.matcher(lineText);
+
+        if (matcher.find()) {
+            // Group 1 contains the class name
+            String className = matcher.group(1);
+            // Only return true if this is the actual class name
+            if (className != null && identifierName.equalsIgnoreCase(className)) {
+                HarbourLogger.log(COMPONENT, "Identified as class name in declaration: " + identifierName);
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * Check if an identifier is a function call based on presence of parentheses
@@ -223,6 +254,50 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             if (nextSibling != null) {
                 // Found the function/procedure name, use that instead
                 HarbourLogger.log(COMPONENT, "Found identifier after keyword: " + nextSibling.getText());
+                element = nextSibling;
+            }
+        }
+        
+        // Special case: If we're clicking on CLASS keyword,
+        // try to get the identifier that follows
+        if (element instanceof LeafPsiElement &&
+                ((LeafPsiElement) element).getElementType() == HarbourTypes.CLASS) {
+
+            HarbourLogger.log(COMPONENT, "Found CLASS keyword, looking for class name identifier");
+
+            // Find the identifier that follows this keyword
+            PsiElement nextSibling = element.getNextSibling();
+            while (nextSibling != null &&
+                    !(nextSibling instanceof LeafPsiElement &&
+                            ((LeafPsiElement) nextSibling).getElementType() == HarbourTypes.IDENT)) {
+                nextSibling = nextSibling.getNextSibling();
+            }
+
+            if (nextSibling != null) {
+                // Found the class name, use that instead
+                HarbourLogger.log(COMPONENT, "Found class name after CLASS keyword: " + nextSibling.getText());
+                element = nextSibling;
+            }
+        }
+        
+        // Special case: If we're clicking on METHOD keyword,
+        // try to get the identifier that follows
+        if (element instanceof LeafPsiElement &&
+                ((LeafPsiElement) element).getElementType() == HarbourTypes.METHOD) {
+
+            HarbourLogger.log(COMPONENT, "Found METHOD keyword, looking for method name identifier");
+
+            // Find the identifier that follows this keyword
+            PsiElement nextSibling = element.getNextSibling();
+            while (nextSibling != null &&
+                    !(nextSibling instanceof LeafPsiElement &&
+                            ((LeafPsiElement) nextSibling).getElementType() == HarbourTypes.IDENT)) {
+                nextSibling = nextSibling.getNextSibling();
+            }
+
+            if (nextSibling != null) {
+                // Found the method name, use that instead
+                HarbourLogger.log(COMPONENT, "Found method name after METHOD keyword: " + nextSibling.getText());
                 element = nextSibling;
             }
         }
@@ -410,74 +485,285 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         }
 
-        // First check if this is a class reference
-        if (isClassReference(leafElement)) {
-            HarbourLogger.log(COMPONENT, "Identified as class reference: " + identifierName);
-            PsiElement[] classTargets = resolveClassReference(leafElement, currentLocationKey);
-            if (classTargets != null && classTargets.length > 0) {
-                HarbourLogger.log(COMPONENT, "Found " + classTargets.length + " class targets");
+        // Check if this is a class name in a CLASS declaration or a class reference
+        boolean isClassDeclaration = isClassDeclarationName(file, leafElement, identifierName);
+        boolean isClassRef = isClassReference(leafElement);
+        
+        if (isClassDeclaration || isClassRef) {
+            HarbourLogger.log(COMPONENT, "Identified as class reference or declaration: " + identifierName);
+            
+            // If clicking on a class declaration, find all usages instead of just declarations
+            if (isClassDeclaration) {
+                HarbourLogger.log(COMPONENT, "User clicked on class declaration - finding all usages");
+                
+                // Find all usages of the class (instantiations, method calls, etc.)
+                Project project = element.getProject();
+                HarbourReferenceService service = HarbourReferenceService.getInstance(project);
+                
+                // Search for all occurrences of the class name
+                List<PsiElement> foundElements = service.findSymbol(identifierName, true);
+                
+                if (!foundElements.isEmpty()) {
+                    HarbourLogger.log(COMPONENT, "Found " + foundElements.size() + " usages of class: " + identifierName);
+                    
+                    // Convert to navigation elements and show popup
+                    List<PsiElement> navigationElements = new ArrayList<>();
+                    Set<String> locations = new HashSet<>();
+                    
+                    for (PsiElement elem : foundElements) {
+                        if (elem != null && elem.isValid()) {
+                            try {
+                                PsiFile containingFile = elem.getContainingFile();
+                                if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                    int lineNumber = HarbourLogger.calculateLineNumber(elem);
+                                    String filePath = containingFile.getVirtualFile().getPath();
+                                    String locationKey = filePath + ":" + lineNumber;
+                                    
+                                    if (!locations.contains(locationKey)) {
+                                        // Determine if this is a definition or usage
+                                        String lineText = getLineText(containingFile, elem);
+                                        boolean isDefinition = lineText != null && lineText.toUpperCase().contains("CLASS " + identifierName.toUpperCase());
+                                        
+                                        String context = isDefinition ? "CLASS definition" : "Usage";
+                                        HarbourNavigationElement navigationElement = new HarbourNavigationElement(
+                                                elem, identifierName, filePath, lineNumber, context, isDefinition, false);
+                                        navigationElements.add(navigationElement);
+                                        locations.add(locationKey);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.log(COMPONENT, "Error creating navigation element: " + e.getMessage());
+                            }
+                        }
+                    }
+                    
+                    if (!navigationElements.isEmpty()) {
+                        // Show popup with all usages
+                        final String finalIdentifierName = identifierName;
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navigationElements), editor, finalIdentifierName);
+                        });
+                        return null; // Prevent default navigation
+                    }
+                }
+            } else {
+                // Regular class reference - show popup with declaration
+                PsiElement[] classTargets = resolveClassReference(leafElement, currentLocationKey);
+                if (classTargets != null && classTargets.length > 0) {
+                    HarbourLogger.log(COMPONENT, "Found " + classTargets.length + " class targets");
 
-                // If there's exactly one target, return it directly for navigation
-                if (classTargets.length == 1) {
-                    HarbourLogger.log(COMPONENT, "Direct navigation to single class target");
+                    // Always show popup for consistent navigation experience
+                    List<HarbourNavigationElement> navElements = new ArrayList<>();
+                    for (PsiElement target : classTargets) {
+                        if (target instanceof HarbourNavigationElement) {
+                            navElements.add((HarbourNavigationElement) target);
+                        }
+                    }
+                    
+                    if (!navElements.isEmpty()) {
+                        final String finalIdentifierName = identifierName;
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navElements), editor, finalIdentifierName);
+                        });
+                        return null; // Prevent default navigation
+                    }
                     return classTargets;
                 }
-                return classTargets;
             }
         }
 
         // Get the line text for context analysis
         String lineText = getLineText(file, element);
 
-        // Next check if this is a method reference
+        // Next check if this is a method reference or method declaration
         boolean isMethod = false;
+        boolean isMethodDeclaration = false;
+        
         if (lineText != null) {
-            // Check if there's a colon immediately before the identifier (method call pattern, case-insensitive)
-            int identPos = lineText.toUpperCase().indexOf(identifierName.toUpperCase());
-            boolean hasColonBefore = false;
-            
-            if (identPos > 0) {
-                // Look backwards from identifier position for a colon
-                for (int i = identPos - 1; i >= 0; i--) {
-                    char ch = lineText.charAt(i);
-                    if (ch == ':') {
-                        // Check if it's part of := or just :
-                        if (i + 1 < lineText.length() && lineText.charAt(i + 1) != '=') {
-                            hasColonBefore = true;
-                        }
-                        break;
-                    } else if (!Character.isWhitespace(ch)) {
-                        break;
-                    }
+            // Check if this is a METHOD declaration line
+            if (lineText.toUpperCase().contains("METHOD ")) {
+                // Check if identifier appears after METHOD keyword (handle both with and without parentheses)
+                Pattern methodPattern = Pattern.compile("(?i)METHOD\\s+" + Pattern.quote(identifierName) + "(?:\\s*\\(|\\s|$)");
+                if (methodPattern.matcher(lineText).find()) {
+                    isMethod = true;
+                    isMethodDeclaration = true;
+                    HarbourLogger.log(COMPONENT, "Identified as method name in METHOD declaration: " + identifierName);
                 }
             }
             
-            // Always check for method reference
-            isMethod = isMethodReference(leafElement);
+            // Check if there's a colon immediately before the identifier (method call pattern, case-insensitive)
+            if (!isMethod) {
+                int identPos = lineText.toUpperCase().indexOf(identifierName.toUpperCase());
+                boolean hasColonBefore = false;
+                
+                if (identPos > 0) {
+                    // Look backwards from identifier position for a colon
+                    for (int i = identPos - 1; i >= 0; i--) {
+                        char ch = lineText.charAt(i);
+                        if (ch == ':') {
+                            // Check if it's part of := or just :
+                            if (i + 1 < lineText.length() && lineText.charAt(i + 1) != '=') {
+                                hasColonBefore = true;
+                            }
+                            break;
+                        } else if (!Character.isWhitespace(ch)) {
+                            break;
+                        }
+                    }
+                }
+                
+                // Always check for method reference
+                isMethod = isMethodReference(leafElement);
+            }
         } else {
             isMethod = isMethodReference(leafElement);
         }
 
         if (isMethod) {
             HarbourLogger.log(COMPONENT, "Identified as method reference: " + identifierName);
-            PsiElement[] methodTargets = resolveMethodReference(leafElement, currentLocationKey);
-            if (methodTargets != null && methodTargets.length > 0) {
-                HarbourLogger.log(COMPONENT, "Found " + methodTargets.length + " method targets");
-
-                // Check if user clicked on a method definition
-                boolean isDefinitionClick = isDefinitionElement(leafElement, getElementContext(leafElement));
+            
+            // If clicking on a method declaration, find all usages
+            if (isMethodDeclaration) {
+                HarbourLogger.log(COMPONENT, "User clicked on method declaration - finding all usages");
                 
-                // If user clicked on a method definition, find all usages instead of just navigating to declaration
-                if (isDefinitionClick) {
-                    HarbourLogger.log(COMPONENT, "User clicked on method definition - finding all usages");
-                    // Continue to function/identifier search to find all calls and show popup
-                } else {
-                    // If there's exactly one target, return it directly for navigation
-                    if (methodTargets.length == 1) {
-                        HarbourLogger.log(COMPONENT, "Direct navigation to single method target");
+                // Find all usages of the method
+                Project project = element.getProject();
+                HarbourReferenceService service = HarbourReferenceService.getInstance(project);
+                
+                // Search for all occurrences of the method name
+                List<PsiElement> foundElements = service.findSymbol(identifierName, true);
+                
+                if (!foundElements.isEmpty()) {
+                    HarbourLogger.log(COMPONENT, "Found " + foundElements.size() + " usages of method: " + identifierName);
+                    
+                    // Convert to navigation elements and show popup
+                    List<HarbourNavigationElement> navigationElements = new ArrayList<>();
+                    Set<String> locations = new HashSet<>();
+                    boolean hasDefinitions = false;
+                    boolean hasUsages = false;
+                    
+                    // First add METHOD definitions
+                    for (PsiElement elem : foundElements) {
+                        if (elem != null && elem.isValid()) {
+                            try {
+                                PsiFile containingFile = elem.getContainingFile();
+                                if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                    String elemLineText = getLineText(containingFile, elem);
+                                    boolean isDefinition = elemLineText != null && elemLineText.toUpperCase().contains("METHOD " + identifierName.toUpperCase());
+                                    
+                                    if (isDefinition) {
+                                        int lineNumber = HarbourLogger.calculateLineNumber(elem);
+                                        String filePath = containingFile.getVirtualFile().getPath();
+                                        String locationKey = filePath + ":" + lineNumber;
+                                        
+                                        if (!locations.contains(locationKey)) {
+                                            HarbourNavigationElement navigationElement = new HarbourNavigationElement(
+                                                    elem, identifierName, filePath, lineNumber, "METHOD definition", true, false);
+                                            navigationElements.add(navigationElement);
+                                            locations.add(locationKey);
+                                            hasDefinitions = true;
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.log(COMPONENT, "Error creating navigation element: " + e.getMessage());
+                            }
+                        }
+                    }
+                    
+                    // Add separator if we have definitions
+                    if (hasDefinitions) {
+                        // Check if there are any usages
+                        for (PsiElement elem : foundElements) {
+                            if (elem != null && elem.isValid()) {
+                                PsiFile containingFile = elem.getContainingFile();
+                                if (containingFile != null) {
+                                    String elemLineText = getLineText(containingFile, elem);
+                                    boolean isDefinition = elemLineText != null && elemLineText.toUpperCase().contains("METHOD " + identifierName.toUpperCase());
+                                    if (!isDefinition) {
+                                        hasUsages = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (hasUsages) {
+                            HarbourNavigationElement separator = HarbourNavigationElement.createSeparator(project);
+                            if (separator != null) {
+                                navigationElements.add(separator);
+                            }
+                        }
+                    }
+                    
+                    // Then add usages
+                    for (PsiElement elem : foundElements) {
+                        if (elem != null && elem.isValid()) {
+                            try {
+                                PsiFile containingFile = elem.getContainingFile();
+                                if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                    String elemLineText = getLineText(containingFile, elem);
+                                    boolean isDefinition = elemLineText != null && elemLineText.toUpperCase().contains("METHOD " + identifierName.toUpperCase());
+                                    
+                                    if (!isDefinition) {
+                                        int lineNumber = HarbourLogger.calculateLineNumber(elem);
+                                        String filePath = containingFile.getVirtualFile().getPath();
+                                        String locationKey = filePath + ":" + lineNumber;
+                                        
+                                        if (!locations.contains(locationKey)) {
+                                            HarbourNavigationElement navigationElement = new HarbourNavigationElement(
+                                                    elem, identifierName, filePath, lineNumber, "Usage", false, false);
+                                            navigationElements.add(navigationElement);
+                                            locations.add(locationKey);
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.log(COMPONENT, "Error creating navigation element: " + e.getMessage());
+                            }
+                        }
+                    }
+                    
+                    if (!navigationElements.isEmpty()) {
+                        // Show popup with all usages
+                        final String finalIdentifierName = identifierName;
+                        ApplicationManager.getApplication().invokeLater(() -> {
+                            HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navigationElements), editor, finalIdentifierName);
+                        });
+                        return null; // Prevent default navigation
+                    }
+                }
+            } else {
+                // Regular method reference - resolve and show popup
+                PsiElement[] methodTargets = resolveMethodReference(leafElement, currentLocationKey);
+                if (methodTargets != null && methodTargets.length > 0) {
+                    HarbourLogger.log(COMPONENT, "Found " + methodTargets.length + " method targets");
+
+                    // Check if user clicked on a method definition
+                    boolean isDefinitionClick = isDefinitionElement(leafElement, getElementContext(leafElement));
+                    
+                    // If user clicked on a method definition, find all usages instead of just navigating to declaration
+                    if (isDefinitionClick) {
+                        HarbourLogger.log(COMPONENT, "User clicked on method definition - finding all usages");
+                        // Continue to function/identifier search to find all calls and show popup
+                    } else {
+                        // Always show popup for consistent navigation experience
+                        List<HarbourNavigationElement> navElements = new ArrayList<>();
+                        for (PsiElement target : methodTargets) {
+                            if (target instanceof HarbourNavigationElement) {
+                                navElements.add((HarbourNavigationElement) target);
+                            }
+                        }
+                        
+                        if (!navElements.isEmpty()) {
+                            final String finalIdentifierName = identifierName;
+                            ApplicationManager.getApplication().invokeLater(() -> {
+                                HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navElements), editor, finalIdentifierName);
+                            });
+                            return null; // Prevent default navigation
+                        }
                         return methodTargets;
                     }
-                    return methodTargets;
                 }
             }
         }
@@ -607,6 +893,117 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             }
         } else {
             HarbourLogger.log(COMPONENT, "Searching for variable/symbol: " + identifierName);
+            
+            // First check if this is a #define constant reference
+            List<PsiElement> defineDeclarations = service.findDefines(identifierName);
+            
+            if (!defineDeclarations.isEmpty()) {
+                HarbourLogger.log(COMPONENT, "Found #define for: " + identifierName);
+                
+                // Find all usages of this #define constant as well
+                // Note: findSymbol might not find constants, so search manually
+                List<PsiElement> allOccurrences = new ArrayList<>();
+                
+                // Search in all Harbour files for this identifier
+                Collection<VirtualFile> allFiles = FileTypeIndex.getFiles(HarbourFileType.INSTANCE, 
+                    GlobalSearchScope.projectScope(project));
+                    
+                for (VirtualFile vFile : allFiles) {
+                    PsiFile psiFile = PsiManager.getInstance(project).findFile(vFile);
+                    if (psiFile != null) {
+                        String fileText = psiFile.getText();
+                        int index = 0;
+                        while ((index = fileText.indexOf(identifierName, index)) != -1) {
+                            PsiElement elem = psiFile.findElementAt(index);
+                            if (elem != null && elem.getText().equals(identifierName)) {
+                                allOccurrences.add(elem);
+                            }
+                            index += identifierName.length();
+                        }
+                    }
+                }
+                
+                HarbourLogger.log(COMPONENT, "Found " + allOccurrences.size() + " total occurrences of #define " + identifierName);
+                
+                // Convert to navigation elements with #define at top
+                List<HarbourNavigationElement> navigationElements = new ArrayList<>();
+                Set<String> locations = new HashSet<>();
+                
+                // First add the #define declarations (they should appear at top)
+                for (PsiElement declaration : defineDeclarations) {
+                    if (declaration != null && declaration.isValid()) {
+                        try {
+                            PsiFile containingFile = declaration.getContainingFile();
+                            if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                int lineNumber = HarbourLogger.calculateLineNumber(declaration);
+                                String filePath = containingFile.getVirtualFile().getPath();
+                                String locationKey = filePath + ":" + lineNumber;
+                                
+                                if (!locations.contains(locationKey)) {
+                                    // Create navigation element for #define declaration
+                                    HarbourNavigationElement navigationElement = new HarbourNavigationElement(
+                                            declaration, identifierName, filePath, lineNumber, 
+                                            "#define declaration", true, false);
+                                    navigationElements.add(navigationElement);
+                                    locations.add(locationKey);
+                                    
+                                    HarbourLogger.log(COMPONENT, "Added #define declaration for " +
+                                            identifierName + " in " + containingFile.getName());
+                                }
+                            }
+                        } catch (Exception e) {
+                            HarbourLogger.log(COMPONENT, "Error creating navigation element for #define: " + e.getMessage());
+                        }
+                    }
+                }
+                
+                // Add separator between declarations and usages if we have both
+                if (!navigationElements.isEmpty() && allOccurrences.size() > defineDeclarations.size()) {
+                    HarbourNavigationElement separator = HarbourNavigationElement.createSeparator(project);
+                    if (separator != null) {
+                        navigationElements.add(separator);
+                    }
+                }
+                
+                // Then add all other usages
+                for (PsiElement elem : allOccurrences) {
+                    if (elem != null && elem.isValid()) {
+                        try {
+                            PsiFile containingFile = elem.getContainingFile();
+                            if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                int lineNumber = HarbourLogger.calculateLineNumber(elem);
+                                String filePath = containingFile.getVirtualFile().getPath();
+                                String locationKey = filePath + ":" + lineNumber;
+                                
+                                if (!locations.contains(locationKey)) {
+                                    // Check if this is a #define line
+                                    String elemLineText = getLineText(containingFile, elem);
+                                    boolean isDefine = elemLineText != null && elemLineText.matches("(?i)^\\s*#\\s*define\\s+.*");
+                                    
+                                    if (!isDefine) { // Skip if it's a define (already added above)
+                                        String context = "Usage";
+                                        HarbourNavigationElement navigationElement = new HarbourNavigationElement(
+                                                elem, identifierName, filePath, lineNumber, context, false, false);
+                                        navigationElements.add(navigationElement);
+                                        locations.add(locationKey);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            HarbourLogger.log(COMPONENT, "Error creating navigation element for usage: " + e.getMessage());
+                        }
+                    }
+                }
+                
+                if (!navigationElements.isEmpty()) {
+                    // Show popup with #define at top and usages below
+                    final String finalIdentifierName = identifierName;
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navigationElements), editor, finalIdentifierName);
+                    });
+                    return null; // Prevent default navigation
+                }
+            }
 
             try {
                 // For variables: Use simple file-based search with line-based scoping
@@ -3040,8 +3437,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                tokenType.equals("SEEK") || tokenType.equals("SKIP") ||
                tokenType.equals("USE") || tokenType.equals("INDEX") ||
                tokenType.equals("ALIAS") || tokenType.equals("EXCLUSIVE") ||
-               tokenType.equals("SHARED") || tokenType.equals("NEW") ||
-               tokenType.equals("READONLY");
+               tokenType.equals("SHARED") || tokenType.equals("READONLY");
     }
 
     /**
@@ -3099,7 +3495,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             upperText.equals("ALL") || upperText.equals("REST") || upperText.equals("FROM") ||
             upperText.equals("SEEK") || upperText.equals("SKIP") || upperText.equals("USE") ||
             upperText.equals("INDEX") || upperText.equals("ALIAS") || upperText.equals("EXCLUSIVE") ||
-            upperText.equals("SHARED") || upperText.equals("NEW") || upperText.equals("READONLY")) {
+            upperText.equals("SHARED") || upperText.equals("READONLY")) {
             return true;
         }
         

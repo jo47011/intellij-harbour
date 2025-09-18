@@ -106,6 +106,67 @@ public final class HarbourReferenceService {
     }
     
     /**
+     * Find all #define declarations with the given name.
+     *
+     * @param defineName The name of the #define to find
+     * @return A list of PSI elements for the #define declarations
+     */
+    public List<PsiElement> findDefines(String defineName) {
+        HarbourLogger.log("ReferenceService", "Searching for #define: " + defineName);
+        
+        if (defineName == null || defineName.isEmpty()) {
+            return Collections.emptyList();
+        }
+        
+        List<PsiElement> result = new ArrayList<>();
+        
+        // Search for #define patterns in all Harbour files
+        Collection<VirtualFile> allFiles = FileTypeIndex.getFiles(HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+        Pattern definePattern = Pattern.compile("(?i)^\\s*#\\s*define\\s+" + Pattern.quote(defineName) + "(?:\\s|\\()", Pattern.MULTILINE);
+        
+        for (VirtualFile file : allFiles) {
+            PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
+            if (psiFile != null) {
+                String content = psiFile.getText();
+                String[] lines = content.split("\n");
+                
+                for (int i = 0; i < lines.length; i++) {
+                    Matcher matcher = definePattern.matcher(lines[i]);
+                    if (matcher.find()) {
+                        // Find the PSI element at this line
+                        int lineStartOffset = getLineStartOffset(content, i);
+                        int defineNameStart = lineStartOffset + matcher.end() - defineName.length();
+                        PsiElement element = psiFile.findElementAt(defineNameStart);
+                        
+                        if (element != null) {
+                            result.add(element);
+                            HarbourLogger.log("ReferenceService", "Found #define " + defineName + " in " + file.getName() + " at line " + (i + 1));
+                        }
+                    }
+                }
+            }
+        }
+        
+        HarbourLogger.log("ReferenceService", "Found " + result.size() + " #define declarations for: " + defineName);
+        return result;
+    }
+    
+    private int getLineStartOffset(String content, int lineNumber) {
+        int offset = 0;
+        int currentLine = 0;
+        for (int i = 0; i < content.length() && currentLine < lineNumber; i++) {
+            if (content.charAt(i) == '\n') {
+                currentLine++;
+                if (currentLine == lineNumber) {
+                    offset = i + 1;
+                    break;
+                }
+            }
+        }
+        return offset;
+    }
+    
+    /**
      * Find all functions with the given name using StubIndex for fast lookup.
      *
      * @param functionName The name of the function to find
@@ -436,19 +497,6 @@ public final class HarbourReferenceService {
     /**
      * Calculate the offset of the start of a line
      */
-    private int getLineStartOffset(String text, int lineNumber) {
-        int offset = 0;
-        int currentLine = 0;
-        
-        for (int i = 0; i < text.length() && currentLine < lineNumber; i++) {
-            if (text.charAt(i) == '\n') {
-                currentLine++;
-                offset = i + 1;
-            }
-        }
-        
-        return offset;
-    }
 
     /**
      * Find all methods of a specific class or related to a class name.
