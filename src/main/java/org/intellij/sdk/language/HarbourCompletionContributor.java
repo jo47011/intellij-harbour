@@ -89,6 +89,15 @@ public class HarbourCompletionContributor extends CompletionContributor {
                             // Get project from original file
                             Project project = parameters.getOriginalFile().getProject();
 
+                            // Check if we're typing after an object: (e.g., rech:)
+                            String objectName = getObjectBeforeColon(parameters);
+                            if (objectName != null && !objectName.isEmpty()) {
+                                HarbourLogger.log("CompletionContributor", "Object method completion for: " + objectName);
+                                // Only show object-specific completions
+                                addObjectMethodsAndData(caseInsensitiveResult, parameters, project, objectName);
+                                return; // Don't add other completions when in object:method context
+                            }
+
                             // Determine if we're in a method context
                             boolean inClassContext = isInClassContext(parameters);
                             HarbourLogger.log("CompletionContributor", "In class context: " + inClassContext);
@@ -339,7 +348,8 @@ public class HarbourCompletionContributor extends CompletionContributor {
             Set<String> paramSet = new HashSet<>(); // Set to track parameters separately
 
             // Pattern for LOCAL variable declarations - stop at end of line to avoid matching across lines
-            Pattern localPattern = Pattern.compile("(?i)^\\s*LOCAL\\s+([\\w,\\s:=]+?)\\s*$", Pattern.MULTILINE);
+            // Also match PRIVATE and STATIC declarations within functions
+            Pattern localPattern = Pattern.compile("(?i)^\\s*(?:LOCAL|PRIVATE|STATIC)\\s+([\\w,\\s:=]+?)\\s*$", Pattern.MULTILINE);
             Matcher localMatcher = localPattern.matcher(scopeText.toString());
 
             while (localMatcher.find()) {
@@ -573,10 +583,14 @@ public class HarbourCompletionContributor extends CompletionContributor {
             Set<String> constants = new HashSet<>();
 
             // Add defines from current .prg file
+            HarbourLogger.log("CompletionContributor", "Searching for defines in current file: " + file.getName());
             addDefinesFromFile(file.getText(), constants);
+            HarbourLogger.log("CompletionContributor", "Found " + constants.size() + " defines in current file");
 
             // Add defines from included .ch files
+            int beforeInclude = constants.size();
             addDefinesFromIncludedFiles(file, constants, parameters.getOriginalFile().getProject());
+            HarbourLogger.log("CompletionContributor", "Found " + (constants.size() - beforeInclude) + " defines from includes");
 
             // Add each constant to completion results
             for (String constant : constants) {
@@ -584,7 +598,7 @@ public class HarbourCompletionContributor extends CompletionContributor {
                 result.addElement(createConstantLookupElement(constant));
             }
 
-            HarbourLogger.log("CompletionContributor", "Added " + constants.size() + " constants/defines");
+            HarbourLogger.log("CompletionContributor", "Total added " + constants.size() + " constants/defines");
 
         } catch (ProcessCanceledException e) {
             throw e;
@@ -599,7 +613,8 @@ public class HarbourCompletionContributor extends CompletionContributor {
     private void addDefinesFromFile(String fileText, Set<String> constants) {
         try {
             // Pattern for #define statements: "#define CONSTANT_NAME value"
-            Pattern definePattern = Pattern.compile("(?i)^\\s*#define\\s+([A-Z_][A-Z0-9_]*)\\s+", Pattern.MULTILINE);
+            // Allow any identifier starting with letter or underscore
+            Pattern definePattern = Pattern.compile("(?i)^\\s*#define\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*", Pattern.MULTILINE);
             Matcher defineMatcher = definePattern.matcher(fileText);
 
             while (defineMatcher.find()) {
@@ -675,11 +690,14 @@ public class HarbourCompletionContributor extends CompletionContributor {
      */
     private VirtualFile findIncludeFile(String fileName, PsiFile currentFile, Project project) {
         try {
+            HarbourLogger.log("CompletionContributor", "Looking for include file: " + fileName);
+            
             // First try relative to current file
             VirtualFile currentDir = currentFile.getVirtualFile().getParent();
             if (currentDir != null) {
                 VirtualFile includeFile = currentDir.findChild(fileName);
                 if (includeFile != null && includeFile.exists()) {
+                    HarbourLogger.log("CompletionContributor", "Found include in current dir: " + includeFile.getPath());
                     return includeFile;
                 }
             }
@@ -689,7 +707,18 @@ public class HarbourCompletionContributor extends CompletionContributor {
             if (projectRoot != null) {
                 VirtualFile includeFile = projectRoot.findChild(fileName);
                 if (includeFile != null && includeFile.exists()) {
+                    HarbourLogger.log("CompletionContributor", "Found include in project root: " + includeFile.getPath());
                     return includeFile;
+                }
+                
+                // Try in include subdirectory of project root
+                VirtualFile includeDir = projectRoot.findChild("include");
+                if (includeDir != null && includeDir.exists()) {
+                    includeFile = includeDir.findChild(fileName);
+                    if (includeFile != null && includeFile.exists()) {
+                        HarbourLogger.log("CompletionContributor", "Found include in project include dir: " + includeFile.getPath());
+                        return includeFile;
+                    }
                 }
             }
 
@@ -697,15 +726,18 @@ public class HarbourCompletionContributor extends CompletionContributor {
             HarbourSettings settings = HarbourSettings.getInstance(project);
             if (settings != null) {
                 for (String includePath : settings.getResolvedIncludePaths(project)) {
-                    VirtualFile includeDir = LocalFileSystem.getInstance().findFileByPath(includePath);
-                    if (includeDir != null && includeDir.exists()) {
-                        VirtualFile includeFile = includeDir.findChild(fileName);
+                    VirtualFile includePathDir = LocalFileSystem.getInstance().findFileByPath(includePath);
+                    if (includePathDir != null && includePathDir.exists()) {
+                        VirtualFile includeFile = includePathDir.findChild(fileName);
                         if (includeFile != null && includeFile.exists()) {
+                            HarbourLogger.log("CompletionContributor", "Found include in settings path: " + includeFile.getPath());
                             return includeFile;
                         }
                     }
                 }
             }
+            
+            HarbourLogger.log("CompletionContributor", "Include file not found: " + fileName);
         } catch (Exception e) {
             HarbourLogger.log("CompletionContributor", "Error finding include file " + fileName + ": " + e.getMessage());
         }
@@ -1221,5 +1253,282 @@ public class HarbourCompletionContributor extends CompletionContributor {
 
         // Extract function name using regex
         return extractFunctionName(text);
+    }
+
+    /**
+     * Check if we're typing after an object: notation (e.g., rech:)
+     * Returns the object name if found, null otherwise
+     */
+    private String getObjectBeforeColon(CompletionParameters parameters) {
+        try {
+            PsiElement position = parameters.getPosition();
+            if (position == null) {
+                return null;
+            }
+            
+            // Get the text before the current position
+            PsiFile file = parameters.getOriginalFile();
+            int offset = parameters.getOffset();
+            String fileText = file.getText();
+            
+            // Look backwards from the current position for a colon
+            int colonPos = -1;
+            for (int i = offset - 1; i >= 0 && i > offset - 100; i--) {
+                if (fileText.charAt(i) == ':') {
+                    colonPos = i;
+                    break;
+                } else if (fileText.charAt(i) == '\n' || fileText.charAt(i) == ';' || 
+                          fileText.charAt(i) == '(' || fileText.charAt(i) == ')') {
+                    // Stop if we hit a line break or statement separator
+                    break;
+                }
+            }
+            
+            if (colonPos == -1) {
+                return null;
+            }
+            
+            // Extract the object name before the colon
+            int startPos = colonPos - 1;
+            while (startPos >= 0 && (Character.isLetterOrDigit(fileText.charAt(startPos)) || 
+                                     fileText.charAt(startPos) == '_')) {
+                startPos--;
+            }
+            startPos++;
+            
+            if (startPos < colonPos) {
+                String objectName = fileText.substring(startPos, colonPos);
+                HarbourLogger.log("CompletionContributor", "Found object before colon: " + objectName);
+                return objectName;
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error getting object before colon: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Add methods and DATA fields for a specific object
+     */
+    private void addObjectMethodsAndData(CompletionResultSet result, CompletionParameters parameters, 
+                                         Project project, String objectName) {
+        try {
+            // First try to determine the class type of the object
+            String className = getObjectClassName(parameters, objectName);
+            if (className == null || className.isEmpty()) {
+                HarbourLogger.log("CompletionContributor", "Could not determine class for object: " + objectName);
+                // Fall back to showing all known classes' methods
+                addAllClassMethodsAndData(result, project);
+                return;
+            }
+            
+            HarbourLogger.log("CompletionContributor", "Object " + objectName + " is of class: " + className);
+            
+            // Add methods for this specific class
+            addClassSpecificMethodsAndData(result, project, className);
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error adding object methods: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Determine the class name of an object variable
+     */
+    private String getObjectClassName(CompletionParameters parameters, String objectName) {
+        try {
+            // Look for object instantiation patterns like:
+            // LOCAL rech := ExcelJob():New()
+            // rech := ExcelJob():New()
+            // ::rech := ExcelJob():New()
+            
+            PsiFile file = parameters.getOriginalFile();
+            String fileText = file.getText();
+            
+            // Pattern to find object instantiation
+            Pattern pattern = Pattern.compile(
+                "(?:LOCAL\\s+|::)?" + Pattern.quote(objectName) + "\\s*:=\\s*([A-Za-z][A-Za-z0-9_]*)\\s*\\(\\)",
+                Pattern.CASE_INSENSITIVE | Pattern.MULTILINE
+            );
+            
+            Matcher matcher = pattern.matcher(fileText);
+            if (matcher.find()) {
+                String className = matcher.group(1);
+                HarbourLogger.log("CompletionContributor", "Found class instantiation for " + objectName + ": " + className);
+                return className;
+            }
+            
+            // Also check for NEW operator patterns
+            pattern = Pattern.compile(
+                "(?:LOCAL\\s+|::)?" + Pattern.quote(objectName) + "\\s*:=\\s*([A-Za-z][A-Za-z0-9_]*)\\s*:New\\s*\\(",
+                Pattern.CASE_INSENSITIVE | Pattern.MULTILINE
+            );
+            
+            matcher = pattern.matcher(fileText);
+            if (matcher.find()) {
+                String className = matcher.group(1);
+                HarbourLogger.log("CompletionContributor", "Found class NEW for " + objectName + ": " + className);
+                return className;
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error determining object class: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Add methods and DATA fields for a specific class
+     */
+    private void addClassSpecificMethodsAndData(CompletionResultSet result, Project project, String className) {
+        try {
+            HarbourReferenceService referenceService = HarbourReferenceService.getInstance(project);
+            
+            // Find class declaration to get DATA fields
+            List<PsiElement> classElements = referenceService.findClasses(className);
+            if (classElements != null && !classElements.isEmpty()) {
+                // Extract DATA fields from class definition
+                for (PsiElement classElement : classElements) {
+                    addDataFieldsFromClass(result, classElement, className);
+                }
+            }
+            
+            // Find all methods for this class
+            List<PsiElement> methodElements = referenceService.findClassMethods(className, null);
+            
+            Set<String> addedMethods = new HashSet<>();
+            for (PsiElement element : methodElements) {
+                if (element != null) {
+                    String methodName = extractMethodName(element.getText(), className);
+                    if (methodName != null && !methodName.isEmpty() && !addedMethods.contains(methodName.toLowerCase())) {
+                        addedMethods.add(methodName.toLowerCase());
+                        result.addElement(createMethodLookupElement(methodName, className));
+                    }
+                }
+            }
+            
+            HarbourLogger.log("CompletionContributor", "Added " + addedMethods.size() + " methods for class " + className);
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error adding class-specific methods: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extract DATA fields from a class definition
+     */
+    private void addDataFieldsFromClass(CompletionResultSet result, PsiElement classElement, String className) {
+        try {
+            if (classElement == null) return;
+            
+            PsiFile file = classElement.getContainingFile();
+            if (file == null) return;
+            
+            String fileText = file.getText();
+            
+            // Find the CLASS declaration line
+            Pattern classPattern = Pattern.compile(
+                "(?i)^\\s*CLASS\\s+" + Pattern.quote(className) + ".*$",
+                Pattern.MULTILINE
+            );
+            Matcher classMatcher = classPattern.matcher(fileText);
+            
+            if (!classMatcher.find()) return;
+            
+            int classStart = classMatcher.end();
+            
+            // Find ENDCLASS
+            Pattern endClassPattern = Pattern.compile("(?i)^\\s*ENDCLASS", Pattern.MULTILINE);
+            Matcher endClassMatcher = endClassPattern.matcher(fileText);
+            endClassMatcher.region(classStart, fileText.length());
+            
+            int classEnd = endClassMatcher.find() ? endClassMatcher.start() : fileText.length();
+            
+            // Extract class body
+            String classBody = fileText.substring(classStart, classEnd);
+            
+            // Find DATA declarations
+            Pattern dataPattern = Pattern.compile(
+                "(?i)^\\s*DATA\\s+([A-Za-z_][A-Za-z0-9_]*)",
+                Pattern.MULTILINE
+            );
+            Matcher dataMatcher = dataPattern.matcher(classBody);
+            
+            Set<String> dataFields = new HashSet<>();
+            while (dataMatcher.find()) {
+                String dataField = dataMatcher.group(1);
+                if (!dataFields.contains(dataField.toLowerCase())) {
+                    dataFields.add(dataField.toLowerCase());
+                    result.addElement(createDataFieldLookupElement(dataField, className));
+                }
+            }
+            
+            HarbourLogger.log("CompletionContributor", "Added " + dataFields.size() + " DATA fields for class " + className);
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error extracting DATA fields: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Create a lookup element for a DATA field
+     */
+    private LookupElement createDataFieldLookupElement(String fieldName, String className) {
+        return LookupElementBuilder.create(fieldName)
+                .withCaseSensitivity(false)
+                .withTypeText("DATA in " + className)
+                .withIcon(HarbourIcons.FILE)
+                .withBoldness(false);
+    }
+
+    /**
+     * Create a lookup element for a method
+     */
+    private LookupElement createMethodLookupElement(String methodName, String className) {
+        return LookupElementBuilder.create(methodName)
+                .withCaseSensitivity(false)
+                .withTypeText("Method of " + className)
+                .withIcon(HarbourIcons.FILE)
+                .withBoldness(true);
+    }
+
+    /**
+     * Add all class methods and data when we can't determine the specific class
+     */
+    private void addAllClassMethodsAndData(CompletionResultSet result, Project project) {
+        try {
+            // This is a fallback - show methods from all classes
+            HarbourReferenceService referenceService = HarbourReferenceService.getInstance(project);
+            
+            // Get all classes in the project
+            Set<String> allClasses = new HashSet<>();
+            Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
+                HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project)
+            );
+            
+            for (VirtualFile virtualFile : virtualFiles) {
+                PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
+                if (psiFile != null) {
+                    String fileText = psiFile.getText();
+                    Pattern classPattern = Pattern.compile(
+                        "(?i)^\\s*CLASS\\s+([A-Za-z_][A-Za-z0-9_]*)",
+                        Pattern.MULTILINE
+                    );
+                    Matcher matcher = classPattern.matcher(fileText);
+                    while (matcher.find()) {
+                        allClasses.add(matcher.group(1));
+                    }
+                }
+            }
+            
+            // Add methods from all found classes
+            for (String className : allClasses) {
+                addClassSpecificMethodsAndData(result, project, className);
+            }
+            
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error adding all class methods: " + e.getMessage());
+        }
     }
 }

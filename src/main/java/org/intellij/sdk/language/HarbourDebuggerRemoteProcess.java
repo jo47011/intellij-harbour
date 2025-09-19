@@ -68,9 +68,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private final Thread commandExecutor;
     private volatile boolean shutdownRequested = false;
     
-    // Command throttling settings - tuned for optimal stability
-    private static final long MIN_COMMAND_INTERVAL = 200; // Minimum ms between commands
-    private static final long NEXT_COMMAND_DELAY = 350;   // Extra delay for NEXT commands
+    // Command throttling settings - ZERO DELAY for absolute maximum speed
+    private static final long MIN_COMMAND_INTERVAL = 0;   // No delay between commands 
+    private static final long NEXT_COMMAND_DELAY = 0;     // No extra delay for NEXT commands
     
     // Debugger state management - prevents rapid command execution
     public enum DebuggerState {
@@ -896,6 +896,36 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             
                             getSession().positionReached(suspendContext);
                             
+                            // Auto-open Frames/Variables tab when hitting breakpoint
+                            try {
+                                getSession().showExecutionPoint();
+                                
+                                // Switch to Frames/Variables tab
+                                com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
+                                if (ui != null) {
+                                    com.intellij.ui.content.Content targetContent = null;
+                                    
+                                    // Look for first non-Console content (which should be Variables/Frames)
+                                    for (com.intellij.ui.content.Content content : ui.getContents()) {
+                                        String displayName = content.getDisplayName();
+                                        if (displayName != null && !displayName.equals("Console")) {
+                                            targetContent = content;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (targetContent != null) {
+                                        ui.selectAndFocus(targetContent, true, true);
+                                    }
+                                }
+                                
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Auto-opened Frames/Variables tab on breakpoint (fallback)");
+                            } catch (Exception e) {
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    "Failed to auto-open debug tabs: " + e.getMessage());
+                            }
+                            
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended via fallback - program will wait indefinitely");
                         });
                     }
@@ -921,6 +951,36 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     "Calling positionReached without source position for " + file + ":" + line);
                 
                 getSession().positionReached(suspendContext);
+                
+                // Auto-open Frames/Variables tab when hitting breakpoint
+                try {
+                    getSession().showExecutionPoint();
+                    
+                    // Switch to Frames/Variables tab
+                    com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
+                    if (ui != null) {
+                        com.intellij.ui.content.Content targetContent = null;
+                        
+                        // Look for first non-Console content (which should be Variables/Frames)
+                        for (com.intellij.ui.content.Content content : ui.getContents()) {
+                            String displayName = content.getDisplayName();
+                            if (displayName != null && !displayName.equals("Console")) {
+                                targetContent = content;
+                                break;
+                            }
+                        }
+                        
+                        if (targetContent != null) {
+                            ui.selectAndFocus(targetContent, true, true);
+                        }
+                    }
+                    
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Auto-opened Frames/Variables tab on breakpoint (no source)");
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        "Failed to auto-open debug tabs: " + e.getMessage());
+                }
                 
                 HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended (no source file found)");
             });
@@ -1795,6 +1855,65 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                     // Wrap in additional try-catch to detect crashes
                                     try {
                                         getSession().positionReached(suspendContext);
+                                        
+                                        // Auto-open Frames/Variables tab when hitting breakpoint
+                                        ApplicationManager.getApplication().invokeLater(() -> {
+                                            try {
+                                                // First show the execution point
+                                                getSession().showExecutionPoint();
+                                                
+                                                // Then switch away from Console to the Variables/Frames view
+                                                com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
+                                                if (ui != null) {
+                                                    // Try to find and select the Variables content
+                                                    // The tab with Frames/Variables is typically not named "Debugger"
+                                                    // but uses a special content ID
+                                                    com.intellij.ui.content.Content targetContent = null;
+                                                    
+                                                    // Try various possible content IDs
+                                                    String[] possibleIds = {"Variables", "DebuggerView", "VariablesContent", 
+                                                                          "Debugger", "Debug", "DebuggerContent"};
+                                                    
+                                                    for (String id : possibleIds) {
+                                                        targetContent = ui.findContent(id);
+                                                        if (targetContent != null) {
+                                                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                                "Found content with ID: " + id);
+                                                            break;
+                                                        }
+                                                    }
+                                                    
+                                                    // If still not found, look for content that is not Console
+                                                    if (targetContent == null) {
+                                                        for (com.intellij.ui.content.Content content : ui.getContents()) {
+                                                            String displayName = content.getDisplayName();
+                                                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                                "Available content: " + displayName);
+                                                            // Select first non-Console content (which should be Variables/Frames)
+                                                            if (displayName != null && !displayName.equals("Console")) {
+                                                                targetContent = content;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    if (targetContent != null) {
+                                                        ui.selectAndFocus(targetContent, true, true);
+                                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                            "Switched to tab: " + targetContent.getDisplayName());
+                                                    } else {
+                                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                            "Could not find Variables/Frames tab");
+                                                    }
+                                                }
+                                                
+                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                    "Completed auto-switch to Frames/Variables tab");
+                                            } catch (Exception e) {
+                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                                    "Failed to auto-open debug tabs: " + e.getMessage());
+                                            }
+                                        });
                                     } catch (Exception positionReachedException) {
                                         HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                                             "CRASH DETECTED: Exception during positionReached: " + positionReachedException.getMessage());
@@ -2936,6 +3055,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     /**
+     * Check if the debugger is ready to accept breakpoint commands
+     * Breakpoints can be sent anytime when connected, regardless of state
+     */
+    public boolean canAcceptBreakpoints() {
+        return isConnected && connection != null && connection.isConnected();
+    }
+    
+    /**
      * TEST METHOD: Generate a realistic Harbour debugging error for console logging verification
      * This simulates common debugging errors that could occur during real debugging sessions
      */
@@ -3084,8 +3211,8 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         while (!shutdownRequested) {
             try {
-                // Wait for a command with timeout
-                DebugCommand cmd = commandQueue.poll(200, TimeUnit.MILLISECONDS);
+                // Wait for a command with timeout - ultra-minimal for maximum speed
+                DebugCommand cmd = commandQueue.poll(1, TimeUnit.MILLISECONDS);
                 
                 if (cmd == null) {
                     continue;
@@ -3099,18 +3226,28 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     continue;
                 }
                 
-                // Calculate required delay
+                // Calculate required delay - optimize for step commands
                 long now = System.currentTimeMillis();
                 long timeSinceLastCommand = now - lastExecutionTime;
                 long requiredDelay = MIN_COMMAND_INTERVAL;
                 
-                // Extra delay for consecutive NEXT commands
+                // Check if this is a step command (NEXT, STEP, OUT)
+                boolean isStepCommand = "NEXT".equals(cmd.command) || 
+                                       "STEP".equals(cmd.command) || 
+                                       "OUT".equals(cmd.command);
+                
+                // Only apply extra delay for consecutive NEXT commands
                 if ("NEXT".equals(cmd.command) && "NEXT".equals(lastCommand)) {
                     requiredDelay = NEXT_COMMAND_DELAY;
                 }
                 
-                // Apply throttling if needed
-                if (timeSinceLastCommand < requiredDelay) {
+                // Skip ALL throttling for step commands - maximum speed
+                if (isStepCommand) {
+                    requiredDelay = 0; // ZERO delay for step commands
+                }
+                
+                // Apply throttling only for non-step commands if needed
+                if (requiredDelay > 0 && timeSinceLastCommand < requiredDelay) {
                     long sleepTime = requiredDelay - timeSinceLastCommand;
                     HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                         "Throttling " + cmd.command + " command by " + sleepTime + "ms");

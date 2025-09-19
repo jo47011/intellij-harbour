@@ -748,6 +748,10 @@ public class HarbourSettingsConfigurable implements Configurable {
         settings.setIncludePaths(new ArrayList<>(myIncludePathsModel.getItems()));
         settings.setExcludedFiles(new HashSet<>(myExcludedFilesModel.getItems()));
         settings.setHarbourCommands(new ArrayList<>(myHarbourCommandsModel.getItems()));
+        
+        // Update HarbourReferenceService with new excluded files
+        HarbourReferenceService referenceService = HarbourReferenceService.getInstance(myProject);
+        referenceService.refreshExclusions();
 
         // Save documentation base URL
         settings.setDocumentationBaseUrl(myDocumentationBaseUrlField.getText());
