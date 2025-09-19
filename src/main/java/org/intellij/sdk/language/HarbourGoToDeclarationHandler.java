@@ -547,28 +547,88 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     }
                 }
             } else {
-                // Regular class reference - show popup with declaration
-                PsiElement[] classTargets = resolveClassReference(leafElement, currentLocationKey);
-                if (classTargets != null && classTargets.length > 0) {
-                    HarbourLogger.log(COMPONENT, "Found " + classTargets.length + " class targets");
-
-                    // Always show popup for consistent navigation experience
-                    List<HarbourNavigationElement> navElements = new ArrayList<>();
-                    for (PsiElement target : classTargets) {
-                        if (target instanceof HarbourNavigationElement) {
-                            navElements.add((HarbourNavigationElement) target);
+                // Regular class reference - show popup with declaration AND usages
+                String className = leafElement.getText();
+                HarbourLogger.log(COMPONENT, "Resolving class reference: " + className);
+                
+                // Get both declarations and usages
+                List<HarbourNavigationElement> allResults = new ArrayList<>();
+                
+                // First, get class declarations
+                PsiElement[] classDeclarations = resolveClassReference(leafElement, currentLocationKey);
+                if (classDeclarations != null && classDeclarations.length > 0) {
+                    HarbourLogger.log(COMPONENT, "Found " + classDeclarations.length + " class declarations");
+                    for (PsiElement decl : classDeclarations) {
+                        if (decl instanceof HarbourNavigationElement) {
+                            allResults.add((HarbourNavigationElement) decl);
+                        } else if (decl != null) {
+                            // Convert regular PsiElement to HarbourNavigationElement
+                            PsiFile containingFile = decl.getContainingFile();
+                            if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                int lineNumber = HarbourLogger.calculateLineNumber(decl);
+                                String filePath = containingFile.getVirtualFile().getPath();
+                                String lineText = getLineText(containingFile, decl);
+                                
+                                // Verify it's actually a CLASS line
+                                if (lineText != null && lineText.toUpperCase().contains("CLASS")) {
+                                    HarbourNavigationElement navElement = new HarbourNavigationElement(
+                                        decl, className, filePath, lineNumber, lineText, true, false);
+                                    allResults.add(navElement);
+                                    HarbourLogger.log(COMPONENT, "Added class declaration from " + 
+                                        containingFile.getName() + " at line " + lineNumber);
+                                }
+                            }
                         }
                     }
-                    
-                    if (!navElements.isEmpty()) {
-                        final String finalIdentifierName = identifierName;
-                        ApplicationManager.getApplication().invokeLater(() -> {
-                            HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(navElements), editor, finalIdentifierName);
-                        });
-                        return null; // Prevent default navigation
-                    }
-                    return classTargets;
                 }
+                
+                // Now get all usages using function search (which includes class usages)
+                Project project = leafElement.getProject();
+                
+                // Add separator if we have declarations
+                if (!allResults.isEmpty()) {
+                    allResults.add(HarbourNavigationElement.createSeparator(project));
+                }
+                HarbourReferenceService service = HarbourReferenceService.getInstance(project);
+                List<PsiElement> usages = service.findFunctions(className, true);
+                
+                if (usages != null && !usages.isEmpty()) {
+                    HarbourLogger.log(COMPONENT, "Found " + usages.size() + " usages of class: " + className);
+                    
+                    for (PsiElement usage : usages) {
+                        if (usage != null && usage.isValid()) {
+                            try {
+                                PsiFile containingFile = usage.getContainingFile();
+                                if (containingFile != null && containingFile.getVirtualFile() != null) {
+                                    int lineNumber = HarbourLogger.calculateLineNumber(usage);
+                                    String filePath = containingFile.getVirtualFile().getPath();
+                                    String locationKey = filePath + ":" + lineNumber;
+                                    
+                                    // Skip current location
+                                    if (!locationKey.equals(currentLocationKey)) {
+                                        String lineText = getLineText(containingFile, usage);
+                                        HarbourNavigationElement navElement = new HarbourNavigationElement(
+                                            usage, className, filePath, lineNumber, lineText, false, false);
+                                        allResults.add(navElement);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                HarbourLogger.log(COMPONENT, "Error processing usage: " + e.getMessage());
+                            }
+                        }
+                    }
+                }
+                
+                if (!allResults.isEmpty()) {
+                    final String finalClassName = className;
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        HarbourNavigationPopup.showNavigationPopup(new ArrayList<>(allResults), editor, finalClassName);
+                    });
+                    return null; // Prevent default navigation
+                }
+                
+                HarbourLogger.log(COMPONENT, "No navigation results found for class: " + className);
+                return null;
             }
         }
 
@@ -2135,8 +2195,13 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             continue;
                         }
 
-                        // Get context information for the navigation element
-                        String context = "CLASS: " + className;
+                        // Get the actual line text for context
+                        String lineText = getLineText(containingFile, declaration);
+                        
+                        // Use the actual line text as context if available, otherwise use default
+                        String context = lineText != null && lineText.toUpperCase().contains("CLASS") 
+                            ? lineText.trim() 
+                            : "CLASS " + className;
 
                         // Create navigation element - class declarations are always definitions
                         HarbourNavigationElement navigationElement = new HarbourNavigationElement(

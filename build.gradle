@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.1.9'
+version = '1.1.19'
 
 repositories {
     mavenCentral()
@@ -32,8 +32,8 @@ dependencies {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 intellijPlatform {

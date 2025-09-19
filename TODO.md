@@ -1,10 +1,5 @@
 # TODOs
 
-- navigation
-  - CLASS NegVerfuegItem<= not navigatable pls fix
-  - define definition in ch files not found, should be at top like func names etc.
-  - myCMonth() not working
-
 - code completion
   - rech:faell <ctrls-space> should propose matching methods and data fields
   - Error(TRY_ ctrl-space => should deliver TRY_AGAIN from ch file
@@ -13,8 +8,6 @@
 - db viewer
   - dbf file open in project explorer, right click => not available
 
-indentation:
-- endif return not unindented
 
 - new: 
 - tab completion: ctrl tab?

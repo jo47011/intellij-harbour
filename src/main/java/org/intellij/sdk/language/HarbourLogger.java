@@ -283,9 +283,16 @@ public class HarbourLogger {
             int offset = element.getTextOffset();
 
             // Ensure offset is valid
-            if (offset >= 0 && offset < fileText.length()) {
+            if (offset >= 0 && offset <= fileText.length()) {
                 // Count the number of newlines up to this offset
-                return fileText.substring(0, offset).split("\n").length;
+                // Lines are 1-based, so the number of newlines + 1 gives us the line number
+                int lineNumber = 1;
+                for (int i = 0; i < offset && i < fileText.length(); i++) {
+                    if (fileText.charAt(i) == '\n') {
+                        lineNumber++;
+                    }
+                }
+                return lineNumber;
             }
         } catch (Exception e) {
             log("LineCalculator", "Error calculating line number: " + e.getMessage());

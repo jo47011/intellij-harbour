@@ -8,11 +8,15 @@ import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiRecursiveElementVisitor;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.impl.FakePsiElement;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -1247,10 +1251,6 @@ public final class HarbourReferenceService {
         Instant start = Instant.now();
         List<PsiElement> results = new ArrayList<>();
 
-        // Pattern for matching class declarations
-        Pattern classPattern = Pattern.compile(
-                "(?i)\\bCLASS\\s+" + Pattern.quote(className) + "\\b");
-
         try {
             // Get all Harbour files in the project
             Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
@@ -1268,35 +1268,67 @@ public final class HarbourReferenceService {
                 PsiFile psiFile = psiManager.findFile(virtualFile);
                 if (psiFile == null) continue;
 
-                // Get the file content
-                String fileContent = psiFile.getText();
-
-                // Look for class declarations
-                Matcher declarationMatcher = classPattern.matcher(fileContent);
-                while (declarationMatcher.find()) {
-                    int startOffset = declarationMatcher.start();
-                    
-                    // Comment checking disabled for performance
-                    
-                    PsiElement element = psiFile.findElementAt(startOffset);
-
-                    if (element != null) {
-                        // Try to get the full class declaration
-                        PsiElement declaration = null;
-
-                        if (element.getText().equalsIgnoreCase("CLASS")) {
-                            declaration = PsiTreeUtil.getParentOfType(element, ClassDeclaration.class);
-                        }
-
-                        // If we found a declaration, add it
-                        if (declaration != null) {
-                            results.add(declaration);
-                        } else {
-                            // Otherwise, add the element itself
-                            results.add(element);
+                // Use PSI tree traversal instead of regex on text
+                // This is more reliable for finding the actual PSI elements
+                psiFile.accept(new PsiRecursiveElementVisitor() {
+                    @Override
+                    public void visitElement(@NotNull PsiElement element) {
+                        super.visitElement(element);
+                        
+                        // Look for CLASS keyword elements
+                        if (element instanceof LeafPsiElement) {
+                            LeafPsiElement leaf = (LeafPsiElement) element;
+                            if (leaf.getText().equalsIgnoreCase("CLASS")) {
+                                // Found a CLASS keyword, now check if the next identifier is our class name
+                                PsiElement nextElement = leaf.getNextSibling();
+                                
+                                // Skip whitespace
+                                while (nextElement != null && (nextElement instanceof PsiWhiteSpace || 
+                                       nextElement.getText().trim().isEmpty())) {
+                                    nextElement = nextElement.getNextSibling();
+                                }
+                                
+                                // Check if the next element is our class name
+                                if (nextElement != null && nextElement.getText().equalsIgnoreCase(className)) {
+                                    // Found our class declaration!
+                                    // Get the actual line text to verify
+                                    int lineNumber = HarbourLogger.calculateLineNumber(leaf);
+                                    String fileText = psiFile.getText();
+                                    String[] lines = fileText.split("\n");
+                                    
+                                    if (lineNumber > 0 && lineNumber <= lines.length) {
+                                        String actualLine = lines[lineNumber - 1];
+                                        if (!actualLine.toUpperCase().contains("CLASS")) {
+                                            // Line calculation is off, try to find the correct line
+                                            HarbourLogger.log("ReferenceService", 
+                                                "WARNING: Line " + lineNumber + " doesn't contain CLASS, got: " + actualLine);
+                                            // Search nearby lines for the CLASS line
+                                            for (int offset = -2; offset <= 2; offset++) {
+                                                int checkLine = lineNumber + offset;
+                                                if (checkLine > 0 && checkLine <= lines.length) {
+                                                    String checkLineText = lines[checkLine - 1];
+                                                    if (checkLineText.toUpperCase().contains("CLASS " + className.toUpperCase())) {
+                                                        lineNumber = checkLine;
+                                                        HarbourLogger.log("ReferenceService", 
+                                                            "CORRECTED: Found CLASS at line " + lineNumber);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Add the CLASS keyword element directly - no wrapper
+                                    // Navigation needs real PSI elements to work correctly
+                                    results.add(leaf);
+                                    HarbourLogger.log("ReferenceService", 
+                                        "Found CLASS " + className + " at line " + lineNumber + 
+                                        " in " + virtualFile.getName());
+                                }
+                            }
                         }
                     }
-                }
+                });
             }
         } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
             // Rethrow ProcessCanceledException - these should never be caught and logged
@@ -1310,6 +1342,7 @@ public final class HarbourReferenceService {
         Instant end = Instant.now();
         Duration duration = Duration.between(start, end);
         HarbourLogger.log("ReferenceService", "Direct class search took: " + duration.toMillis() + "ms");
+        HarbourLogger.log("ReferenceService", "Direct search found " + results.size() + " results for class: " + className);
 
         return results;
     }
