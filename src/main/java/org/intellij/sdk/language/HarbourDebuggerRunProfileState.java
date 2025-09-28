@@ -68,10 +68,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     @NotNull
     @Override
     protected ProcessHandler startProcess() throws ExecutionException {
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "========= START PROCESS DEBUG =========");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "startProcess() method called");
-        
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to call exportBreakpointsToFile()");
         
         // Check if mute state is available from HarbourDebuggerRunner (two-phase startup)
         Boolean globalMuteState = env.getUserData(HarbourDebuggerRunner.GLOBAL_MUTE_STATE_KEY);
@@ -84,8 +80,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     "Two-phase startup: Mute state not available, using fallback approach");
             exportBreakpointsToFile();
         }
-        
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "exportBreakpointsToFile() call completed");
 
         GeneralCommandLine commandLine = new GeneralCommandLine();
 
@@ -125,22 +119,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         // Add comprehensive debugging for Windows connection issues
         String osName = System.getProperty("os.name", "").toLowerCase();
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "========= CONNECTION DEBUGGING v1.0.240 =========");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "OS detected: " + osName);
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Debug library selection: " + (osName.contains("windows") ? "Windows Simple" : "Unix Standard"));
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "HB_REMOTE_DEBUG environment variable: " + commandLine.getEnvironment().get("HB_REMOTE_DEBUG"));
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "HB_DBG_PATH environment variable: " + commandLine.getEnvironment().get("HB_DBG_PATH"));
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Expected debug protocol: TCP socket on port 9876");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Expected PyCharm behavior: Should listen on 127.0.0.1:9876 for incoming connections");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "================================================");
 
         OSProcessHandler handler;
         try {
@@ -204,8 +182,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
                     // DEBUG MODE ONLY: For GUI applications, launch executable after successful compilation
                     if (event.getExitCode() == 0 && isGuiProgram && isDebugMode) {
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                "DEBUG MODE - GUI APPLICATION: Compilation successful, launching executable for debugging");
                         
                         try {
                             // Determine executable name from build target
@@ -610,13 +586,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (isDebugMode) {
             // DEBUG MODE: Use actual debug port
             parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
-            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "DEBUG MODE: Added -DDBG_PORT=" + runConfig.getDebugPort() + " for debugging and error handling");
         } else {
             // RUN MODE: Use default port for error handling
             parameters.add("-DDBG_PORT=9876");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "RUN MODE: Added -DDBG_PORT=9876 for error handling");
         }
         
         // FIXED: No manual GUI parameter additions
@@ -649,11 +621,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             // In debug mode, also add the debug library
             String debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
             parameters.add(debugSourcePath);
-            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "DEBUG MODE: Added error handler, monitor and debug library to command line");
-        } else {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "RUN MODE: Added error handler and monitor to command line");
         }
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
@@ -1578,13 +1545,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     @Override
     public ExecutionResult execute(@NotNull Executor executor, @NotNull com.intellij.execution.runners.ProgramRunner<?> runner)
             throws ExecutionException {
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "========= EXECUTE DEBUG =========");
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "execute() method called");
-        
-        // Check if this is debug mode and if mute state is available from HarbourDebuggerRunner
+        // Check if this is debug mode
         this.isDebugMode = DefaultDebugExecutor.EXECUTOR_ID.equals(executor.getId());
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Executor mode: " + (this.isDebugMode ? "DEBUG" : "RUN") + " (ID: " + executor.getId() + ")");
         
         // Create console BEFORE starting process to capture all output
         TextConsoleBuilder consoleBuilder = TextConsoleBuilderFactory.getInstance()
@@ -1607,14 +1569,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
                 if (isGui) {
                     // For GUI applications (both debug and run mode), keep the error monitor running
-                    // The GUI application continues running after compilation
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                            "GUI application terminated, keeping error monitor running");
-
                     // In run mode, launch the executable after successful compilation
                     if (!isDebugMode && event.getExitCode() == 0) {
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                "RUN MODE: Launching GUI executable after successful compilation");
 
                         try {
                             // Determine executable name from build target
@@ -1642,13 +1598,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                             File projectDir = new File(workingDir);
                             File executable = new File(projectDir, exeName);
 
-                            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                    "Looking for executable: " + executable.getAbsolutePath());
-
                             if (executable.exists()) {
-                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                        "Found executable, launching: " + executable.getAbsolutePath());
-
                                 // Create command to launch executable in run mode
                                 GeneralCommandLine launchCommand = new GeneralCommandLine();
                                 launchCommand.setExePath(executable.getAbsolutePath());
@@ -1657,9 +1607,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                                 // Launch as separate process
                                 OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
                                 launchHandler.startNotify();
-
-                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                        "GUI executable launched successfully in run mode");
                             } else {
                                 HarbourLogger.log(env.getProject(), "HarbourDebugger",
                                         "ERROR: Executable not found: " + executable.getAbsolutePath());
@@ -1671,8 +1618,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     }
                 } else if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
                     // For console applications only, stop the monitor
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                            "Console application terminated, stopping error monitor thread");
                     errorMonitorThread.interrupt();
                     try {
                         errorMonitorThread.join(1000); // Wait up to 1 second for thread to stop
@@ -1688,10 +1633,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.setConsole(console);
         HarbourLogger.log(env.getProject(), "HarbourDebugger", "Console logging enabled", HarbourLogger.LogLevel.DEBUG);
 
-        // File monitor for error display in console
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "About to start error file monitor");
+        // Start error file monitor
         startHarbourErrorFileMonitor(console, env.getProject());
-        HarbourLogger.log(env.getProject(), "HarbourDebugger", "Error file monitor started");
         
         // Clear console after monitors are set up but before showing command
         console.clear();
@@ -2141,13 +2084,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         final String hbmkErrorPath = workingDir + File.separator + ".hbmk" + File.separator + "pycharm_errors.log";
         final File hbmkErrorFile = new File(hbmkErrorPath);
 
-        HarbourLogger.log(project, "HarbourDebugger", "=== ERROR MONITOR SETUP ===");
-        HarbourLogger.log(project, "HarbourDebugger", "Working directory: " + workingDir);
-        HarbourLogger.log(project, "HarbourDebugger", "Monitoring file path: " + hbmkErrorPath);
-        HarbourLogger.log(project, "HarbourDebugger", "File exists at start: " + hbmkErrorFile.exists());
-        HarbourLogger.log(project, "HarbourDebugger", "File absolute path: " + hbmkErrorFile.getAbsolutePath());
-        HarbourLogger.log(project, "HarbourDebugger", "Parent directory exists: " + hbmkDir.exists());
-        HarbourLogger.log(project, "HarbourDebugger", "===========================");
         
         // Make workingDir effectively final for lambda
         final String finalWorkingDir = workingDir;
@@ -2161,37 +2097,16 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
                     checkCount++;
-
-                    if (checkCount % 50 == 0) { // Log every 5 seconds (50 * 100ms)
-                        HarbourLogger.log(project, "HarbourDebugger", 
-                            "Error monitor check #" + checkCount + 
-                            ", .hbmk/pycharm_errors.log exists: " + hbmkErrorFile.exists() + 
-                            ", size: " + (hbmkErrorFile.exists() ? hbmkErrorFile.length() : 0));
-                    }
                     
                     // Check .hbmk/pycharm_errors.log (PRIMARY)
                     if (hbmkErrorFile.exists()) {
                         long currentModified = hbmkErrorFile.lastModified();
                         long currentSize = hbmkErrorFile.length();
 
-                        // Log first detection
-                        if (hbmkLastModified == 0 && currentSize > 0) {
-                            HarbourLogger.log(project, "HarbourDebugger",
-                                "ERROR FILE DETECTED: " + hbmkErrorFile.getAbsolutePath() +
-                                " (size: " + currentSize + " bytes)");
-                        }
-
                         // Only read if file was modified and has new content
                         if (currentModified > hbmkLastModified || currentSize > hbmkLastSize) {
-                            HarbourLogger.log(project, "HarbourDebugger",
-                                "ERROR FILE CHANGED! Path: " + hbmkErrorFile.getAbsolutePath() +
-                                ", Modified: " + currentModified + " > " + hbmkLastModified +
-                                ", Size: " + currentSize + " > " + hbmkLastSize);
                             try {
                                 String content = new String(java.nio.file.Files.readAllBytes(hbmkErrorFile.toPath()));
-                                HarbourLogger.log(project, "HarbourDebugger",
-                                    "Read error file content (" + content.length() + " chars): " +
-                                    content.substring(0, Math.min(200, content.length())));
 
                                 if (!content.trim().isEmpty()) {
                                     // Send error to console with simple direct hyperlinks
@@ -2240,7 +2155,6 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         // Stop any existing error monitor thread before starting a new one
         if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
-            HarbourLogger.log(project, "HarbourDebugger", "Stopping existing error monitor thread");
             errorMonitorThread.interrupt();
             try {
                 errorMonitorThread.join(1000); // Wait up to 1 second for thread to stop
