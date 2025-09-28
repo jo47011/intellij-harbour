@@ -199,13 +199,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 
                 @Override
                 public void processTerminated(@NotNull com.intellij.execution.process.ProcessEvent event) {
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
                             "Process terminated with exit code: " + event.getExitCode());
-                    
-                    // FIXED: For GUI applications, launch executable after successful compilation
-                    if (event.getExitCode() == 0 && isGuiProgram) {
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                                "GUI APPLICATION: Compilation successful, launching executable for debugging");
+
+                    // DEBUG MODE ONLY: For GUI applications, launch executable after successful compilation
+                    if (event.getExitCode() == 0 && isGuiProgram && isDebugMode) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                "DEBUG MODE - GUI APPLICATION: Compilation successful, launching executable for debugging");
                         
                         try {
                             // Determine executable name from build target
@@ -588,13 +588,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         } else {
             // RUN MODE: Standard compilation without debug flags
             if (isGui) {
-                // GUI programs: Just compile
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        "RUN MODE - GUI PROGRAM: Standard compilation (no debug flags)");
+                // GUI programs: Just compile, no -run flag (we'll launch manually)
+                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                        "RUN MODE - GUI PROGRAM: Standard compilation (no -run, will launch manually)");
             } else {
                 // Console programs: Use -run for immediate execution
                 parameters.add("-run");
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                HarbourLogger.log(env.getProject(), "HarbourDebugger",
                         "RUN MODE - CONSOLE PROGRAM: Standard compilation with -run");
             }
         }
@@ -606,18 +606,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Remove FORCE_DEBUG_MODE - it was triggering Harbour debugger instead of PyCharm
         // parameters.add("-DFORCE_DEBUG_MODE=1");  // REMOVED - not in working version
         
-        // Add debug defines only in debug mode
+        // Add DBG_PORT define for both debug and run modes (needed for error handler)
         if (isDebugMode) {
-            // CRITICAL FIX: DO NOT define __HARBOUR_DEBUG__ as it activates altd() calls in user code
-            // which causes crashes when debugger isn't properly initialized
-            // parameters.add("-D__HARBOUR_DEBUG__"); // REMOVED - causes altd() crash
+            // DEBUG MODE: Use actual debug port
             parameters.add("-DDBG_PORT=" + runConfig.getDebugPort());
-            
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "DEBUG MODE: Added debug defines: -DDBG_PORT=" + runConfig.getDebugPort() + " (NOT defining __HARBOUR_DEBUG__ to prevent altd() crashes)");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "DEBUG MODE: Added -DDBG_PORT=" + runConfig.getDebugPort() + " for debugging and error handling");
         } else {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "RUN MODE: Skipped debug defines");
+            // RUN MODE: Use default port for error handling
+            parameters.add("-DDBG_PORT=9876");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "RUN MODE: Added -DDBG_PORT=9876 for error handling");
         }
         
         // FIXED: No manual GUI parameter additions
@@ -637,36 +636,24 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     "Added -rebuild flag to compiler arguments");
         }
 
-        // Error handling libraries - conditional addition based on execution context
+        // Error handling libraries - add to command line for PyCharm execution
         String errorHandlerPath = buildDir + File.separator + "harbour_error_handler.prg";
         String errorMonitorPath = buildDir + File.separator + "harbour_error_monitor.prg";
 
-        // Detect if we're running in PyCharm environment
-        boolean isPyCharmEnvironment = true; // Always true when launched from PyCharm plugin
+        // Always add error handler files when running from PyCharm
+        // The DBG_PORT define was already added above
+        parameters.add(errorHandlerPath);
+        parameters.add(errorMonitorPath);
 
-        if (isDebugMode) {
-            // DEBUG MODE: Add error handler files to command line for printDebugStackTrace() support
-            parameters.add("-DDBG_PORT=9876");
-            parameters.add(errorHandlerPath);
-            parameters.add(errorMonitorPath);
-
-            if (!finalBuildTarget.endsWith("harbour_debug.prg")) {
-                String debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
-                parameters.add(debugSourcePath);
-                HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                        "DEBUG MODE: Added error handler, monitor and debug library WITH -DDBG_PORT=9876");
-            }
-        } else if (isPyCharmEnvironment) {
-            // RUN MODE in PyCharm: Add files with special define for error monitoring
-            parameters.add("-DPYCHARM_RUN=1");
-            parameters.add(errorHandlerPath);
-            parameters.add(errorMonitorPath);
+        if (isDebugMode && !finalBuildTarget.endsWith("harbour_debug.prg")) {
+            // In debug mode, also add the debug library
+            String debugSourcePath = buildDir + File.separator + "harbour_debug.prg";
+            parameters.add(debugSourcePath);
             HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "RUN MODE (PyCharm): Added error handler and monitor WITH -DPYCHARM_RUN=1 for error capture");
+                    "DEBUG MODE: Added error handler, monitor and debug library to command line");
         } else {
-            // STANDALONE MODE: Files are copied but NOT added to command line
             HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                    "STANDALONE MODE: Error files copied but NOT added to command line to avoid conflicts");
+                    "RUN MODE: Added error handler and monitor to command line");
         }
 
         if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
@@ -1618,15 +1605,74 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 // Check if this is a GUI application
                 boolean isGui = isGuiProgram(runConfig);
 
-                if (isGui && isDebugMode) {
-                    // For GUI debug mode, keep the error monitor running
+                if (isGui) {
+                    // For GUI applications (both debug and run mode), keep the error monitor running
                     // The GUI application continues running after compilation
                     HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                            "GUI application compilation terminated, keeping error monitor running for launched application");
+                            "GUI application terminated, keeping error monitor running");
+
+                    // In run mode, launch the executable after successful compilation
+                    if (!isDebugMode && event.getExitCode() == 0) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                "RUN MODE: Launching GUI executable after successful compilation");
+
+                        try {
+                            // Determine executable name from build target
+                            String buildTarget = runConfig.getSourceFile();
+                            String exeName;
+                            String currentOS = System.getProperty("os.name").toLowerCase();
+                            String exeExtension = currentOS.contains("windows") ? ".exe" : "";
+
+                            if (buildTarget.endsWith(".hbp")) {
+                                File hbpFile = new File(buildTarget);
+                                String projectName = hbpFile.getName().replace(".hbp", "");
+                                exeName = projectName + exeExtension;
+                            } else {
+                                File sourceFile = new File(buildTarget);
+                                String sourceName = sourceFile.getName().replace(".prg", "");
+                                exeName = sourceName + exeExtension;
+                            }
+
+                            // Use the working directory from configuration
+                            String workingDir = runConfig.getWorkingDirectory();
+                            if (workingDir == null || workingDir.isEmpty()) {
+                                workingDir = env.getProject().getBasePath();
+                            }
+
+                            File projectDir = new File(workingDir);
+                            File executable = new File(projectDir, exeName);
+
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                    "Looking for executable: " + executable.getAbsolutePath());
+
+                            if (executable.exists()) {
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                        "Found executable, launching: " + executable.getAbsolutePath());
+
+                                // Create command to launch executable in run mode
+                                GeneralCommandLine launchCommand = new GeneralCommandLine();
+                                launchCommand.setExePath(executable.getAbsolutePath());
+                                launchCommand.setWorkDirectory(projectDir);
+
+                                // Launch as separate process
+                                OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
+                                launchHandler.startNotify();
+
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                        "GUI executable launched successfully in run mode");
+                            } else {
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                        "ERROR: Executable not found: " + executable.getAbsolutePath());
+                            }
+                        } catch (Exception e) {
+                            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                    "Error launching GUI executable: " + e.getMessage());
+                        }
+                    }
                 } else if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
-                    // For console applications or run mode, stop the monitor
+                    // For console applications only, stop the monitor
                     HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                            "Process terminated, stopping error monitor thread");
+                            "Console application terminated, stopping error monitor thread");
                     errorMonitorThread.interrupt();
                     try {
                         errorMonitorThread.join(1000); // Wait up to 1 second for thread to stop
@@ -2111,19 +2157,10 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             long hbmkLastModified = 0;
             long hbmkLastSize = 0;
             int checkCount = 0;
-            int maxChecksForGui = 6000; // 10 minutes for GUI apps (6000 * 100ms)
-            boolean isGui = isGuiProgram(runConfig);
 
             while (!Thread.currentThread().isInterrupted()) {
                 try {
                     checkCount++;
-
-                    // For GUI apps in debug mode, stop monitoring after timeout
-                    if (isGui && isDebugMode && checkCount > maxChecksForGui) {
-                        HarbourLogger.log(project, "HarbourDebugger",
-                                "GUI error monitor timeout reached (10 minutes), stopping monitor");
-                        break;
-                    }
 
                     if (checkCount % 50 == 0) { // Log every 5 seconds (50 * 100ms)
                         HarbourLogger.log(project, "HarbourDebugger", 

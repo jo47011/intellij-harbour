@@ -231,22 +231,23 @@ ErrorBlock({|oError| MyCustomHandler(oError)})
 
 FUNCTION MyCustomHandler(oError)
    // Your custom error logic here
-   LogToMyDatabase(oError)
-   SaveToLogFile(oError)
-   
-   // Generate PyCharm-compatible stack trace
-   printDebugStackTrace()
-   
+
+   // Generate PyCharm-compatible stack trace when running in PyCharm
+   #ifdef DBG_PORT
+      printDebugStackTrace()
+   #endif
+
    // Continue with your error handling
-   QUIT
 RETURN NIL
 ```
 
 **Key points:**
 
 - Add `printDebugStackTrace()` to your custom error handler
+- Use `#ifdef DBG_PORT` to conditionally include it (works for both debug and run modes in PyCharm)
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
+- The code compiles cleanly outside PyCharm (the function call is skipped)
 
 ## Code Helpers
 
