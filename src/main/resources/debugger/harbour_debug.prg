@@ -1163,9 +1163,9 @@ STATIC PROCEDURE SendArrayElements(cParams)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL aParams, cScope, cArrayName, nStart, nCount
    LOCAL xArray, xElement, cType, i
-   LOCAL vmStack, aStack
-   LOCAL nStackIndex, l
-   LOCAL tmp, vName, nPrivates, nPublics, cName, xValue, nEnd
+   LOCAL vmStack
+   LOCAL nStackIndex
+   LOCAL tmp, nPrivates, nPublics, cName, xValue, nEnd
    LOCAL cBaseName, aIndices, nPos, cIndex
    
    oDebugInfo := __DEBUGITEM()
@@ -1312,7 +1312,7 @@ STATIC PROCEDURE SendHashElements(cParams)
    LOCAL xHash, cKey, xValue, cType
    LOCAL vmStack
    LOCAL nStackIndex
-   LOCAL tmp, vName, nPrivates, nPublics, cName
+   LOCAL tmp, vName, nPrivates, nPublics
    LOCAL cBaseName, aIndices, nPos, cIndex
    LOCAL aKeys, i
    
@@ -1446,7 +1446,7 @@ STATIC PROCEDURE SendObjectProperties(cParams)
    LOCAL aParams, cScope, cObjectName
    LOCAL xObject, xValue, cType, i
    LOCAL vmStack, aStack
-   LOCAL nStackIndex, l
+   LOCAL nStackIndex
    LOCAL tmp, vName, nPrivates, nPublics
    LOCAL aProperties, cPropName
    
@@ -1789,7 +1789,7 @@ RETURN
 STATIC PROCEDURE SendAreaRecords(nArea, aParams)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL nStart := 1, nCount := 20
-   LOCAL i, j, xValue, cFieldName
+   LOCAL i, j, xValue
    LOCAL nSaveRecNo := RecNo()
    LOCAL nFieldCount := FCount()
    
@@ -2018,7 +2018,6 @@ STATIC PROCEDURE SendExpression(cParams)
    LOCAL cModule, nModIndex := 0
    LOCAL cVarName, xValue, lFound := .F.
    LOCAL lHasLocals, lMacroWorked
-   LOCAL l
    LOCAL nBracketStart, nBracketEnd, cVarPart, cKeyPart
    
    // Debug log entry
@@ -2397,11 +2396,14 @@ STATIC FUNCTION GetPrivateOrPublic(cVarName)
 RETURN xValue
 
 // Evaluate complex expressions with variable substitution
+// NOTE: Currently unused but preserved for potential future use
+// Commenting out to avoid compiler warnings about unused function
+/*
 STATIC FUNCTION EvaluateComplexExpression(cExpression, nStackLevel, vmStack, aStack)
    LOCAL xResult := NIL
    LOCAL bError, oErr
-   LOCAL cModified, nPos, cVarName, xVarValue
-   LOCAL i, nStackIndex, tmp
+   LOCAL nPos, cVarName, xVarValue
+   LOCAL i
    LOCAL cUpper := Upper(cExpression)
    LOCAL aVars := {}
    LOCAL cTemp
@@ -2475,6 +2477,7 @@ STATIC FUNCTION EvaluateComplexExpression(cExpression, nStackLevel, vmStack, aSt
    
    // For other complex expressions, return NIL to use fallback
 RETURN NIL
+*/
 
 // Replace variable names in expression with their values (VSCode pattern)
 STATIC FUNCTION ReplaceExpression(cExpr, aDbg, cName, xValue)
@@ -2555,11 +2558,17 @@ STATIC FUNCTION GetStackId(nLevel, aStack)
 RETURN AScan(aStack, {|a| a[HB_DBG_CS_LEVEL] == l})
 
 // Get variable value from any scope
+// NOTE: Currently unused (only called by commented-out EvaluateComplexExpression)
+// Commenting out to avoid compiler warnings
+/*
 STATIC FUNCTION GetVariableValue(cVarName, nStackLevel, vmStack, aStack)
    LOCAL xValue := NIL
    LOCAL nStackIndex, i, tmp
    LOCAL cUpperName := Upper(AllTrim(cVarName))
-   
+
+   // Suppress unused parameter warning - vmStack kept for API compatibility
+   HB_SYMBOL_UNUSED(vmStack)
+
    LogDebugInfo("GetVariableValue: looking for '" + cVarName + "' at stack level " + AllTrim(Str(nStackLevel)))
    LogDebugInfo("  aStack has " + AllTrim(Str(Len(aStack))) + " frames")
    
@@ -2605,6 +2614,7 @@ STATIC FUNCTION GetVariableValue(cVarName, nStackLevel, vmStack, aStack)
    xValue := GetPrivateOrPublic(cVarName)
    
 RETURN xValue
+*/
 
 // Override AltD() to trigger debugger (WORKING SOLUTION FROM GIT HISTORY)
 PROCEDURE AltD()

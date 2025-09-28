@@ -154,42 +154,46 @@ FUNCTION GetErrorInfo(oError)
 
 /**
  * printDebugStackTrace() - Public procedure for custom error handlers
- * 
+ *
  * Call this from your custom ErrorBlock handler to generate clickable stack traces
  * in PyCharm/IntelliJ console, even when using custom error handling.
- * 
+ *
  * Usage in custom error handler:
  *   ErrorBlock({|oError| MyCustomHandler(oError)})
- *   
+ *
  *   FUNCTION MyCustomHandler(oError)
  *      // Your custom error logic here
  *      LogToMyDatabase(oError)
- *      
+ *
  *      // Generate PyCharm-compatible stack trace
- *      printDebugStackTrace()
- *      
+ *      #if defined(DBG_PORT) || defined(PYCHARM_RUN)
+ *         printDebugStackTrace()
+ *      #endif
+ *
  *      // Continue with your error handling
  *      QUIT
  *   RETURN NIL
  */
+#if defined(DBG_PORT) || defined(PYCHARM_RUN)
+// Full implementation when running in PyCharm environment
 PROCEDURE printDebugStackTrace()
    LOCAL cStackTrace, aStack
    LOCAL hFile, cLogFile
    LOCAL i := 1
-   
+
    // Collect current stack trace
    aStack := CollectStackTrace()
-   
+
    // Format stack trace for PyCharm console pattern matching
    cStackTrace := "[" + DToS(Date()) + " " + Time() + "]" + CRLF
    cStackTrace += "RUNTIME ERROR from custom ErrorBlock" + CRLF
    cStackTrace += FormatStackTrace(aStack)
-   
+
    // Write to .hbmk/pycharm_errors.log for PyCharm to detect
    IF !hb_DirExists(".hbmk")
       MakeDir(".hbmk")
    ENDIF
-   
+
    cLogFile := ".hbmk" + hb_ps() + "pycharm_errors.log"
    hFile := FOpen(cLogFile, 1)
    IF hFile == -1
@@ -197,14 +201,21 @@ PROCEDURE printDebugStackTrace()
    ELSE
       FSeek(hFile, 0, 2)
    ENDIF
-   
+
    IF hFile != -1
       FWrite(hFile, cStackTrace)
       FWrite(hFile, Replicate("-", 70) + CRLF + CRLF)
       FClose(hFile)
    ENDIF
-   
+
    // Also output to console for immediate visibility
    ? cStackTrace
-   
+
 RETURN
+#else
+// Stub implementation for standalone compilation
+PROCEDURE printDebugStackTrace()
+   // Empty stub - does nothing when compiled outside PyCharm
+   // This prevents "undefined reference" errors during standalone compilation
+RETURN
+#endif
