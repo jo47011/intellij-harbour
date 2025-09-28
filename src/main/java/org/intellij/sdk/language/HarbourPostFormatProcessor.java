@@ -262,6 +262,22 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             String lineWithWhitespace = lines[i];
             String line = lineWithWhitespace.trim();
+
+            // Clean up malformed continuations
+            // This fixes code that was previously malformed
+            if (line.contains(",;") && !line.endsWith(",;")) {
+                // Replace ,; in the middle of line with just ,
+                line = line.replaceAll(",;\\s+", ", ");
+                lineWithWhitespace = lineWithWhitespace.replaceAll(",;\\s+", ", ");
+            }
+
+            // Clean up semicolons before logical operators - they should never appear
+            line = line.replaceAll(";\\s*\\.and\\.", " .and.");
+            line = line.replaceAll(";\\s*\\.or\\.", " .or.");
+            line = line.replaceAll(";\\s*\\.not\\.", " .not.");
+            lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s*\\.and\\.", " .and.");
+            lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s*\\.or\\.", " .or.");
+            lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s*\\.not\\.", " .not.");
             
             // Check for block comment start/end
             if (line.contains("/*")) {
@@ -587,8 +603,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         result.append("\n");
                     }
                 }
-            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 && shouldBreakLine(processedLine)) {
+            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 && shouldBreakLine(processedLine) && !isLineContinuation) {
                 // Line needs breaking (skip for very large files to improve performance)
+                // Never break continuation lines - they're already part of a multi-line statement
                 List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
 
                 for (int j = 0; j < brokenLines.size(); j++) {
@@ -596,13 +613,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     if (j < brokenLines.size() - 1) {
                         result.append("\n");
                     } else if (i < lines.length - 1) {
-                        // Check if the next line is a continuation line
-                        // If so, don't add newline to avoid empty line between continuation
-                        boolean nextLineIsContinuation = (i + 1 < lines.length) && continuationLines.contains(i + 1);
-                        if (!nextLineIsContinuation) {
-                            // Only add newline after last segment if not at end of file and next line is not a continuation
-                            result.append("\n");
-                        }
+                        // Always add newline if not at end of file
+                        result.append("\n");
                     }
                 }
             } else {
@@ -638,11 +650,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
             }
             
-            // elseif increases indent like if, but else does NOT increase indent
-            // Don't increase indent if this is a continuation line
-            if (!isLineContinuation && lowerLine.startsWith("elseif")) {
-                indentLevel++;
-            }
+            // else does NOT increase indent (elseif is handled with if statements above)
+            // elseif should also not increase indent separately since it's already handled
 
             // Increase indent after switch statement
             // Don't increase indent if this is a continuation line
@@ -680,6 +689,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // Check if this line already contains string continuation
         if (STRING_CONTINUATION_PATTERN.matcher(line).matches()) {
             // Not breaking line with existing string continuation
+            result.add(line);
+            return result;
+        }
+
+        // Check if this line already has a line continuation semicolon
+        // If it does, don't break it further as it's already been manually formatted
+        if (line.trim().endsWith(";")) {
             result.add(line);
             return result;
         }
@@ -843,26 +859,36 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private boolean shouldAddContinuationSemicolon(String segment, String fullContent, int currentPos, int breakPos) {
         String trimmedSegment = segment.trim();
-        
+
         // Don't add semicolon if segment already ends with one or ends with comment
         if (trimmedSegment.endsWith(";") || trimmedSegment.endsWith("//")) {
             return false;
         }
-        
-        // Check what comes after the break point - if next content starts with comment, no semicolon needed
+
+        // Check what comes after the break point
         String contextAfter = fullContent.substring(breakPos).trim();
+
+        // Don't add semicolon if next content starts with comment
         if (contextAfter.startsWith("//") || contextAfter.startsWith("/*")) {
             return false;
         }
-        
+
+        // Don't add semicolon if next content starts with a logical operator
+        String lowerContextAfter = contextAfter.toLowerCase();
+        if (lowerContextAfter.startsWith(".and.") ||
+            lowerContextAfter.startsWith(".or.") ||
+            lowerContextAfter.startsWith(".not.")) {
+            return false;
+        }
+
         // Don't add semicolon if we're breaking inside array/block syntax
         String contextBefore = fullContent.substring(0, currentPos);
-        
-        // Count braces to see if we're inside a block
+
+        // Count braces to see if we're inside an array literal
         int braceCount = 0;
         boolean inString = false;
         char stringDelim = 0;
-        
+
         for (char c : contextBefore.toCharArray()) {
             if (!inString && (c == '"' || c == '\'')) {
                 inString = true;
@@ -874,17 +900,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 else if (c == '}') braceCount--;
             }
         }
-        
-        // If we're inside braces, don't add semicolon
+
+        // If we're inside braces (array literal), don't add semicolon
         if (braceCount > 0) {
             return false;
         }
-        
+
         // Check if this looks like an array assignment
         if (contextBefore.contains(":=") && (contextBefore.contains("{") || contextAfter.contains("}"))) {
             return false;
         }
-        
+
         // Default: add semicolon for normal line continuation
         return true;
     }
