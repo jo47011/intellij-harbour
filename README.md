@@ -119,6 +119,65 @@ current file for easy navigation.
 Automatic code indentation and formatting follows Harbour conventions. Customize indentation, line breaks, and statement
 positioning in settings.
 
+#### Command-Line Formatting
+
+The Harbour plugin enables command-line formatting through PyCharm/IntelliJ's built-in CLI tools. This feature works automatically once the plugin is installed - no additional setup required.
+
+**How it works:**
+- PyCharm/IntelliJ IDEA provide the `format` command as part of their standard CLI tools
+- Our plugin registers the Harbour formatter with the IDE's formatting system
+- When you run the format command on `.prg` or `.ch` files, the IDE uses our plugin's formatter
+- The IDE runs in headless mode (no GUI) to perform the formatting
+
+#### PyCharm
+```bash
+# Format a single file
+pycharm.sh format /path/to/file.prg
+
+# Format all files in a directory recursively
+pycharm.sh format -recursive /path/to/project
+
+# Format with custom settings
+pycharm.sh format -s /path/to/settings.xml /path/to/project
+```
+
+#### IntelliJ IDEA
+```bash
+# Format a single file
+idea.sh format /path/to/file.prg
+
+# Format all files in a directory recursively
+idea.sh format -recursive /path/to/project
+```
+
+**Requirements:**
+- The Harbour plugin must be installed in the IDE
+- The IDE must not be running when using command-line formatting
+- The `pycharm.sh` or `idea.sh` script must be in your PATH or use full path to the script
+
+**Testing the formatter:**
+You can use these commands to test formatting during development without opening the IDE.
+
+### Format Exclusion
+
+You can exclude specific sections of code from automatic formatting using special comments:
+
+- **Block exclusion**: Use `// fmt: off` and `// fmt: on` (or `# fmt: off` and `# fmt: on`) to exclude a block of code:
+  ```harbour
+  // fmt: off
+  ? "This line will not be formatted"
+  ? "Neither will this one"
+  // fmt: on
+  ? "This line will be formatted normally"
+  ```
+
+- **Single line exclusion**: Use `// fmt: skip` (or `# fmt: skip`) to skip formatting for a single line:
+  ```harbour
+  ? "This will be formatted"
+  ? "This won't be formatted"  // fmt: skip
+  ? "This will be formatted"
+  ```
+
 <p align="center">
   <img src="img/settings-formatting.png" alt="Code Style Settings Format"/>
   <br>

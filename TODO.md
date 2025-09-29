@@ -18,3 +18,10 @@ Bugs:
 - linting s. workspace/screenshot
 
 - missing include -> link: configure include path should open the correct tab in settings
+
+
+Recherche:
+3. Command-line formatting - Confirmed support and documented usage:
+   - pycharm.sh format file.prg - format single file
+   - pycharm.sh format -recursive /directory - format directory
+   - Works when IDE is not running

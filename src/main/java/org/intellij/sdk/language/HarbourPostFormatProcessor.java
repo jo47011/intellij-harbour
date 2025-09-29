@@ -238,10 +238,25 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String line = lines[i].trim();
             String nextLine = lines[i+1].trim();
 
-            // String continuation pattern
+            // String continuation pattern - handle multiple continuations
             if (STRING_CONTINUATION_PATTERN.matcher(line).matches() &&
                     STRING_START_PATTERN.matcher(nextLine).matches()) {
                 skipLines.add(i+1); // Skip the next line
+
+                // Check for chain of string continuations
+                int j = i + 1;
+                while (j < lines.length - 1) {
+                    String currentLine = lines[j].trim();
+                    String followingLine = lines[j+1].trim();
+
+                    if (STRING_CONTINUATION_PATTERN.matcher(currentLine).matches() &&
+                            STRING_START_PATTERN.matcher(followingLine).matches()) {
+                        skipLines.add(j+1); // Skip this continuation too
+                        j++;
+                    } else {
+                        break; // End of continuation chain
+                    }
+                }
             }
 
             // Regular line continuation with semicolon
@@ -253,6 +268,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // Store previous line's *actual* indentation for comment alignment
         String previousLineActualIndent = "";
 
+        // Track format exclusion
+        boolean inFormatExclusion = false;
+
         // Main processing loop
         for (int i = 0; i < lines.length; i++) {
             // Skip lines that are part of continuation pairs
@@ -263,6 +281,34 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String lineWithWhitespace = lines[i];
             String line = lineWithWhitespace.trim();
 
+            // Check for format exclusion markers
+            if (line.contains("// fmt: off") || line.contains("# fmt: off")) {
+                inFormatExclusion = true;
+                result.append(lineWithWhitespace);
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+                continue;
+            }
+
+            if (line.contains("// fmt: on") || line.contains("# fmt: on")) {
+                inFormatExclusion = false;
+                result.append(lineWithWhitespace);
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+                continue;
+            }
+
+            // If in format exclusion or line has fmt: skip, preserve as-is
+            if (inFormatExclusion || line.contains("// fmt: skip") || line.contains("# fmt: skip")) {
+                result.append(lineWithWhitespace);
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+                continue;
+            }
+
             // Clean up malformed continuations
             // This fixes code that was previously malformed
             if (line.contains(",;") && !line.endsWith(",;")) {
@@ -271,13 +317,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 lineWithWhitespace = lineWithWhitespace.replaceAll(",;\\s+", ", ");
             }
 
-            // Clean up semicolons before logical operators - they should never appear
-            line = line.replaceAll(";\\s*\\.and\\.", " .and.");
-            line = line.replaceAll(";\\s*\\.or\\.", " .or.");
-            line = line.replaceAll(";\\s*\\.not\\.", " .not.");
-            lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s*\\.and\\.", " .and.");
-            lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s*\\.or\\.", " .or.");
-            lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s*\\.not\\.", " .not.");
+            // Clean up semicolons before logical operators on the SAME line
+            // Don't remove semicolons at end of line (for continuations)
+            if (!line.trim().endsWith(";")) {
+                // Only clean up if semicolon is not at the end
+                line = line.replaceAll(";\\s+\\.and\\.", " .and.");
+                line = line.replaceAll(";\\s+\\.or\\.", " .or.");
+                line = line.replaceAll(";\\s+\\.not\\.", " .not.");
+                lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s+\\.and\\.", " .and.");
+                lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s+\\.or\\.", " .or.");
+                lineWithWhitespace = lineWithWhitespace.replaceAll(";\\s+\\.not\\.", " .not.");
+            }
             
             // Check for block comment start/end
             if (line.contains("/*")) {
@@ -297,17 +347,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 continue; // Skip all other processing for block comment lines
             }
 
-            // Skip empty lines, but avoid empty lines after semicolon continuations
+            // Handle empty lines
             if (line.isEmpty()) {
-                // Check if previous non-empty line ended with semicolon for continuation
-                String lastResultLine = getLastNonEmptyLine(result.toString());
-                if (lastResultLine != null && lastResultLine.trim().endsWith(";")) {
-                    // Skip this empty line as it would break Harbour continuation syntax
-                    continue;
-                } else {
-                    result.append("\n");
-                    continue;
-                }
+                // Always preserve empty lines - the semicolon cleanup will handle unnecessary semicolons
+                result.append("\n");
+                continue;
             }
 
             // Skip lone semicolons
@@ -479,6 +523,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check if this line is a continuation of previous line
             boolean isLineContinuation = continuationLines.contains(i);
 
+            // Check if previous line ends with semicolon (manual continuation formatting)
+            boolean prevLineHasContinuation = i > 0 && lines[i-1].trim().endsWith(";");
+
             // Handle comment-only lines - use previous line's indentation
             boolean isCommentOnlyLine = COMMENT_LINE_PATTERN.matcher(line).matches();
             String newIndent;
@@ -551,6 +598,90 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Processed line with proper indent
             String processedLine = newIndent + processedContent.toString();
 
+            // Debug: Log all long lines
+            if (processedLine.length() > 99) {
+                log("LONG LINE (>" + 99 + "): " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
+                log("  - Full length: " + processedLine.length());
+            }
+
+            // Add missing semicolon if next line is a continuation
+            if (!processedLine.trim().endsWith(";") && i < lines.length - 1) {
+                String trimmed = processedLine.trim().toLowerCase();
+
+                // Never add semicolon after control structure keywords
+                if (trimmed.startsWith("if ") || trimmed.equals("if") ||
+                    trimmed.startsWith("else") || trimmed.equals("else") ||
+                    trimmed.startsWith("elseif ") ||
+                    trimmed.startsWith("for ") ||
+                    trimmed.startsWith("while ") ||
+                    trimmed.startsWith("do ") ||
+                    trimmed.startsWith("case ") ||
+                    trimmed.equals("otherwise") ||
+                    trimmed.startsWith("switch ") ||
+                    trimmed.startsWith("class ") ||
+                    trimmed.startsWith("method ") ||
+                    trimmed.startsWith("function ") ||
+                    trimmed.startsWith("procedure ") ||
+                    trimmed.startsWith("begin ") ||
+                    trimmed.startsWith("recover ")) {
+                    // These keywords should never have semicolons
+                    // Skip semicolon addition
+                } else {
+                    String nextLine = lines[i + 1];
+                    String nextLineTrimmed = nextLine.trim();
+
+                    // Don't add semicolon if next line is a control structure keyword
+                    String nextLineLower = nextLineTrimmed.toLowerCase();
+                    if (nextLineLower.startsWith("else") ||
+                        nextLineLower.startsWith("elseif") ||
+                        nextLineLower.startsWith("endif") ||
+                        nextLineLower.startsWith("next") ||
+                        nextLineLower.startsWith("enddo") ||
+                        nextLineLower.startsWith("endcase") ||
+                        nextLineLower.startsWith("endswitch") ||
+                        nextLineLower.startsWith("end")) {
+                        // Don't add semicolon before control structure keywords
+                    } else {
+                        // Check if next line is indented more than this line (suggesting continuation)
+                        int thisIndent = processedLine.length() - processedLine.trim().length();
+                        int nextIndent = nextLine.length() - nextLineTrimmed.length();
+
+                        // If next line is indented more and starts with certain patterns, it's a continuation
+                        if (nextIndent > thisIndent && !nextLineTrimmed.isEmpty()) {
+                            // Check if it starts with continuation patterns
+                            if (nextLineTrimmed.startsWith("\"") ||
+                                nextLineTrimmed.startsWith("'") ||
+                                nextLineTrimmed.startsWith(".and.") ||
+                                nextLineTrimmed.startsWith(".or.") ||
+                                nextLineTrimmed.startsWith(".not.") ||
+                                nextLineTrimmed.startsWith(",") ||
+                                nextLineTrimmed.startsWith("+") ||
+                                nextLineTrimmed.startsWith("-") ||
+                                nextLineTrimmed.startsWith("*") ||
+                                nextLineTrimmed.startsWith("/")) {
+                                // This is a continuation, add semicolon
+                                if (!processedLine.trim().isEmpty() && !processedLine.trim().endsWith(";")) {
+                                    processedLine = processedLine + ";";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Remove unnecessary trailing semicolon ONLY if next line is empty
+            else if (processedLine.trim().endsWith(";") && i < lines.length - 1) {
+                String nextLineTrimmed = lines[i + 1].trim();
+                // Only remove semicolon if next line is empty (no continuation needed)
+                if (nextLineTrimmed.isEmpty()) {
+                    // Next line is empty, semicolon is not needed
+                    String trimmed = processedLine.trim();
+                    if (trimmed.endsWith(";")) {
+                        processedLine = newIndent + trimmed.substring(0, trimmed.length() - 1);
+                    }
+                }
+            }
+
             // Store this actual indentation for the next line's potential comment
             // This needs to be stored AFTER all special handling is done
             if (!isCommentOnlyLine && !isLineContinuation) {
@@ -568,44 +699,68 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 result.append(processedLine);
                 result.append("\n");
 
-                // Process the continuation line if it exists and starts with a string
-                String nextLine = lines[i+1];
-                String nextLineTrimmed = nextLine.trim();
+                // Process ALL continuation lines in the chain
+                int j = i + 1;
+                while (j < lines.length) {
+                    String nextLine = lines[j];
+                    String nextLineTrimmed = nextLine.trim();
 
-                if (STRING_START_PATTERN.matcher(nextLineTrimmed).matches()) {
-                    // Get proper indentation for continuation
-                    String contIndent = newIndent + " ".repeat(indentSize);
-
-                    // FIX: Make sure not to duplicate quote marks
-                    // First ensure we have a proper string start (exactly one quote)
-                    String stringContent = nextLineTrimmed;
-                    // Count leading quotes to handle multiple formats
-                    int quoteCount = 0;
-                    while (quoteCount < stringContent.length() &&
-                            (stringContent.charAt(quoteCount) == '"' || stringContent.charAt(quoteCount) == '\'')) {
-                        quoteCount++;
+                    // Check if this line is marked to skip (part of string continuation)
+                    if (!skipLines.contains(j)) {
+                        break; // Not a continuation, stop processing
                     }
 
-                    // Use only one quote
-                    String fixedContent;
-                    if (quoteCount > 0) {
-                        char quote = stringContent.charAt(0);
-                        fixedContent = quote + stringContent.substring(quoteCount);
-                    } else {
-                        fixedContent = stringContent;
+                    if (STRING_START_PATTERN.matcher(nextLineTrimmed).matches()) {
+                        // Get proper indentation for continuation
+                        String contIndent = newIndent + " ".repeat(indentSize);
+
+                        // FIX: Make sure not to duplicate quote marks
+                        // First ensure we have a proper string start (exactly one quote)
+                        String stringContent = nextLineTrimmed;
+                        // Count leading quotes to handle multiple formats
+                        int quoteCount = 0;
+                        while (quoteCount < stringContent.length() &&
+                                (stringContent.charAt(quoteCount) == '"' || stringContent.charAt(quoteCount) == '\'')) {
+                            quoteCount++;
+                        }
+
+                        // Use only one quote
+                        String fixedContent;
+                        if (quoteCount > 0) {
+                            char quote = stringContent.charAt(0);
+                            fixedContent = quote + stringContent.substring(quoteCount);
+                        } else {
+                            fixedContent = stringContent;
+                        }
+
+                        // Add with proper indent
+                        result.append(contIndent).append(fixedContent);
+
+                        // Add newline if not at end
+                        if (j < lines.length - 1) {
+                            result.append("\n");
+                        }
                     }
 
-                    // Add with proper indent
-                    result.append(contIndent).append(fixedContent);
-
-                    // If not at end, add newline
-                    if (i < lines.length - 2) {
-                        result.append("\n");
-                    }
+                    j++;
                 }
-            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 && shouldBreakLine(processedLine) && !isLineContinuation) {
+            } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 &&
+                       !isLineContinuation && !prevLineHasContinuation && !processedLine.trim().endsWith(";")) {
                 // Line needs breaking (skip for very large files to improve performance)
                 // Never break continuation lines - they're already part of a multi-line statement
+                // Don't break lines that already end with semicolon (manually formatted continuations)
+                // Don't break lines if previous line has continuation (part of manual formatting)
+
+                // Debug logging for lines being broken
+                if (processedLine.contains("Miki Plastik") || processedLine.contains("open(") || processedLine.contains("region==DATA->Region")) {
+                    log("BREAKING LINE: " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
+                    log("  - Length: " + processedLine.length() + ", Limit: " + lineBreakPosition);
+                    log("  - shouldBreakLine: " + shouldBreakLine(processedLine));
+                    log("  - Ends with semicolon: " + processedLine.trim().endsWith(";"));
+                    log("  - Is continuation: " + isLineContinuation);
+                    log("  - Prev has continuation: " + prevLineHasContinuation);
+                }
+
                 List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
 
                 for (int j = 0; j < brokenLines.size(); j++) {
@@ -619,6 +774,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
             } else {
                 // Regular line, no breaking needed
+
+                // Debug logging for problematic line
+                if (processedLine.contains("Miki Plastik") || processedLine.contains("region==DATA->Region")) {
+                    log("NOT BREAKING LINE: " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
+                    log("  - Length: " + processedLine.length() + ", Limit: " + lineBreakPosition);
+                    if (processedLine.length() > lineBreakPosition) {
+                        log("  - Line is longer than limit but not being broken!");
+                        log("  - shouldBreakLine: " + shouldBreakLine(processedLine));
+                        log("  - Ends with semicolon: " + processedLine.trim().endsWith(";"));
+                        log("  - Is continuation: " + isLineContinuation);
+                        log("  - Prev has continuation: " + prevLineHasContinuation);
+                    }
+                }
+
                 result.append(processedLine);
 
                 // Add newline if not at end of file
@@ -700,97 +869,149 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             return result;
         }
 
-        // Start with base indent
+        // Special handling for lines starting with ? followed by a string
+        String trimmed = content.trim();
+        if (trimmed.startsWith("?") && trimmed.length() > 2) {
+            // Check if it's a string after the ?
+            int afterQ = trimmed.indexOf("?") + 1;
+            while (afterQ < trimmed.length() && Character.isWhitespace(trimmed.charAt(afterQ))) {
+                afterQ++;
+            }
+
+            if (afterQ < trimmed.length()) {
+                char stringDelim = trimmed.charAt(afterQ);
+                if (stringDelim == '"' || stringDelim == '\'') {
+                    // This is a ? followed by a string - handle specially
+                    return breakStringLine(line, indent, content, stringDelim, lineBreakPosition, indentSize);
+                }
+            }
+        }
+
+        // Regular line breaking logic for non-string lines
+        return breakRegularLine(line, indent, content, lineBreakPosition, indentSize);
+    }
+
+    /**
+     * Break a line that starts with ? followed by a string
+     */
+    private List<String> breakStringLine(String line, String indent, String content,
+                                         char stringDelim, int lineBreakPosition, int indentSize) {
+        List<String> result = new ArrayList<>();
+
+        // Find where the string actually starts and ends
+        int stringStart = content.indexOf(stringDelim);
+        if (stringStart == -1) {
+            result.add(line);
+            return result;
+        }
+
+        // Find the matching closing delimiter
+        int stringEnd = -1;
+        for (int i = stringStart + 1; i < content.length(); i++) {
+            if (content.charAt(i) == stringDelim && (i == 0 || content.charAt(i-1) != '\\')) {
+                stringEnd = i;
+                break;
+            }
+        }
+
+        if (stringEnd == -1) {
+            // String doesn't close on this line - shouldn't happen but handle gracefully
+            result.add(line);
+            return result;
+        }
+
+        // Extract the parts
+        String beforeString = content.substring(0, stringStart); // This includes the ?
+        String stringContent = content.substring(stringStart + 1, stringEnd); // Content without delimiters
+        String afterString = content.substring(stringEnd + 1);
+
+        // If the whole line fits, don't break
+        if (line.length() <= lineBreakPosition) {
+            result.add(line);
+            return result;
+        }
+
+        // Calculate how much string content fits on first line
+        int firstLineSpace = lineBreakPosition - indent.length() - beforeString.length() - 1 - 4; // -1 for opening quote, -4 for ' +;
+        if (firstLineSpace <= 0) {
+            // Can't fit anything, don't break
+            result.add(line);
+            return result;
+        }
+
+        // Break the string content
+        if (firstLineSpace >= stringContent.length()) {
+            // String fits on one line
+            result.add(line);
+        } else {
+            // Need to break the string
+            String firstPart = stringContent.substring(0, Math.min(firstLineSpace, stringContent.length()));
+            String secondPart = stringContent.substring(firstPart.length());
+
+            // First line: ? 'firstPart' +;
+            result.add(indent + beforeString + stringDelim + firstPart + stringDelim + " +;");
+
+            // Second line: 'secondPart'
+            String continuationIndent = indent + " ".repeat(indentSize);
+            result.add(continuationIndent + stringDelim + secondPart + stringDelim + afterString);
+        }
+
+        return result;
+    }
+
+    /**
+     * Break a regular (non-string) line
+     */
+    private List<String> breakRegularLine(String line, String indent, String content,
+                                          int lineBreakPosition, int indentSize) {
+        List<String> result = new ArrayList<>();
         String currentLine = indent;
         int pos = 0;
 
-        // Track string context
-        boolean inString = false;
-        char stringDelimiter = 0;
-
         while (pos < content.length()) {
             // Calculate available space
-            int availableSpace = lineBreakPosition - currentLine.length();
+            int maxLineLength = Math.min(99, lineBreakPosition);
+            int availableSpace = maxLineLength - currentLine.length() - 1; // -1 for potential semicolon
 
-            // Safety check: ensure we have positive available space
+            // Safety check
             if (availableSpace <= 0) {
-                // Line is already too long, force a break
                 result.add(currentLine);
                 currentLine = indent + " ".repeat(indentSize);
-                availableSpace = lineBreakPosition - currentLine.length();
+                availableSpace = maxLineLength - currentLine.length() - 1;
             }
 
             // Check if remaining content fits
             if (pos + availableSpace >= content.length()) {
                 currentLine += content.substring(pos);
                 result.add(currentLine);
-                currentLine = null; // Prevent duplication
                 break;
             }
 
             // Find break point
             int breakPos = findBreakPoint(content, pos, pos + availableSpace);
-            
-            // Safety check: ensure we're making progress
             if (breakPos <= pos) {
-                // Force progress by breaking at least one character ahead
-                breakPos = Math.min(pos + 1, content.length());
+                breakPos = Math.min(pos + availableSpace, content.length());
             }
 
-            // Update string context
-            for (int i = pos; i < breakPos; i++) {
-                char c = content.charAt(i);
-                if ((c == '"' || c == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
-                    if (!inString) {
-                        inString = true;
-                        stringDelimiter = c;
-                    } else if (c == stringDelimiter) {
-                        inString = false;
-                    }
-                }
-            }
-
-            // Add segment
             String segment = content.substring(pos, breakPos);
 
-            // Handle string breaks
-            if (inString) {
-                // Removed excessive logging that can cause memory issues
+            // Check if we need a semicolon
+            String trimmedSegment = segment.trim().toLowerCase();
+            boolean isControlKeyword = trimmedSegment.startsWith("if ") || trimmedSegment.equals("if") ||
+                                      trimmedSegment.startsWith("else") || trimmedSegment.equals("else") ||
+                                      trimmedSegment.startsWith("elseif ");
 
-                // Check for space at break point
-                boolean breakAtSpace = breakPos < content.length() && content.charAt(breakPos) == ' ';
-                if (breakAtSpace) {
-                    segment += " ";
-                    breakPos++;
-                }
-
-                // Close string and add continuation
-                currentLine += segment + stringDelimiter + " +;";
-                result.add(currentLine);
-
-                // Start new line with string
-                String continuationIndent = indent + " ".repeat(indentSize);
-                currentLine = continuationIndent + stringDelimiter;
+            if (isControlKeyword) {
+                currentLine += segment;
+            } else if (shouldAddContinuationSemicolon(segment, content, pos, breakPos)) {
+                currentLine += segment + ";";
             } else {
-                // Normal break - be more selective about adding semicolons
-                if (shouldAddContinuationSemicolon(segment, content, pos, breakPos)) {
-                    currentLine += segment + ";";
-                } else {
-                    currentLine += segment;
-                }
-
-                result.add(currentLine);
-
-                // Start new line
-                currentLine = indent + " ".repeat(indentSize);
+                currentLine += segment;
             }
 
-            pos = breakPos;
-        }
-
-        // Add remaining content if any
-        if (currentLine != null && currentLine.length() > indent.length()) {
             result.add(currentLine);
+            currentLine = indent + " ".repeat(indentSize);
+            pos = breakPos;
         }
 
         return result;
@@ -808,14 +1029,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             return false; // Don't break comment lines
         }
         
-        // Don't break text/string output lines (e.g., ? "very long string")
-        // Check if line starts with ? (output command) followed by string literal
-        if (trimmed.startsWith("?")) {
-            // Check if it contains a string literal
-            if (trimmed.contains("\"") || trimmed.contains("'")) {
-                return false; // Don't break text output lines
-            }
-        }
+        // Allow breaking text/string output lines if they're too long
+        // The line breaking logic will handle string continuations properly
         
         // Don't break lines that are primarily string literals
         // Pattern: lines that start with a string literal or are assignment to string literals
@@ -859,27 +1074,59 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private boolean shouldAddContinuationSemicolon(String segment, String fullContent, int currentPos, int breakPos) {
         String trimmedSegment = segment.trim();
+        String trimmedLower = trimmedSegment.toLowerCase();
+
+        // Debug logging
+        if (segment.contains("open(") || segment.contains("BesAus")) {
+            log("shouldAddContinuationSemicolon for: " + trimmedSegment);
+        }
+
+        // Don't add semicolon after control structure keywords
+        if (trimmedLower.startsWith("if ") || trimmedLower.equals("if") ||
+            trimmedLower.startsWith("else") || trimmedLower.equals("else") ||
+            trimmedLower.startsWith("elseif ") ||
+            trimmedLower.startsWith("for ") ||
+            trimmedLower.startsWith("while ") ||
+            trimmedLower.startsWith("do ") ||
+            trimmedLower.startsWith("case ") ||
+            trimmedLower.equals("otherwise") ||
+            trimmedLower.startsWith("switch ") ||
+            trimmedLower.startsWith("class ") ||
+            trimmedLower.startsWith("method ") ||
+            trimmedLower.startsWith("function ") ||
+            trimmedLower.startsWith("procedure ") ||
+            trimmedLower.startsWith("begin ") ||
+            trimmedLower.startsWith("recover ")) {
+            return false;
+        }
 
         // Don't add semicolon if segment already ends with one or ends with comment
         if (trimmedSegment.endsWith(";") || trimmedSegment.endsWith("//")) {
+            if (segment.contains("open(") || segment.contains("BesAus")) {
+                log("  -> NO: already ends with ; or //");
+            }
             return false;
         }
 
         // Check what comes after the break point
         String contextAfter = fullContent.substring(breakPos).trim();
 
+        // Don't add semicolon if the next line is 'else', 'elseif', or 'endif'
+        // This prevents breaking if-else-endif structures
+        String contextAfterLower = contextAfter.toLowerCase();
+        if (contextAfterLower.startsWith("else") ||
+            contextAfterLower.startsWith("elseif") ||
+            contextAfterLower.startsWith("endif")) {
+            return false;
+        }
+
         // Don't add semicolon if next content starts with comment
         if (contextAfter.startsWith("//") || contextAfter.startsWith("/*")) {
             return false;
         }
 
-        // Don't add semicolon if next content starts with a logical operator
-        String lowerContextAfter = contextAfter.toLowerCase();
-        if (lowerContextAfter.startsWith(".and.") ||
-            lowerContextAfter.startsWith(".or.") ||
-            lowerContextAfter.startsWith(".not.")) {
-            return false;
-        }
+        // NOTE: When next content starts with logical operators (.and., .or., .not.),
+        // we SHOULD add a semicolon - these are common continuation patterns in Harbour
 
         // Don't add semicolon if we're breaking inside array/block syntax
         String contextBefore = fullContent.substring(0, currentPos);
@@ -912,6 +1159,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         // Default: add semicolon for normal line continuation
+        if (segment.contains("open(") || segment.contains("BesAus")) {
+            log("  -> YES: adding semicolon for continuation");
+        }
         return true;
     }
 
@@ -954,7 +1204,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (c == '.' && !isWithinHarbourKeyword(content, i)) return i + 1; // Dots only if not in keywords
         }
 
-        return startPos; // No good break point found
+        // No good break point found - return endPos to force breaking at the limit
+        // This avoids character-by-character breaking for strings with no natural break points
+        return endPos;
     }
     
     /**
