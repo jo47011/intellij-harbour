@@ -22,7 +22,8 @@ public class HarbourCompilerOutputFilter implements Filter {
     private final String workingDirectory;
 
     // Pattern to match file:line references in compiler output (must be more specific to avoid matching function references)
-    private static final Pattern FILE_PATTERN = Pattern.compile("((?:\\.[\\\\/])?[^\\s:()]+\\.(prg|c|cpp|h|ch))\\((\\d+)\\)(?:\\s+Warning|\\s+Error|\\s|$)");
+    // Matches: file.prg(123) Error..., ./file.prg(123) Warning..., .\file.prg(123) Error E0020...
+    private static final Pattern FILE_PATTERN = Pattern.compile("((?:\\.[\\\\/])?[^\\s:()]+\\.(prg|c|cpp|h|ch))\\((\\d+)\\)(?:\\s+(?:Warning|Error)|\\s|$)");
     
     // Pattern to match include file references like 'filename.ch' or "filename.ch"
     private static final Pattern INCLUDE_FILE_PATTERN = Pattern.compile("['\"]([^'\"]+\\.(ch|hbh|h))['\"]|Can't open #include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|#include file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|file ['\"]([^'\"]+\\.(ch|hbh|h))['\"]|'([^']+\\.(ch|hbh|h))'|\"([^\"]+\\.(ch|hbh|h))\"");
