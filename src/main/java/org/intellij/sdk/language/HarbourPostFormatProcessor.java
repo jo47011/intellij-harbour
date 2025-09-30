@@ -71,6 +71,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     // Pattern for detecting comment-only lines
     private static final Pattern COMMENT_LINE_PATTERN =
             Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
+
+    // Patterns for fmt:off and fmt:on comments
+    private static final Pattern FMT_OFF_PATTERN =
+            Pattern.compile("^\\s*//\\s*fmt:off\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern FMT_ON_PATTERN =
+            Pattern.compile("^\\s*//\\s*fmt:on\\s*$", Pattern.CASE_INSENSITIVE);
             
     // Pattern for detecting array/block syntax that should not be broken
     private static final Pattern ARRAY_BLOCK_PATTERN =
@@ -217,6 +223,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         boolean inDoCaseBlock = false;
         boolean inClassDefinition = false;
         boolean inBlockComment = false; // Track if we're inside a block comment
+        boolean inFmtOffBlock = false; // Track if we're inside a fmt:off block
         int indentSize = 2; // Default indentation size for Harbour
         
         // Get custom indentation settings
@@ -238,6 +245,29 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         while (lineIdx < lines.length) {
             String currentLine = lines[lineIdx];
             String currentTrimmed = currentLine.trim();
+
+            // Check for fmt:off/fmt:on comments
+            if (FMT_OFF_PATTERN.matcher(currentTrimmed).matches()) {
+                inFmtOffBlock = true;
+                processedLines.add(currentLine);
+                originalIndents.add("");
+                lineIdx++;
+                continue;
+            } else if (FMT_ON_PATTERN.matcher(currentTrimmed).matches()) {
+                inFmtOffBlock = false;
+                processedLines.add(currentLine);
+                originalIndents.add("");
+                lineIdx++;
+                continue;
+            }
+
+            // If we're in a fmt:off block, preserve the line exactly as-is
+            if (inFmtOffBlock) {
+                processedLines.add(currentLine);
+                originalIndents.add("");
+                lineIdx++;
+                continue;
+            }
 
             // Check if this line ends with a continuation semicolon
             // In Harbour, semicolons are ONLY used as continuation markers, never as statement terminators
@@ -501,15 +531,16 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
         // Track format exclusion
         boolean inFormatExclusion = false;
+        inFmtOffBlock = false; // Reset for second pass
 
         // Main processing loop
         for (int i = 0; i < lines.length; i++) {
             String lineWithWhitespace = lines[i];
             String line = lineWithWhitespace.trim();
 
-            // Check for format exclusion markers
-            if (line.contains("// fmt: off") || line.contains("# fmt: off")) {
-                inFormatExclusion = true;
+            // Check for fmt:off/fmt:on comments (no space between fmt: and off/on)
+            if (FMT_OFF_PATTERN.matcher(line).matches()) {
+                inFmtOffBlock = true;
                 result.append(lineWithWhitespace);
                 if (i < lines.length - 1) {
                     result.append("\n");
@@ -517,8 +548,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 continue;
             }
 
-            if (line.contains("// fmt: on") || line.contains("# fmt: on")) {
-                inFormatExclusion = false;
+            if (FMT_ON_PATTERN.matcher(line).matches()) {
+                inFmtOffBlock = false;
                 result.append(lineWithWhitespace);
                 if (i < lines.length - 1) {
                     result.append("\n");
@@ -526,8 +557,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 continue;
             }
 
-            // If in format exclusion or line has fmt: skip, preserve as-is
-            if (inFormatExclusion || line.contains("// fmt: skip") || line.contains("# fmt: skip")) {
+            // If in fmt:off block, preserve as-is
+            if (inFmtOffBlock) {
                 result.append(lineWithWhitespace);
                 if (i < lines.length - 1) {
                     result.append("\n");
