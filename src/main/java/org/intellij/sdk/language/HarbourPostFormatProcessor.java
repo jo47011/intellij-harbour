@@ -281,13 +281,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         originalIndents.add(firstIndent);
 
                         // Add all continuation lines with proper indentation (one extra level)
-                        String continuationIndent = firstIndent + " ".repeat(indentSize);
                         int j = lineIdx + 1;
                         while (j < lines.length) {
                             String nextLine = lines[j];
                             String nextTrimmed = nextLine.trim();
 
                             if (!nextTrimmed.isEmpty()) {
+                                // Get the existing indentation of this line
+                                String existingIndent = nextLine.substring(0, nextLine.length() - nextTrimmed.length());
+                                // Add extra indentation to the existing indentation
+                                String continuationIndent = existingIndent + " ".repeat(indentSize);
+
                                 // Fix spaces around := if present and apply proper indentation
                                 String fixedContent = nextTrimmed.replaceAll("\\s*:=\\s*", ":=");
                                 String fixedNextLine = continuationIndent + fixedContent;
@@ -367,16 +371,24 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         String firstIndent = currentLine.substring(0, currentLine.length() - currentTrimmed.length());
                         originalIndents.add(firstIndent);
 
+                        log("First indent length: " + firstIndent.length() + ", indentSize: " + indentSize);
+
                         // Add all continuation lines with proper indentation
-                        String continuationIndent = firstIndent + " ".repeat(indentSize);
                         int j = lineIdx + 1;
                         while (j < lines.length) {
                             String nextLine = lines[j];
                             String nextTrimmed = nextLine.trim();
 
                             if (!nextTrimmed.isEmpty()) {
+                                // Get the existing indentation of this line
+                                String existingIndent = nextLine.substring(0, nextLine.length() - nextTrimmed.length());
+                                // Add extra indentation to the existing indentation
+                                String continuationIndent = existingIndent + " ".repeat(indentSize);
+                                log("Existing indent: " + existingIndent.length() + " spaces, adding " + indentSize + " more");
+
                                 // Apply proper indentation
                                 String fixedNextLine = continuationIndent + nextTrimmed;
+                                log("Original line: '" + nextLine + "' -> Fixed: '" + fixedNextLine + "'");
                                 processedLines.add(fixedNextLine);
                                 originalIndents.add(continuationIndent);
 
@@ -473,8 +485,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     continue;
             }
 
-            // Not a continuation or not joinable - add as is
-            processedLines.add(currentLine);
+            // Not a continuation or not joinable - add as is but fix := spacing
+            String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
+            processedLines.add(fixedLine);
             String indent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
             originalIndents.add(indent);
             lineIdx++;
