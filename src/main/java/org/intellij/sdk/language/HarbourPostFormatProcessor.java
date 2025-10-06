@@ -1008,10 +1008,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 &&
-                       !isLineContinuation && !prevLineHasContinuation) {
+                       !isLineContinuation && !prevLineHasContinuation && !isCommentOnlyLine) {
                 // Line needs breaking (skip for very large files to improve performance)
                 // Never break continuation lines - they're already part of a multi-line statement
                 // Don't break lines if previous line has continuation (part of manual formatting)
+                // Never break comment-only lines - they should be preserved as-is
 
                 // Check if this is a manual continuation (ends with continuation semicolon)
                 // A continuation semicolon is one at the end with no closing parenthesis after it
@@ -1364,6 +1365,250 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             log("  line length: " + line.length());
         }
 
+        // Special handling for "do while", "elseif", and "loca/locate for" constructs
+        String trimmedLower = content.trim().toLowerCase();
+        if (trimmedLower.startsWith("do while ")) {
+            // For "do while" statements, try to keep as much on the first line as possible
+            // Only break when we really need to
+            if (line.length() <= lineBreakPosition) {
+                // Fits on one line, don't break
+                result.add(line);
+                return result;
+            }
+
+            // Line is too long, but we want to find the best break point
+            // Try to keep the first condition with "do while" if possible
+            String afterDoWhile = content.substring(9); // Skip "do while "
+
+            // Find the LAST logical operator that would still fit on the line
+            int breakAfterLogical = -1;
+            String contentLower = content.toLowerCase();
+            String[] operators = {".and.", ".or."};
+
+            // Look for all logical operators and find the last one that fits
+            for (String op : operators) {
+                int searchStart = 0;
+                while (searchStart < content.length()) {
+                    int pos = contentLower.indexOf(op, searchStart);
+                    if (pos < 0) break;
+
+                    int actualPos = pos + op.length(); // Position after operator in content
+                    String firstPart = indent + content.substring(0, actualPos);
+
+                    // Check if this break point would fit (with semicolon)
+                    if (firstPart.length() + 1 <= lineBreakPosition) { // +1 for semicolon
+                        // This fits, update our best break point
+                        breakAfterLogical = actualPos;
+                    }
+
+                    searchStart = pos + op.length();
+                }
+            }
+
+            if (breakAfterLogical > 0) {
+                // Break after the logical operator
+                String firstPart = content.substring(0, breakAfterLogical);
+                String remaining = content.substring(breakAfterLogical).trim();
+
+                // Add semicolon after the logical operator
+                result.add(indent + firstPart + ";");
+
+                // Add the continuation with proper indentation
+                String continuationIndent = indent + " ".repeat(indentSize);
+
+                // Check if remaining needs further breaking
+                if (continuationIndent.length() + remaining.length() > lineBreakPosition) {
+                    // Recursively break the remaining
+                    List<String> subLines = breakRegularLine(
+                        continuationIndent + remaining,
+                        continuationIndent,
+                        remaining,
+                        lineBreakPosition,
+                        indentSize
+                    );
+                    result.addAll(subLines);
+                } else {
+                    result.add(continuationIndent + remaining);
+                }
+                return result;
+            }
+            // If no good logical break point found, fall through to regular breaking
+        } else if (trimmedLower.startsWith("elseif ")) {
+            // Special handling for elseif statements - prevent excessive breaking
+            // Try to keep logical expressions together
+            if (line.length() <= lineBreakPosition) {
+                // Fits on one line, don't break
+                result.add(line);
+                return result;
+            }
+
+            // Line is too long. For elseif, we want to maximize content on first line
+            // Find the best break point that keeps logical units together
+
+            // First, try breaking at logical operators (.or., .and.)
+            int bestBreak = -1;
+            String contentLower = content.toLowerCase();
+
+            // Look for the last .or. or .and. that would fit
+            for (String op : new String[]{".or.", ".and."}) {
+                int pos = 0;
+                while (pos < content.length()) {
+                    int found = contentLower.indexOf(op, pos);
+                    if (found < 0) break;
+
+                    int breakPos = found + op.length();
+                    String testLine = indent + content.substring(0, breakPos);
+
+                    if (testLine.length() + 1 <= lineBreakPosition) {
+                        // This fits, update best break
+                        bestBreak = breakPos;
+                    }
+
+                    pos = found + op.length();
+                }
+            }
+
+            // If we can't break at a logical operator, or if we can fit more,
+            // try breaking at spaces (but avoid breaking $ operator from its operands)
+            if (bestBreak < 0 || bestBreak < content.length() - 20) {
+                // Look for spaces as break points, working backwards from the limit
+                int maxPos = lineBreakPosition - indent.length() - 1; // -1 for semicolon
+
+                for (int i = Math.min(maxPos, content.length() - 1); i > 7; i--) {
+                    if (content.charAt(i) == ' ') {
+                        // Don't break right after $ operator
+                        if (i > 0 && content.charAt(i-1) == '$') {
+                            continue;
+                        }
+                        // Don't break right before $ operator
+                        if (i < content.length() - 1 && content.charAt(i+1) == '$') {
+                            continue;
+                        }
+
+                        // Check if this is after a logical operator
+                        String before = content.substring(Math.max(0, i-4), i).toLowerCase();
+                        if (before.endsWith(".or") || before.endsWith(".and")) {
+                            // This is right after a logical operator, good break point
+                            bestBreak = i;
+                            break;
+                        }
+
+                        // Otherwise, this is a potential break point
+                        if (bestBreak < 0) {
+                            bestBreak = i;
+                        }
+                    }
+                }
+            }
+
+            if (bestBreak > 0) {
+                // Break at the found position
+                String firstPart = content.substring(0, bestBreak);
+                // Remove trailing spaces
+                while (firstPart.endsWith(" ")) {
+                    firstPart = firstPart.substring(0, firstPart.length() - 1);
+                }
+                String remaining = content.substring(bestBreak).trim();
+
+                // Add semicolon at the break point
+                result.add(indent + firstPart + ";");
+
+                // Add the continuation with proper indentation
+                String continuationIndent = indent + " ".repeat(indentSize);
+
+                // For the remaining part, avoid excessive breaking
+                // Only break if absolutely necessary
+                if (continuationIndent.length() + remaining.length() > lineBreakPosition) {
+                    // Try to find a good break point in the remaining part
+                    // Look for logical operators
+                    int nextBreak = -1;
+                    String remainingLower = remaining.toLowerCase();
+
+                    for (String op : new String[]{".or.", ".and."}) {
+                        int pos = remainingLower.lastIndexOf(op);
+                        if (pos > 0) {
+                            String testLine = continuationIndent + remaining.substring(0, pos + op.length());
+                            if (testLine.length() + 1 <= lineBreakPosition) {
+                                nextBreak = pos + op.length();
+                            }
+                        }
+                    }
+
+                    if (nextBreak > 0) {
+                        // Found a good break point
+                        result.add(continuationIndent + remaining.substring(0, nextBreak) + ";");
+                        result.add(continuationIndent + remaining.substring(nextBreak).trim());
+                    } else {
+                        // No good break point, keep as-is (might be too long but better than excessive breaks)
+                        result.add(continuationIndent + remaining);
+                    }
+                } else {
+                    result.add(continuationIndent + remaining);
+                }
+                return result;
+            }
+            // If no good logical break point found, fall through to regular breaking
+        } else if (trimmedLower.startsWith("loca for ") || trimmedLower.startsWith("locate for ")) {
+            // Special handling for locate/loca statements - keep "for" with the command
+            if (line.length() <= lineBreakPosition) {
+                // Fits on one line, don't break
+                result.add(line);
+                return result;
+            }
+
+            // Line is too long, but we want to keep "loca for" or "locate for" together
+            // Find a good break point after logical operators
+            int commandEnd = trimmedLower.startsWith("loca for ") ? 9 : 11; // Length of "loca for " or "locate for "
+
+            // Look for the first .and. as a preferred break point
+            int breakAfterLogical = -1;
+            String contentLower = content.toLowerCase();
+            int firstAndPos = contentLower.indexOf(".and.", commandEnd);
+
+            if (firstAndPos > 0) {
+                int breakPos = firstAndPos + 5; // After ".and."
+                String testLine = indent + content.substring(0, breakPos);
+
+                // If first .and. gives us a reasonable line length (at least 35 chars), use it
+                if (testLine.length() >= 35 && testLine.length() + 1 <= lineBreakPosition) {
+                    breakAfterLogical = breakPos;
+                }
+            }
+
+            // If no good .and. break, look for .or.
+            if (breakAfterLogical < 0) {
+                int firstOrPos = contentLower.indexOf(".or.", commandEnd);
+                if (firstOrPos > 0) {
+                    int breakPos = firstOrPos + 4; // After ".or."
+                    String testLine = indent + content.substring(0, breakPos);
+
+                    if (testLine.length() >= 35 && testLine.length() + 1 <= lineBreakPosition) {
+                        breakAfterLogical = breakPos;
+                    }
+                }
+            }
+
+            if (breakAfterLogical > 0) {
+                // Break after the logical operator
+                String firstPart = content.substring(0, breakAfterLogical);
+                String remaining = content.substring(breakAfterLogical).trim();
+
+                // Remove trailing spaces from first part
+                while (firstPart.endsWith(" ")) {
+                    firstPart = firstPart.substring(0, firstPart.length() - 1);
+                }
+
+                // Add semicolon at the break point
+                result.add(indent + firstPart + ";");
+
+                // Add continuation with proper indentation
+                String continuationIndent = indent + " ".repeat(indentSize);
+                result.add(continuationIndent + remaining);
+                return result;
+            }
+            // If no good break point found, fall through to regular breaking
+        }
+
         // If the line fits, don't break it
         if (line.length() <= lineBreakPosition) {
             result.add(line);
@@ -1512,6 +1757,50 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     if (content.charAt(i-1) == '(' || content.charAt(i-1) == ':') {
                         continue;
                     }
+
+                    // Don't break between "do" and "while" or right after "do while"
+                    if (i >= 2) {
+                        String beforeSpace = content.substring(Math.max(0, i-2), i).toLowerCase();
+                        if (beforeSpace.equals("do") && i + 5 <= content.length()) {
+                            String afterSpace = content.substring(i+1, Math.min(i+6, content.length())).toLowerCase();
+                            if (afterSpace.equals("while") || afterSpace.startsWith("while")) {
+                                continue; // Don't break between do and while
+                            }
+                        }
+                    }
+
+                    // Don't break between "loca" and "for" or "locate" and "for"
+                    if (i >= 4) {
+                        String beforeSpace = content.substring(Math.max(0, i-4), i).toLowerCase();
+                        if (beforeSpace.equals("loca") && i + 3 <= content.length()) {
+                            String afterSpace = content.substring(i+1, Math.min(i+4, content.length())).toLowerCase();
+                            if (afterSpace.equals("for") || afterSpace.startsWith("for")) {
+                                continue; // Don't break between loca and for
+                            }
+                        }
+                    }
+                    if (i >= 6) {
+                        String beforeSpace = content.substring(Math.max(0, i-6), i).toLowerCase();
+                        if (beforeSpace.equals("locate") && i + 3 <= content.length()) {
+                            String afterSpace = content.substring(i+1, Math.min(i+4, content.length())).toLowerCase();
+                            if (afterSpace.equals("for") || afterSpace.startsWith("for")) {
+                                continue; // Don't break between locate and for
+                            }
+                        }
+                    }
+
+                    // Also don't break right after "while" if it's part of "do while"
+                    if (i >= 5) {
+                        String beforeSpace = content.substring(Math.max(0, i-5), i).toLowerCase();
+                        if (beforeSpace.equals("while") || beforeSpace.endsWith(" while")) {
+                            // Check if this is a "do while" by looking further back
+                            String checkDoWhile = content.substring(0, i).toLowerCase().trim();
+                            if (checkDoWhile.equals("do while") || checkDoWhile.endsWith(" do while")) {
+                                continue; // Don't break right after "do while"
+                            }
+                        }
+                    }
+
                     lastSpace = i + 1;
                     if (bestBreakPos < 0 && !preferLogicalBreak) {
                         bestBreakPos = lastSpace;
