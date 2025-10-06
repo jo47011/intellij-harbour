@@ -50,6 +50,9 @@ public final class HarbourFunctionClassificationService {
     
     // Flag to track if scanning is in progress
     private volatile boolean scanning = false;
+
+    // Store the current progress indicator to allow cancellation
+    private volatile ProgressIndicator currentScanIndicator = null;
     
     
     // Progress tracking
@@ -232,6 +235,7 @@ public final class HarbourFunctionClassificationService {
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "Harbour plugin initialization", true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
+                currentScanIndicator = indicator;
                 indicator.setText("Indexing Harbour functions and procedures...");
                 indicator.setIndeterminate(false);
                 // Don't wrap the entire scan in ReadAction - it blocks UI updates!
@@ -240,6 +244,7 @@ public final class HarbourFunctionClassificationService {
             
             @Override
             public void onSuccess() {
+                currentScanIndicator = null;
                 scanning = false;
                 HarbourLogger.log("FunctionClassification", "Project scan completed successfully");
                 // Force re-highlighting after scan complete
@@ -248,6 +253,7 @@ public final class HarbourFunctionClassificationService {
             
             @Override
             public void onCancel() {
+                currentScanIndicator = null;
                 scanning = false;
                 initialized = false;
                 HarbourLogger.log("FunctionClassification", "Project scan was cancelled");
@@ -255,13 +261,26 @@ public final class HarbourFunctionClassificationService {
             
             @Override
             public void onThrowable(@NotNull Throwable error) {
+                currentScanIndicator = null;
                 scanning = false;
                 initialized = false;
                 HarbourLogger.error("FunctionClassification", "Project scan failed: " + error.getMessage());
             }
         });
     }
-    
+
+    /**
+     * Stop any ongoing background scanning process.
+     * This should be called when stopping a run/debug session or closing the project.
+     */
+    public void stopScanning() {
+        if (scanning && currentScanIndicator != null) {
+            HarbourLogger.log("FunctionClassification", "Stopping background scan process");
+            currentScanIndicator.cancel();
+            currentScanIndicator = null;
+            scanning = false;
+        }
+    }
 
     /**
      * Scan all Harbour files in the project to find internal function declarations with progress indication.
@@ -269,6 +288,12 @@ public final class HarbourFunctionClassificationService {
      */
     private void scanProjectForInternalFunctionsWithProgress(@NotNull ProgressIndicator indicator) {
         if (initialized) {
+            return;
+        }
+
+        // Check if project is disposed before starting
+        if (project.isDisposed()) {
+            HarbourLogger.log("FunctionClassification", "Project is disposed, skipping scan");
             return;
         }
 
@@ -317,13 +342,19 @@ public final class HarbourFunctionClassificationService {
                 // Log which file we're about to process
                 HarbourLogger.log("FunctionClassification", "Processing file " + (i+1) + "/" + totalFiles + ": " + virtualFile.getPath());
                 
+                // Check if project is disposed before processing each file
+                if (project.isDisposed()) {
+                    HarbourLogger.log("FunctionClassification", "Project is disposed, stopping scan");
+                    break;
+                }
+
                 // Update progress BEFORE processing to show which file we're working on
                 int processed = processedFiles.incrementAndGet();
                 double progress = (double) processed / totalFiles;
                 indicator.setFraction(progress);
                 indicator.setText("Scanning Harbour project files... (" + processed + "/" + totalFiles + ")");
                 indicator.setText2(virtualFile.getName());
-                
+
                 // CRITICAL: Use ProgressManager to allow UI updates
                 ProgressManager.checkCanceled(); // This allows the UI to update!
                 
@@ -331,6 +362,10 @@ public final class HarbourFunctionClassificationService {
                     // Process file in smaller chunks to allow UI updates
                     String fileContent = ApplicationManager.getApplication().runReadAction(
                         (com.intellij.openapi.util.Computable<String>) () -> {
+                            // Check project disposal inside read action
+                            if (project.isDisposed()) {
+                                return null;
+                            }
                             PsiFile psiFile = psiManager.findFile(virtualFile);
                             if (psiFile == null) {
                                 HarbourLogger.log("FunctionClassification", "Could not find PSI file for: " + virtualFile.getName());

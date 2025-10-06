@@ -124,10 +124,24 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         try {
             String currentOS = System.getProperty("os.name").toLowerCase();
             boolean isWindowsConsole = currentOS.contains("windows") && !isGuiProgram(runConfig);
-            
+
             // UNIFIED APPROACH: Use single-phase compile+run for all platforms
             // This ensures proper debug console integration
             handler = new OSProcessHandler(commandLine);
+
+            // Add listener to stop background scanning when process terminates
+            handler.addProcessListener(new ProcessAdapter() {
+                @Override
+                public void processTerminated(@NotNull ProcessEvent event) {
+                    HarbourFunctionClassificationService service =
+                        HarbourFunctionClassificationService.getInstance(env.getProject());
+                    if (service != null) {
+                        service.stopScanning();
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                            "Stopped background scanning on process termination");
+                    }
+                }
+            });
             
             if (isWindowsConsole) {
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
