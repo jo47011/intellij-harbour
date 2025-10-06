@@ -308,6 +308,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     // If no lines are too long, don't join - keep as is
                     if (!needsJoining) {
                         log("Continuation lines are properly formatted, not joining");
+
+                        // Debug logging for problematic case
+                        if (currentTrimmed.contains("Liste(")) {
+                            log("DEBUG: Processing Liste line with continuation");
+                            log("  Current line: '" + currentLine + "'");
+                            log("  Current trimmed: '" + currentTrimmed + "'");
+                        }
+
                         // Add current line unchanged but remove spaces around :=
                         String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
                         processedLines.add(fixedLine);
@@ -445,6 +453,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     // Remove the trailing semicolon and add the content
                     String firstPart = currentTrimmed.substring(0, currentTrimmed.length() - 1);
 
+                    // Track parentheses balance to detect if we're inside a function call
+                    int totalOpenParens = 0;
+                    for (char c : firstPart.toCharArray()) {
+                        if (c == '(') totalOpenParens++;
+                        else if (c == ')') totalOpenParens--;
+                    }
+
                     // Check if it ends with string concatenation pattern
                     if (firstPart.endsWith("\"+ ") || firstPart.endsWith("' +") ||
                         firstPart.endsWith("\" +") || firstPart.endsWith("'+ ") ||
@@ -463,16 +478,40 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         if (!nextTrimmed.isEmpty()) {
                             String lineToAdd = nextTrimmed;
 
+                            // Update total parentheses count with this line
+                            for (char c : lineToAdd.toCharArray()) {
+                                if (c == '(') totalOpenParens++;
+                                else if (c == ')') totalOpenParens--;
+                            }
+
                             // Check if this line also continues
                             boolean continues = false;
                             if (nextTrimmed.endsWith(";") && j < lines.length - 1) {
-                                // Check if the semicolon is a continuation
-                                int nextLastSemi = nextTrimmed.lastIndexOf(';');
-                                int nextLastParen = nextTrimmed.lastIndexOf(')');
-                                if (nextLastParen < nextLastSemi) {
+                                // If we're still inside parentheses (totalOpenParens > 0),
+                                // the semicolon is definitely a continuation
+                                if (totalOpenParens > 0) {
                                     continues = true;
                                     // Remove the trailing semicolon
                                     lineToAdd = nextTrimmed.substring(0, nextTrimmed.length() - 1);
+                                    // Update parentheses count after removing semicolon
+                                    totalOpenParens = 0;
+                                    for (char c : joined.toString().toCharArray()) {
+                                        if (c == '(') totalOpenParens++;
+                                        else if (c == ')') totalOpenParens--;
+                                    }
+                                    for (char c : lineToAdd.toCharArray()) {
+                                        if (c == '(') totalOpenParens++;
+                                        else if (c == ')') totalOpenParens--;
+                                    }
+                                } else {
+                                    // Check the old way for other cases
+                                    int nextLastSemi = nextTrimmed.lastIndexOf(';');
+                                    int nextLastParen = nextTrimmed.lastIndexOf(')');
+                                    if (nextLastParen < nextLastSemi) {
+                                        continues = true;
+                                        // Remove the trailing semicolon
+                                        lineToAdd = nextTrimmed.substring(0, nextTrimmed.length() - 1);
+                                    }
                                 }
                             }
 
@@ -1019,6 +1058,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             result.append("\n");
                         }
                     }
+                } else {
+                    // Has manual continuation - keep the line as-is
+                    if (processedLine.contains("Liste(")) {
+                        log("Keeping line with manual continuation: " + processedLine.substring(0, Math.min(80, processedLine.length())));
+                    }
+                    result.append(processedLine);
+                    if (i < lines.length - 1) {
+                        result.append("\n");
+                    }
                 }  // Close the if (!hasManualContinuation) block
             } else {
                 // Regular line, no breaking needed
@@ -1213,14 +1261,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     result.add(indent + beforeString + stringDelim + part + stringDelim + afterString);
                 } else {
                     // More parts follow
-                    result.add(indent + beforeString + stringDelim + part + stringDelim + ";");
+                    result.add(indent + beforeString + stringDelim + part + stringDelim + "+;");
                 }
             } else if (i == stringParts.size() - 1) {
                 // Last line
                 result.add(continuationIndent + stringDelim + part + stringDelim + afterString);
             } else {
                 // Middle lines
-                result.add(continuationIndent + stringDelim + part + stringDelim + ";");
+                result.add(continuationIndent + stringDelim + part + stringDelim + "+;");
             }
         }
 
@@ -1290,7 +1338,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             String secondPart = stringContent.substring(firstPart.length());
 
             // First line: ? 'firstPart';
-            result.add(indent + beforeString + stringDelim + firstPart + stringDelim + ";");
+            result.add(indent + beforeString + stringDelim + firstPart + stringDelim + "+;");
 
             // Second line: 'secondPart'
             String continuationIndent = indent + " ".repeat(indentSize);
@@ -1542,7 +1590,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
                     // First line with partial string
                     String firstPart = stringContent.substring(0, stringBreakPos);
-                    result.add(indent + beforeString + stringDelim + firstPart + stringDelim + ";");
+                    result.add(indent + beforeString + stringDelim + firstPart + stringDelim + "+;");
 
                     // Second line with rest of string
                     String remaining = stringContent.substring(stringBreakPos);
