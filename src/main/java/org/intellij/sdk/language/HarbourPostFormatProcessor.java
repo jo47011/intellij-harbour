@@ -1658,6 +1658,76 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 return result;
             }
             // If no good break point found, fall through to regular breaking
+        } else if (trimmedLower.startsWith("index ") || trimmedLower.startsWith("index on ")) {
+            // Special handling for index statements
+            // Keep "index on ... tag ... for" structure together
+            if (line.length() <= lineBreakPosition) {
+                // Fits on one line, don't break
+                result.add(line);
+                return result;
+            }
+
+            // Line is too long. Find the "for" keyword which marks the condition start
+            String contentLower = content.toLowerCase();
+            int forPos = contentLower.indexOf(" for ");
+            if (forPos > 0) {
+                // Check if we can fit everything up to and including "for" on one line
+                String upToFor = content.substring(0, forPos + 5); // Include " for "
+                String afterFor = content.substring(forPos + 5).trim();
+
+                // If the first part with "for ;" fits, break there
+                if ((indent + upToFor).length() + 1 <= lineBreakPosition) {
+                    // Add the index declaration part with semicolon
+                    result.add(indent + upToFor + ";");
+
+                    // Process the condition part
+                    String continuationIndent = indent + " ".repeat(indentSize);
+
+                    // Look for logical operators in the condition to break if needed
+                    if (continuationIndent.length() + afterFor.length() > lineBreakPosition) {
+                        // Need to break the condition too
+                        // Find a good break point at .or. or .and.
+                        int condBreak = -1;
+                        String afterForLower = afterFor.toLowerCase();
+
+                        // Find the last .or. or .and. that fits
+                        for (String op : new String[]{".or.", ".and."}) {
+                            int pos = 0;
+                            while (pos < afterFor.length()) {
+                                int found = afterForLower.indexOf(op, pos);
+                                if (found < 0) break;
+
+                                int breakPos = found + op.length();
+                                String testLine = continuationIndent + afterFor.substring(0, breakPos);
+
+                                if (testLine.length() + 1 <= lineBreakPosition) {
+                                    condBreak = breakPos;
+                                }
+
+                                pos = found + op.length();
+                            }
+                        }
+
+                        if (condBreak > 0) {
+                            // Break the condition
+                            String firstCondPart = afterFor.substring(0, condBreak);
+                            String secondCondPart = afterFor.substring(condBreak).trim();
+
+                            result.add(continuationIndent + firstCondPart + ";");
+                            result.add(continuationIndent + secondCondPart);
+                        } else {
+                            // No good break point in condition, keep as-is
+                            result.add(continuationIndent + afterFor);
+                        }
+                    } else {
+                        // Condition fits on one line
+                        result.add(continuationIndent + afterFor);
+                    }
+
+                    return result;
+                }
+            }
+            // If no "for" keyword or can't fit the structure, fall through to regular breaking
         }
 
         // If the line fits, don't break it
