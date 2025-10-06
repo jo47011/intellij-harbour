@@ -1433,6 +1433,57 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 return result;
             }
             // If no good logical break point found, fall through to regular breaking
+        } else if (trimmedLower.startsWith("if ") && !trimmedLower.startsWith("if(")) {
+            // Special handling for if statements (but not if() function calls)
+            // Prevent excessive breaking, keep logical expressions together
+            if (line.length() <= lineBreakPosition) {
+                // Fits on one line, don't break
+                result.add(line);
+                return result;
+            }
+
+            // Line is too long, find optimal break point at logical operators
+            int breakAfterLogical = -1;
+            String contentLower = content.toLowerCase();
+
+            // Look for the first .or. or .and. that gives a reasonable line
+            for (String op : new String[]{".or.", ".and."}) {
+                int searchStart = 3; // Start after "if "
+                while (searchStart < content.length()) {
+                    int pos = contentLower.indexOf(op, searchStart);
+                    if (pos < 0) break;
+
+                    int actualPos = pos + op.length();
+                    String firstPart = indent + content.substring(0, actualPos);
+
+                    // Keep updating to find the last one that fits
+                    if (firstPart.length() + 1 <= lineBreakPosition) {
+                        breakAfterLogical = actualPos;
+                    }
+
+                    searchStart = pos + op.length();
+                }
+            }
+
+            if (breakAfterLogical > 0) {
+                // Break after the logical operator
+                String firstPart = content.substring(0, breakAfterLogical);
+                String remaining = content.substring(breakAfterLogical).trim();
+
+                // Remove trailing spaces
+                while (firstPart.endsWith(" ")) {
+                    firstPart = firstPart.substring(0, firstPart.length() - 1);
+                }
+
+                // Add semicolon at the break point
+                result.add(indent + firstPart + ";");
+
+                // Add continuation with proper indentation
+                String continuationIndent = indent + " ".repeat(indentSize);
+                result.add(continuationIndent + remaining);
+                return result;
+            }
+            // If no good logical break point found, fall through to regular breaking
         } else if (trimmedLower.startsWith("elseif ")) {
             // Special handling for elseif statements - prevent excessive breaking
             // Try to keep logical expressions together
