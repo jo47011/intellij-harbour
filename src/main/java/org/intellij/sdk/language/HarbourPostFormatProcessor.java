@@ -147,6 +147,23 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             log("Processing text range: " + textRange.getStartOffset() + " to " + textRange.getEndOffset());
             log("Selected text length: " + selectedText.length());
 
+            // DEBUG: Log the actual input text line by line - DISABLED FOR PERFORMANCE
+            // Only enable for debugging specific issues
+            /*
+            log("=== INPUT TEXT (line by line) ===");
+            String[] inputLines = selectedText.split("\n");
+            for (int i = 0; i < inputLines.length; i++) {
+                String line = inputLines[i];
+                log("Line " + (i+1) + " [len=" + line.length() + "]: " +
+                    line.substring(0, Math.min(80, line.length())) +
+                    (line.length() > 80 ? "..." : ""));
+                if (line.trim().toLowerCase().endsWith(".or.;")) {
+                    log("  ^^ This line ends with .or.; and should be preserved!");
+                }
+            }
+            log("==================================");
+            */
+
             // Preserve exact original trailing whitespace - store it separately
             String originalTrailingWhitespace = extractTrailingWhitespace(selectedText);
             log("Original trailing whitespace: '" + originalTrailingWhitespace.replace("\n", "\\n") + "'");
@@ -820,13 +837,38 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (indentLevel > 0) indentLevel--;
             }
 
-            // Check if this line is a continuation of previous line
-            // Since we joined continuations, this should always be false now
-            boolean isLineContinuation = false;
-
             // Check if previous line ends with semicolon (manual continuation formatting)
-            // After joining, lines shouldn't have continuation semicolons anymore
             boolean prevLineHasContinuation = false;
+            if (i > 0) {
+                String prevLine = lines[i - 1].trim();
+                // Check if previous line ends with continuation semicolon
+                if (prevLine.endsWith(";")) {
+                    String prevLower = prevLine.toLowerCase();
+                    // It's a continuation if it ends with operators followed by ;
+                    if (prevLower.endsWith(".or.;") || prevLower.endsWith(".and.;") ||
+                        prevLower.endsWith("+;") || prevLower.endsWith("-;") ||
+                        prevLower.endsWith("*;") || prevLower.endsWith("/;") ||
+                        prevLower.endsWith(",;") || prevLower.endsWith("$;") ||
+                        prevLower.endsWith("for ;")) {  // index ... for ; continuation
+                        prevLineHasContinuation = true;
+                    }
+                }
+            }
+
+            // Check if this line is a continuation of previous line
+            boolean isLineContinuation = false;
+            // If previous line has continuation, this line is a continuation
+            if (prevLineHasContinuation) {
+                isLineContinuation = true;
+            } else if (i > 0) {
+                // Also check if this line is indented more than expected (manual continuation)
+                int currentLineIndent = line.length() - line.trim().length();
+                int expectedIndent = effectiveIndentLevel * indentSize;
+                if (currentLineIndent > expectedIndent + indentSize) {
+                    // This line is indented more than normal, likely a continuation
+                    isLineContinuation = true;
+                }
+            }
 
             // Handle comment-only lines - use previous line's indentation
             boolean isCommentOnlyLine = COMMENT_LINE_PATTERN.matcher(line).matches();
@@ -915,12 +957,53 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Processed line with proper indent
             String processedLine = newIndent + processedContent.toString();
 
+            // EARLY CHECK: If this line has manual continuation OR is part of a continuation block, preserve it
+            String checkTrimmed = processedLine.trim();
+            boolean shouldPreserveCompletely = false;
+
+            // Debug: log every line that contains WARAUS - DISABLED FOR PERFORMANCE
+            /*
+            if (checkTrimmed.contains("WARAUS")) {
+                log("CHECKING LINE: " + checkTrimmed.substring(0, Math.min(80, checkTrimmed.length())) +
+                    "... ends with: '" + checkTrimmed.substring(Math.max(0, checkTrimmed.length() - 10)) + "'");
+            }
+            */
+
+            // Check if this line ends with manual continuation
+            if (checkTrimmed.endsWith(";")) {
+                String checkLower = checkTrimmed.toLowerCase();
+                if (checkLower.endsWith(".or.;") || checkLower.endsWith(".and.;") ||
+                    checkLower.endsWith("+;") || checkLower.endsWith("-;") ||
+                    checkLower.endsWith("*;") || checkLower.endsWith("/;") ||
+                    checkLower.endsWith(",;") || checkLower.endsWith("$;")) {
+                    shouldPreserveCompletely = true;
+                    // log("PRESERVING manual continuation line ending with: " + checkTrimmed.substring(Math.max(0, checkTrimmed.length() - 20)));
+                }
+            }
+
+            // Also preserve if this is part of a continuation block
+            if (prevLineHasContinuation || isLineContinuation) {
+                shouldPreserveCompletely = true;
+                log("Preserving continuation block line");
+            }
+
+            if (shouldPreserveCompletely) {
+                // DO NOT FORMAT - preserve exactly as-is
+                // log("SKIPPING ALL PROCESSING for line: " + checkTrimmed.substring(0, Math.min(50, checkTrimmed.length())));
+                result.append(processedLine);
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
+                continue;  // Skip all further processing for this line
+            }
+
             // Debug: Log all long lines
             if (processedLine.length() > 99) {
-                log("LONG LINE (>" + 99 + "): " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
-                log("  - Full length: " + processedLine.length());
-                log("  - lineBreakPosition: " + lineBreakPosition);
-                log("  - Will break: " + (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition));
+                // Disabled for performance
+                // log("LONG LINE (>" + 99 + "): " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
+                // log("  - Full length: " + processedLine.length());
+                // log("  - lineBreakPosition: " + lineBreakPosition);
+                // log("  - Will break: " + (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition));
             }
 
             // Add missing semicolon if next line is a continuation
@@ -1007,65 +1090,95 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 previousLineActualIndent = newIndent;
             }
 
+            // Check if this is part of a manual continuation block
+            boolean isManualContinuationLine = false;
+            String trimmed = processedLine.trim();
+
+            // Check if this line is part of a manual continuation
+            if (trimmed.endsWith(";")) {
+                String trimmedLower = trimmed.toLowerCase();
+                if (trimmedLower.endsWith(".or.;") || trimmedLower.endsWith(".and.;") ||
+                    trimmedLower.endsWith("+;") || trimmedLower.endsWith("-;") ||
+                    trimmedLower.endsWith("*;") || trimmedLower.endsWith("/;") ||
+                    trimmedLower.endsWith(",;") || trimmedLower.endsWith("$;")) {
+                    isManualContinuationLine = true;
+                    log("Manual continuation line detected: " + trimmed.substring(Math.max(0, trimmed.length() - 10)));
+                }
+            }
+            // Also mark as manual continuation if it's part of a continuation block
+            if (prevLineHasContinuation || isLineContinuation) {
+                isManualContinuationLine = true;
+                log("Part of continuation block: prevHasCont=" + prevLineHasContinuation + ", isLineCont=" + isLineContinuation);
+            }
+
+            // Decide whether to keep manual continuation as-is
+            boolean shouldKeepManualContinuation = false;
+            if (isManualContinuationLine) {
+                // For manual continuation lines, ALWAYS keep them as-is if:
+                // 1. Any line in the block has an inline comment OR
+                // 2. All lines fit within the limit (ignoring comments)
+
+                // First check: does this line have an inline comment?
+                int inlineCommentIdx = processedLine.indexOf("//");
+                if (inlineCommentIdx > 0) {
+                    // Has inline comment - always keep manual continuation
+                    shouldKeepManualContinuation = true;
+                    log("Keeping manual continuation - has inline comment");
+                } else {
+                    // Check if line (without comment) fits
+                    String lineForCheck = processedLine.trim();
+                    if (lineForCheck.length() <= lineBreakPosition) {
+                        shouldKeepManualContinuation = true;
+                        log("Keeping manual continuation - line fits: " + lineForCheck.length() + " <= " + lineBreakPosition);
+                    } else {
+                        log("NOT keeping manual continuation - line too long: " + lineForCheck.length() + " > " + lineBreakPosition);
+                    }
+                }
+
+                // Additional check: if this is a continuation line (prevLineHasContinuation or isLineContinuation)
+                // we should keep it as part of the manual formatting
+                if (prevLineHasContinuation || isLineContinuation) {
+                    shouldKeepManualContinuation = true;
+                    log("Keeping manual continuation - part of continuation block");
+                }
+            }
+
+            // Debug logging for manual continuation lines
+            if (trimmed.contains("WARAUS") && trimmed.contains(".or.;")) {
+                log("DEBUG: Line with .or.; - length=" + processedLine.length() +
+                    ", isManualCont=" + isManualContinuationLine +
+                    ", shouldKeep=" + shouldKeepManualContinuation +
+                    ", isLineCont=" + isLineContinuation +
+                    ", prevHasCont=" + prevLineHasContinuation);
+            }
+
+            // Now check if we should break the line
             if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 &&
-                       !isLineContinuation && !prevLineHasContinuation && !isCommentOnlyLine) {
+                       !isLineContinuation && !prevLineHasContinuation && !isCommentOnlyLine && !shouldKeepManualContinuation) {
                 // Line needs breaking (skip for very large files to improve performance)
                 // Never break continuation lines - they're already part of a multi-line statement
                 // Don't break lines if previous line has continuation (part of manual formatting)
                 // Never break comment-only lines - they should be preserved as-is
+                // Never break lines that have manual continuation markers
 
-                // Check if this is a manual continuation (ends with continuation semicolon)
-                // A continuation semicolon is one at the end with no closing parenthesis after it
-                boolean hasManualContinuation = false;
-                String trimmed = processedLine.trim();
-                if (trimmed.endsWith(";")) {
-                    // Check if this might be a statement ending semicolon (inside parentheses)
-                    // vs a continuation semicolon
-                    int lastSemi = trimmed.lastIndexOf(';');
-                    int lastParen = trimmed.lastIndexOf(')');
-                    // If there's no closing paren after the semicolon, it's likely a continuation
-                    if (lastParen < lastSemi) {
-                        // Check if the line looks like it's incomplete
-                        // Lines with .and., .or., opening parenthesis without close, etc.
-                        int openParens = 0;
-                        for (char c : trimmed.toCharArray()) {
-                            if (c == '(') openParens++;
-                            else if (c == ')') openParens--;
-                        }
-                        // If parentheses are balanced, it's probably not a continuation
-                        hasManualContinuation = (openParens > 0);
-                    }
+                // Debug logging for lines being broken
+                if (processedLine.contains("Miki Plastik") || processedLine.contains("open(") || processedLine.contains("region==DATA->Region")) {
+                    log("BREAKING LINE: " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
+                    log("  - Length: " + processedLine.length() + ", Limit: " + lineBreakPosition);
+                    log("  - shouldBreakLine: " + shouldBreakLine(processedLine));
+                    log("  - Ends with semicolon: " + processedLine.trim().endsWith(";"));
+                    log("  - Is continuation: " + isLineContinuation);
+                    log("  - Prev has continuation: " + prevLineHasContinuation);
                 }
 
-                if (!hasManualContinuation) {
-                    // Debug logging for lines being broken
-                    if (processedLine.contains("Miki Plastik") || processedLine.contains("open(") || processedLine.contains("region==DATA->Region")) {
-                        log("BREAKING LINE: " + processedLine.substring(0, Math.min(50, processedLine.length())) + "...");
-                        log("  - Length: " + processedLine.length() + ", Limit: " + lineBreakPosition);
-                        log("  - shouldBreakLine: " + shouldBreakLine(processedLine));
-                        log("  - Ends with semicolon: " + processedLine.trim().endsWith(";"));
-                        log("  - Is continuation: " + isLineContinuation);
-                        log("  - Prev has continuation: " + prevLineHasContinuation);
-                    }
+                List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
 
-                    List<String> brokenLines = breakLine(processedLine, lineBreakPosition, indentSize);
-
-                    for (int j = 0; j < brokenLines.size(); j++) {
-                        result.append(brokenLines.get(j));
-                        if (j < brokenLines.size() - 1) {
-                            result.append("\n");
-                        } else if (i < lines.length - 1) {
-                            // Always add newline if not at end of file
-                            result.append("\n");
-                        }
-                    }
-                } else {
-                    // Has manual continuation - keep the line as-is
-                    if (processedLine.contains("Liste(")) {
-                        log("Keeping line with manual continuation: " + processedLine.substring(0, Math.min(80, processedLine.length())));
-                    }
-                    result.append(processedLine);
-                    if (i < lines.length - 1) {
+                for (int j = 0; j < brokenLines.size(); j++) {
+                    result.append(brokenLines.get(j));
+                    if (j < brokenLines.size() - 1) {
+                        result.append("\n");
+                    } else if (i < lines.length - 1) {
+                        // Always add newline if not at end of file
                         result.append("\n");
                     }
                 }  // Close the if (!hasManualContinuation) block
@@ -1365,6 +1478,71 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             log("  line length: " + line.length());
         }
 
+        // CRITICAL: Detect if this is a joined manual continuation block
+        // This happens when IntelliJ's formatter joins lines that originally had .or.; or .and.; continuations
+        // Pattern: Very long line with multiple logical operators in sequence
+        String contentLower = content.toLowerCase();
+        if (content.length() > 200 && content.contains("(") &&
+            (contentLower.contains("waraus") || contentLower.contains("result"))) {
+
+            // Count logical operators with specific patterns that indicate manual formatting
+            int orCount = 0;
+            int andCount = 0;
+            int dollarCount = 0;
+
+            // Look for patterns like "WARAUS_KLAG_FREMD_LS $ trim(WARAUS->PROGRAMM) .or."
+            // Also handle quoted strings like "Inventur 2020" $ trim(WARAUS->PROGRAMM) .or."
+            Pattern manualPattern = Pattern.compile("\\$\\s*trim\\([^)]+\\)\\s*\\.(or|and)\\.");
+            Matcher m = manualPattern.matcher(content);
+            int manualPatternCount = 0;
+            while (m.find()) {
+                manualPatternCount++;
+            }
+
+            // Count .or. and .and. occurrences
+            int pos = 0;
+            while ((pos = contentLower.indexOf(".or.", pos)) != -1) {
+                orCount++;
+                pos += 4;
+            }
+            pos = 0;
+            while ((pos = contentLower.indexOf(".and.", pos)) != -1) {
+                andCount++;
+                pos += 5;
+            }
+            pos = 0;
+            while ((pos = content.indexOf("$", pos)) != -1) {
+                dollarCount++;
+                pos++;
+            }
+
+            // If we have many logical operators in sequence, this was likely a manual continuation block
+            if (manualPatternCount >= 3 || (orCount >= 5 && dollarCount >= 5)) {
+                log("DETECTED JOINED MANUAL CONTINUATION BLOCK!");
+                log("  Pattern count: " + manualPatternCount);
+                log("  .or. count: " + orCount);
+                log("  .and. count: " + andCount);
+                log("  $ count: " + dollarCount);
+
+                // Debug: Check if quotes are present in the joined line
+                if (content.contains("\"Inventur") || content.contains("\"M:Austausch")) {
+                    log("DEBUG: Original content HAS quotes for Inventur/Austausch");
+                } else if (content.contains("Inventur") || content.contains("M:Austausch")) {
+                    log("DEBUG WARNING: Original content is MISSING quotes for Inventur/Austausch!");
+                    log("DEBUG: Content around Inventur: " +
+                        content.substring(Math.max(0, content.indexOf("Inventur") - 10),
+                                        Math.min(content.length(), content.indexOf("Inventur") + 30)));
+                }
+
+                // Reconstruct the original manual formatting
+                List<String> reconstructed = reconstructManualContinuationBlock(line, indent, content, indentSize);
+                if (!reconstructed.isEmpty()) {
+                    log("Successfully reconstructed " + reconstructed.size() + " lines from joined block");
+                    return reconstructed;
+                }
+            }
+        }
+
         // Special handling for "do while", "elseif", and "loca/locate for" constructs
         String trimmedLower = content.trim().toLowerCase();
         if (trimmedLower.startsWith("do while ")) {
@@ -1382,7 +1560,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Find the LAST logical operator that would still fit on the line
             int breakAfterLogical = -1;
-            String contentLower = content.toLowerCase();
+            // Use already defined contentLower variable
             String[] operators = {".and.", ".or."};
 
             // Look for all logical operators and find the last one that fits
@@ -1436,15 +1614,26 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         } else if (trimmedLower.startsWith("if ") && !trimmedLower.startsWith("if(")) {
             // Special handling for if statements (but not if() function calls)
             // Prevent excessive breaking, keep logical expressions together
-            if (line.length() <= lineBreakPosition) {
-                // Fits on one line, don't break
+            // Check length without inline comment
+            String lineWithoutComment = line;
+            int commentPos = line.indexOf("//");
+            if (commentPos > 0) {
+                String beforeComment = line.substring(0, commentPos);
+                while (beforeComment.endsWith(" ")) {
+                    beforeComment = beforeComment.substring(0, beforeComment.length() - 1);
+                }
+                lineWithoutComment = beforeComment;
+            }
+
+            if (lineWithoutComment.length() <= lineBreakPosition) {
+                // Fits on one line (ignoring comment), don't break
                 result.add(line);
                 return result;
             }
 
             // Line is too long, find optimal break point at logical operators
             int breakAfterLogical = -1;
-            String contentLower = content.toLowerCase();
+            // Use already defined contentLower variable
 
             // Look for the first .or. or .and. that gives a reasonable line
             for (String op : new String[]{".or.", ".and."}) {
@@ -1498,7 +1687,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // First, try breaking at logical operators (.or., .and.)
             int bestBreak = -1;
-            String contentLower = content.toLowerCase();
+            // Use already defined contentLower variable
 
             // Look for the last .or. or .and. that would fit
             for (String op : new String[]{".or.", ".and."}) {
@@ -1601,8 +1790,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // If no good logical break point found, fall through to regular breaking
         } else if (trimmedLower.startsWith("loca for ") || trimmedLower.startsWith("locate for ")) {
             // Special handling for locate/loca statements - keep "for" with the command
-            if (line.length() <= lineBreakPosition) {
-                // Fits on one line, don't break
+            // Check length without inline comment
+            String lineWithoutComment = line;
+            int commentPos = line.indexOf("//");
+            if (commentPos > 0) {
+                String beforeComment = line.substring(0, commentPos);
+                // Remove trailing spaces from before comment
+                while (beforeComment.endsWith(" ")) {
+                    beforeComment = beforeComment.substring(0, beforeComment.length() - 1);
+                }
+                lineWithoutComment = beforeComment;
+            }
+
+            if (lineWithoutComment.length() <= lineBreakPosition) {
+                // Fits on one line (ignoring comment), don't break
                 result.add(line);
                 return result;
             }
@@ -1613,7 +1814,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Look for the first .and. as a preferred break point
             int breakAfterLogical = -1;
-            String contentLower = content.toLowerCase();
+            // Use already defined contentLower variable
             int firstAndPos = contentLower.indexOf(".and.", commandEnd);
 
             if (firstAndPos > 0) {
@@ -1668,7 +1869,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Line is too long. Find the "for" keyword which marks the condition start
-            String contentLower = content.toLowerCase();
+            // Use already defined contentLower variable
             int forPos = contentLower.indexOf(" for ");
             if (forPos > 0) {
                 // Check if we can fit everything up to and including "for" on one line
@@ -1730,8 +1931,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // If no "for" keyword or can't fit the structure, fall through to regular breaking
         }
 
-        // If the line fits, don't break it
-        if (line.length() <= lineBreakPosition) {
+        // Check if line has inline comment and would fit without it
+        String lineForLengthCheck = line;
+        int inlineCommentPos = line.indexOf("//");
+        if (inlineCommentPos > 0) {
+            String beforeComment = line.substring(0, inlineCommentPos);
+            // Remove trailing spaces
+            while (beforeComment.endsWith(" ")) {
+                beforeComment = beforeComment.substring(0, beforeComment.length() - 1);
+            }
+            lineForLengthCheck = beforeComment;
+        }
+
+        // If the line fits (ignoring inline comment), don't break it
+        if (lineForLengthCheck.length() <= lineBreakPosition) {
             result.add(line);
             return result;
         }
@@ -2452,6 +2665,130 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
         }
         return null;
+    }
+
+    /**
+     * Reconstruct the original manual continuation block formatting
+     * This is called when we detect that IntelliJ has joined manual continuation lines
+     */
+    private List<String> reconstructManualContinuationBlock(String line, String indent, String content, int indentSize) {
+        List<String> result = new ArrayList<>();
+
+        // log("Reconstructing manual continuation block from joined line");
+        // log("  Original content: " + content.substring(0, Math.min(100, content.length())) + "...");
+
+        // Pattern: Each segment looks like "IDENTIFIER $ trim(EXPRESSION) .or."
+        // We need to split at each occurrence while preserving the pattern
+
+        // Find the opening parenthesis of the result assignment
+        int resultStart = content.indexOf("(");
+        if (resultStart == -1) {
+            log("No opening parenthesis found, cannot reconstruct");
+            return result;
+        }
+
+        String beforeParen = content.substring(0, resultStart + 1);
+        String afterParen = content.substring(resultStart + 1);
+
+        // Remove the closing parenthesis at the end
+        String closingPart = "";
+        int lastParen = afterParen.lastIndexOf(")");
+        if (lastParen != -1) {
+            closingPart = afterParen.substring(lastParen);
+            afterParen = afterParen.substring(0, lastParen);
+        }
+
+        // Split the content at each logical operator while preserving the operators
+        List<String> segments = new ArrayList<>();
+        String remaining = afterParen.trim();
+
+        while (remaining.length() > 0) {
+            // Find the next .or. or .and.
+            int nextOr = remaining.toLowerCase().indexOf(".or.");
+            int nextAnd = remaining.toLowerCase().indexOf(".and.");
+
+            int nextOp = -1;
+            int opLength = 0;
+
+            if (nextOr >= 0 && (nextAnd < 0 || nextOr < nextAnd)) {
+                nextOp = nextOr;
+                opLength = 4; // ".or."
+            } else if (nextAnd >= 0) {
+                nextOp = nextAnd;
+                opLength = 5; // ".and."
+            }
+
+            if (nextOp == -1) {
+                // No more operators, add the remaining content
+                segments.add(remaining);
+                break;
+            }
+
+            // Include the operator with the segment
+            String segment = remaining.substring(0, nextOp + opLength);
+            segments.add(segment);
+
+            // Move to the next part
+            remaining = remaining.substring(nextOp + opLength).trim();
+        }
+
+        // log("Split into " + segments.size() + " segments");
+
+        // Now reconstruct with proper indentation and semicolons
+        for (int i = 0; i < segments.size(); i++) {
+            String segment = segments.get(i).trim();
+
+            // Fix missing quotes for string literals
+            // IntelliJ removes quotes when joining lines, so we need to add them back
+            // Pattern: If segment starts with a non-keyword identifier followed by space and $
+            // and doesn't already have quotes, it's likely a string literal that lost its quotes
+            if (!segment.startsWith("\"") && !segment.startsWith("WARAUS") &&
+                !segment.startsWith("(") && segment.contains(" $")) {
+                // Check if this looks like a string literal that lost its quotes
+                int dollarPos = segment.indexOf(" $");
+                String beforeDollar = segment.substring(0, dollarPos);
+
+                // Check if it's not a known variable/constant (starts with uppercase or contains underscore)
+                if (!beforeDollar.matches("^[A-Z][A-Z_0-9]*$")) {
+                    // This is likely a string literal - add quotes back
+                    segment = "\"" + beforeDollar + "\"" + segment.substring(dollarPos);
+                    log("Added quotes back to string literal: " + segment);
+                }
+            }
+
+            if (i == 0) {
+                // First line: indent + "result:=(" + first segment + ";"
+                if (segments.size() == 1) {
+                    // Only one segment, no continuation
+                    result.add(indent + beforeParen + segment + closingPart);
+                } else {
+                    // Add semicolon for continuation
+                    result.add(indent + beforeParen + segment + ";");
+                }
+            } else if (i == segments.size() - 1) {
+                // Last line: proper indentation + segment + closing parenthesis
+                String continuationIndent = indent + "  ";  // Manual continuation typically uses 2 spaces
+
+                // Check if this segment already ends with a comment
+                if (segment.contains("//")) {
+                    // Has inline comment - preserve it
+                    result.add(continuationIndent + segment + closingPart);
+                } else {
+                    result.add(continuationIndent + segment + closingPart);
+                }
+            } else {
+                // Middle lines: proper indentation + segment + ";"
+                String continuationIndent = indent + "  ";  // Manual continuation typically uses 2 spaces
+                result.add(continuationIndent + segment + ";");
+            }
+        }
+
+        // log("Reconstructed " + result.size() + " lines:");
+        // for (String r : result) {
+        //     log("  " + r.substring(0, Math.min(80, r.length())));
+        // }
+
+        return result;
     }
 
     /**
