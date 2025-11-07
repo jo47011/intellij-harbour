@@ -12,6 +12,7 @@ import com.intellij.ui.table.JBTable;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebugSessionListener;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.XDebuggerManagerListener;
 import org.jetbrains.annotations.NotNull;
@@ -22,6 +23,7 @@ import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableColumn;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
+import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.event.ActionListener;
@@ -78,7 +80,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
     
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-        HarbourDBFToolWindowContent content = new HarbourDBFToolWindowContent(project);
+        HarbourDBFToolWindowContent content = new HarbourDBFToolWindowContent(project, toolWindow);
         Content toolContent = ContentFactory.getInstance().createContent(
             content.getContent(), "Harbour DBF", false);
         toolWindow.getContentManager().addContent(toolContent);
@@ -88,8 +90,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
      * Content panel for the DBF tool window
      */
     private static class HarbourDBFToolWindowContent implements HarbourLiveDBFConnection.DetailedDataListener {
-        
+
         private final Project project;
+        private final ToolWindow toolWindow;
         private final JPanel mainPanel;
         private final Tree workareaTree;
         private final JBTable detailsTable;
@@ -158,13 +161,14 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         // Flag to prevent selection events during tree updates
         private boolean updatingTree = false;
         
-        public HarbourDBFToolWindowContent(@NotNull Project project) {
+        public HarbourDBFToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
             this.project = project;
+            this.toolWindow = toolWindow;
             
             // Version indicator - CRITICAL: Table Grid View and Indexes nodes MUST appear
             HarbourLogger.log("HarbourDBFToolWindow", "");
             HarbourLogger.log("HarbourDBFToolWindow", "==========================================");
-            HarbourLogger.log("HarbourDBFToolWindow", "*** PLUGIN VERSION 1.2.28 LOADED ***");
+            HarbourLogger.log("HarbourDBFToolWindow", "*** PLUGIN VERSION 1.2.24 LOADED ***");
             HarbourLogger.log("HarbourDBFToolWindow", "*** Table Grid View and Indexes ENABLED ***");
             HarbourLogger.log("HarbourDBFToolWindow", "==========================================");
             HarbourLogger.log("HarbourDBFToolWindow", "");
@@ -333,12 +337,113 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             HarbourLogger.log("HarbourDBFToolWindow", "*** onWorkareasUpdated() called with " + workareas.size() + " workareas");
             ApplicationManager.getApplication().invokeLater(() -> {
                 HarbourLogger.log("HarbourDBFToolWindow", "*** About to call updateWorkareaTree()");
+
+                // Remember if "Current Record" was selected before tree rebuild
+                String selectedWorkarea = null;
+                boolean currentRecordWasSelected = false;
+
+                TreePath selectionPath = workareaTree.getSelectionPath();
+                if (selectionPath != null) {
+                    DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+                    if (selectedNode != null && selectedNode.getUserObject() != null) {
+                        String nodeText = selectedNode.getUserObject().toString();
+                        if (nodeText.equals("Current Record")) {
+                            currentRecordWasSelected = true;
+                            // Get parent workarea
+                            TreeNode parentNode = selectedNode.getParent();
+                            if (parentNode instanceof DefaultMutableTreeNode) {
+                                Object parentObj = ((DefaultMutableTreeNode) parentNode).getUserObject();
+                                if (parentObj instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                                    selectedWorkarea = ((HarbourLiveDBFConnection.WorkareaInfo) parentObj).getAlias();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HarbourLogger.log("HarbourDBFToolWindow",
+                    "Before tree update: currentRecordWasSelected=" + currentRecordWasSelected +
+                    ", workarea=" + selectedWorkarea);
+
+                // Update the tree
                 updateWorkareaTree(workareas);
+
                 if (workareas.isEmpty()) {
                     updateStatus("Connected - No database files are currently open");
+                    // Clear the details view since no workareas are open
+                    List<String[]> emptyData = new ArrayList<>();
+                    emptyData.add(new String[]{"No database files open", ""});
+                    tableModel.setData(emptyData);
+                    HarbourLogger.log("HarbourDBFToolWindow", "Cleared details view - no workareas open");
                 } else {
                     updateStatus(String.format("Connected - %d workarea(s) open", workareas.size()));
                     HarbourLogger.log("HarbourDBFToolWindow", "*** Updated status to show " + workareas.size() + " workarea(s)");
+
+                    // If no selection will be restored, clear the "No database files open" message
+                    if (!currentRecordWasSelected) {
+                        List<String[]> selectData = new ArrayList<>();
+                        selectData.add(new String[]{"Select a workarea to view details", ""});
+                        tableModel.setData(selectData);
+                        HarbourLogger.log("HarbourDBFToolWindow", "Cleared 'No database files open' message - showing selection prompt");
+                    }
+                }
+
+                // IMPORTANT: If "Current Record" was selected, restore selection and refresh
+                if (currentRecordWasSelected && selectedWorkarea != null && !workareas.isEmpty()) {
+                    // Find the workarea in the new tree
+                    for (HarbourLiveDBFConnection.WorkareaInfo wa : workareas) {
+                        if (wa.getAlias().equals(selectedWorkarea)) {
+                            HarbourLogger.log("HarbourDBFToolWindow",
+                                "Restoring Current Record selection and refreshing for " + selectedWorkarea);
+
+                            // CRITICAL: Invalidate cached record data so onWorkareaSelected() requests fresh data
+                            WorkareaCache cache = dataCache.get(selectedWorkarea);
+                            if (cache != null) {
+                                cache.recordData = null;
+                                HarbourLogger.log("HarbourDBFToolWindow",
+                                    "Invalidated cached record data for " + selectedWorkarea + " to force fresh request");
+                            }
+
+                            // Use invokeLater to ensure tree is fully updated first
+                            final String finalWorkarea = selectedWorkarea;
+                            SwingUtilities.invokeLater(() -> {
+                                // Find and select the "Current Record" node in the tree
+                                DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) treeModel.getRoot();
+                                for (int i = 0; i < rootNode.getChildCount(); i++) {
+                                    DefaultMutableTreeNode child = (DefaultMutableTreeNode) rootNode.getChildAt(i);
+                                    if (child.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                                        HarbourLiveDBFConnection.WorkareaInfo info =
+                                            (HarbourLiveDBFConnection.WorkareaInfo) child.getUserObject();
+                                        if (info.getAlias().equals(finalWorkarea)) {
+                                            // Expand the workarea node
+                                            TreePath workareaPath = new TreePath(child.getPath());
+                                            workareaTree.expandPath(workareaPath);
+
+                                            // Find the "Current Record" child node
+                                            for (int j = 0; j < child.getChildCount(); j++) {
+                                                DefaultMutableTreeNode childNode =
+                                                    (DefaultMutableTreeNode) child.getChildAt(j);
+                                                if (childNode.getUserObject().toString().equals("Current Record")) {
+                                                    // Select it
+                                                    TreePath recordPath = new TreePath(childNode.getPath());
+                                                    workareaTree.setSelectionPath(recordPath);
+
+                                                    HarbourLogger.log("HarbourDBFToolWindow",
+                                                        "Restored selection to Current Record for " + finalWorkarea);
+
+                                                    // Trigger refresh - this will happen via onWorkareaSelected()
+                                                    // which is called automatically when selection changes
+                                                    break;
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+                            break;
+                        }
+                    }
                 }
             });
         }
@@ -827,7 +932,10 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 
                 // Update spinner model
                 if (totalRecords > 0) {
-                    recordSpinner.setModel(new SpinnerNumberModel(currentRecord, 1, totalRecords, 1));
+                    // Ensure currentRecord is within valid range [1, totalRecords]
+                    // Harbour can return 0 (BOF) or totalRecords+1 (EOF)
+                    int validRecord = Math.max(1, Math.min(currentRecord, totalRecords));
+                    recordSpinner.setModel(new SpinnerNumberModel(validRecord, 1, totalRecords, 1));
                     // IMPORTANT: Re-setup Enter key handling after model change
                     setupSpinnerEnterKeyHandling();
                     // Format with thousand separator
@@ -913,16 +1021,110 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         if (dbfConnection != null) {
                             connectToDebuggingSession(dbfConnection);
                             HarbourLogger.log("HarbourDBFToolWindow", "Auto-connected to Harbour debugging session");
+
+                            // Add session listener to refresh DBF view on each step/pause
+                            setupStepListener(debugProcess.getSession());
                         }
                     }
                 }
-                
+
                 @Override
                 public void processStopped(@NotNull XDebugProcess debugProcess) {
                     // Check if this was a Harbour debug process
                     if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
                         disconnectFromDebuggingSession();
                         HarbourLogger.log("HarbourDBFToolWindow", "Auto-disconnected from Harbour debugging session");
+                    }
+                }
+            });
+        }
+
+        /**
+         * Setup listener to refresh DBF view when debugger steps/pauses
+         */
+        private void setupStepListener(@NotNull XDebugSession session) {
+            session.addSessionListener(new XDebugSessionListener() {
+                @Override
+                public void sessionPaused() {
+                    // Only refresh if session is actually paused (not running)
+                    // This prevents refreshing during rapid stepping or continuous execution
+                    if (session.isSuspended()) {
+                        // IMPORTANT: Only refresh if the tool window is visible
+                        // When the window is closed, stepping should be faster
+                        if (!toolWindow.isVisible()) {
+                            HarbourLogger.log("HarbourDBFToolWindow",
+                                "Session paused but DBF tool window not visible - skipping refresh for better performance");
+                            return;
+                        }
+
+                        HarbourLogger.log("HarbourDBFToolWindow",
+                            "Session paused - triggering ASYNC DBF refresh");
+
+                        // Request fresh workarea list asynchronously
+                        // This will call onWorkareasUpdated() when complete
+                        if (liveConnection != null) {
+                            liveConnection.requestWorkareaUpdate();
+                        }
+                    } else {
+                        HarbourLogger.log("HarbourDBFToolWindow",
+                            "Session paused event but not suspended - skipping auto-refresh");
+                    }
+                }
+
+                @Override
+                public void sessionResumed() {
+                    // Don't refresh when resuming - wait for next pause
+                    HarbourLogger.log("HarbourDBFToolWindow", "Session resumed - no refresh");
+                }
+            });
+        }
+
+        /**
+         * Refresh the current record view if it's currently selected
+         * (Legacy method - kept for manual refresh operations)
+         */
+        private void refreshCurrentRecordViewIfSelected() {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                // Only refresh if we have an active connection
+                if (liveConnection == null) {
+                    return;
+                }
+
+                TreePath selectionPath = workareaTree.getSelectionPath();
+                if (selectionPath != null) {
+                    DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) selectionPath.getLastPathComponent();
+                    if (selectedNode != null && selectedNode.getUserObject() != null) {
+                        String nodeText = selectedNode.getUserObject().toString();
+
+                        // Check if "Current Record" view is selected
+                        if (nodeText.equals("Current Record")) {
+                            // Get parent workarea node
+                            TreeNode parentNode = selectedNode.getParent();
+                            if (parentNode instanceof DefaultMutableTreeNode) {
+                                Object parentObj = ((DefaultMutableTreeNode) parentNode).getUserObject();
+                                if (parentObj instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                                    HarbourLiveDBFConnection.WorkareaInfo workarea =
+                                        (HarbourLiveDBFConnection.WorkareaInfo) parentObj;
+
+                                    HarbourLogger.log("HarbourDBFToolWindow",
+                                        "Auto-refreshing Current Record view for " + workarea.getAlias());
+
+                                    // Force fresh data request by calling reloadCurrentData
+                                    reloadCurrentData();
+                                }
+                            }
+                        }
+                        // Also refresh if the workarea itself is selected (defaults to Current Record)
+                        else if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                            HarbourLiveDBFConnection.WorkareaInfo workarea =
+                                (HarbourLiveDBFConnection.WorkareaInfo) selectedNode.getUserObject();
+
+                            HarbourLogger.log("HarbourDBFToolWindow",
+                                "Auto-refreshing workarea view for " + workarea.getAlias());
+
+                            // Force fresh data request by calling reloadCurrentData
+                            reloadCurrentData();
+                        }
                     }
                 }
             });
@@ -934,7 +1136,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private void checkForExistingDebugSession() {
             XDebuggerManager debuggerManager = XDebuggerManager.getInstance(project);
             XDebugSession currentSession = debuggerManager.getCurrentSession();
-            
+
             if (currentSession != null) {
                 XDebugProcess debugProcess = currentSession.getDebugProcess();
                 if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
@@ -943,6 +1145,9 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     if (dbfConnection != null) {
                         connectToDebuggingSession(dbfConnection);
                         HarbourLogger.log("HarbourDBFToolWindow", "Connected to existing Harbour debugging session");
+
+                        // Add session listener to refresh DBF view on each step/pause
+                        setupStepListener(currentSession);
                     }
                 }
             }
