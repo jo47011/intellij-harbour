@@ -280,6 +280,22 @@ public class HarbourDebuggerValue extends XValue {
     }
     
     // Method to update children when array/hash response arrives
+    // Transfer pending expansion state from another value (used when variables are refreshed)
+    public void transferPendingState(HarbourDebuggerValue from) {
+        if (from != null) {
+            this.pendingNode = from.pendingNode;
+            this.childrenRequested = from.childrenRequested;
+            // Also transfer any already-loaded children
+            if (!from.children.isEmpty()) {
+                this.children.clear();
+                this.children.addAll(from.children);
+            }
+            HarbourLogger.log("HarbourDebuggerValue",
+                "Transferred pending state for " + name + " (pendingNode=" + (pendingNode != null) +
+                ", childrenRequested=" + childrenRequested + ", children=" + children.size() + ")");
+        }
+    }
+
     public void updateChildren() {
         if (pendingNode != null) {
             // Determine if this is an array or hash for logging
