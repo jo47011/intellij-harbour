@@ -47,10 +47,27 @@ public class HarbourDebuggerStackFrame extends XStackFrame {
     public void computeChildren(@NotNull XCompositeNode node) {
         // Execute on the proper thread to ensure UI safety
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            // Wait for variables to arrive if they're not ready yet
+            // This runs on a background thread, so it won't block the UI
+            if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                if (!remoteProcess.areVariablesReady()) {
+                    HarbourLogger.log("HarbourDebuggerStackFrame",
+                        "Variables not ready yet, waiting up to 500ms...");
+                    remoteProcess.waitForVariables(500);  // Wait max 500ms
+                    if (remoteProcess.areVariablesReady()) {
+                        HarbourLogger.log("HarbourDebuggerStackFrame", "Variables ready after wait");
+                    } else {
+                        HarbourLogger.log("HarbourDebuggerStackFrame",
+                            "Timeout waiting for variables, showing what we have");
+                    }
+                }
+            }
+
             Map<String, HarbourDebuggerValue> variables = debugProcess.getVariables();
 
             XValueChildrenList children = new XValueChildrenList();
-            
+
             // DEBUGGING: Log what's actually in the variables map
             HarbourLogger.log("HarbourDebuggerStackFrame", "=== DEBUGGING VARIABLES MAP ===");
             HarbourLogger.log("HarbourDebuggerStackFrame", "Variables map size: " + variables.size());

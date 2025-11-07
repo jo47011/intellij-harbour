@@ -602,8 +602,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 receivedVariableScopes.add(scope);
                 HarbourLogger.log("HarbourDebuggerRemoteProcess",
                     "Variable scope completed: " + scope + " (total=" + receivedVariableScopes.size() + "/4)");
-                // Check if we can show UI now
-                checkAndShowPositionIfReady();
+                // All variables received - mark as ready
+                if (receivedVariableScopes.size() == 4) {
+                    waitingForVariables = false;
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "All variables ready");
+                }
                 break;
                 
             case "ARRAY":
@@ -810,7 +813,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Update debugger state to SUSPENDED when we stop and clear pending step flag
         updateDebuggerState(DebuggerState.SUSPENDED, false);
 
-        // Set flags to wait for STACK and all variable scopes before showing UI
+        // Set flags to track STACK and variable scope arrivals
         expectingStackForPosition = true;
         waitingForVariables = true;
         receivedVariableScopes.clear();
@@ -820,29 +823,28 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Request stack trace for call stack panel AND position verification
         sendCommand("STACK");
 
-        // Request variables for variables panel
+        // Request variables for variables panel (async - they'll arrive soon)
         sendCommand("LOCALS", "0");
         sendCommand("STATICS", "0");
         sendCommand("PRIVATES", "0");
         sendCommand("PUBLICS");
 
-        // Start timeout thread to show position if STACK/variables don't arrive
+        // Start timeout thread to show position if STACK doesn't arrive
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                Thread.sleep(2000);  // Wait 2 seconds for STACK and variables
+                Thread.sleep(1000);  // Wait 1 second for STACK
             } catch (InterruptedException e) {
                 // Interrupted, that's fine
             }
-            // If we still haven't shown position, do it now with whatever we have
-            if (expectingStackForPosition || waitingForVariables) {
+            // If we still haven't shown position, do it now with STOP data
+            if (expectingStackForPosition) {
                 expectingStackForPosition = false;
-                waitingForVariables = false;
                 showPositionInUI(file, line);
             }
         });
 
-        // Don't show UI yet - wait for STACK and all variables to arrive
-        // They will trigger showPositionInUI() when ready
+        // Note: We'll show UI when STACK arrives (fast), but variables will load async
+        // HarbourDebuggerStackFrame.computeChildren() will wait for variables if needed
     }
     
     
@@ -970,41 +972,31 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     "STACK position matches STOP position: " + stackFile + ":" + firstFrame.line);
             }
 
-            // Mark that STACK has arrived
+            // Mark that STACK has arrived and show UI immediately (fast!)
             expectingStackForPosition = false;
-
-            // Check if all variables have also arrived - if so, show UI
-            checkAndShowPositionIfReady();
+            showPositionInUI(currentFile, currentLine);
         }
 
         // Stack trace is now available for the Frames panel
     }
 
-    // Check if both STACK and all variables are ready, then show UI
-    private void checkAndShowPositionIfReady() {
-        // If we're not waiting anymore (already shown or timeout), skip
-        if (!waitingForVariables && !expectingStackForPosition) {
-            return;
-        }
+    // Check if all variables have arrived (used by HarbourDebuggerStackFrame)
+    public boolean areVariablesReady() {
+        return receivedVariableScopes.contains("LOCALS") &&
+               receivedVariableScopes.contains("STATICS") &&
+               receivedVariableScopes.contains("PRIVATES") &&
+               receivedVariableScopes.contains("PUBLICS");
+    }
 
-        // Check if STACK has arrived
-        boolean stackReady = !expectingStackForPosition;
-
-        // Check if all 4 variable scopes have arrived
-        boolean variablesReady = receivedVariableScopes.contains("LOCALS") &&
-                                receivedVariableScopes.contains("STATICS") &&
-                                receivedVariableScopes.contains("PRIVATES") &&
-                                receivedVariableScopes.contains("PUBLICS");
-
-        HarbourLogger.log("HarbourDebuggerRemoteProcess",
-            "checkAndShowPositionIfReady: stackReady=" + stackReady + ", variablesReady=" + variablesReady +
-            ", receivedScopes=" + receivedVariableScopes);
-
-        // If both are ready, show the UI
-        if (stackReady && variablesReady) {
-            waitingForVariables = false;
-            expectingStackForPosition = false;
-            showPositionInUI(currentFile, currentLine);
+    // Wait for variables to be ready (with timeout)
+    public void waitForVariables(long timeoutMs) {
+        long startTime = System.currentTimeMillis();
+        while (!areVariablesReady() && System.currentTimeMillis() - startTime < timeoutMs) {
+            try {
+                Thread.sleep(10);  // Check every 10ms
+            } catch (InterruptedException e) {
+                break;
+            }
         }
     }
 
