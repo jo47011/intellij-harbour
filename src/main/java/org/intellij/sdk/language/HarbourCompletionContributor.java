@@ -99,16 +99,10 @@ public class HarbourCompletionContributor extends CompletionContributor {
                             }
 
                             // Determine if we're in a method context
-                            boolean inClassContext = isInClassContext(parameters);
+                            boolean inClassContext=isInClassContext(parameters);
                             HarbourLogger.log("CompletionContributor", "In class context: " + inClassContext);
 
-                            // Add commands from settings
-                            addCommandCompletions(caseInsensitiveResult, project);
-
-                            // Add standard functions
-                            addStandardFunctions(caseInsensitiveResult);
-
-                            // Add local variables from current scope
+                            // Add local variables FIRST - they are most relevant
                             addLocalVariablesFromCurrentScope(caseInsensitiveResult, parameters);
 
                             // Add public variables from current file scope
@@ -117,7 +111,13 @@ public class HarbourCompletionContributor extends CompletionContributor {
                             // Add constants/defines from current file and included .ch files
                             addConstantsAndDefines(caseInsensitiveResult, parameters);
 
-                            // Add user-defined functions from project
+                            // Add commands from settings
+                            addCommandCompletions(caseInsensitiveResult, project);
+
+                            // Add standard functions
+                            addStandardFunctions(caseInsensitiveResult);
+
+                            // Add user-defined functions from project (now uses cache for speed)
                             addUserDefinedFunctions(caseInsensitiveResult, project, parameters);
 
                             // Add class methods if we're in a class context
@@ -344,13 +344,14 @@ public class HarbourCompletionContributor extends CompletionContributor {
             // Debug logging removed - issue found and fixed
 
             // Find all LOCAL variable declarations in the current scope
-            Set<String> localVariables = new HashSet<>();
-            Set<String> paramSet = new HashSet<>(); // Set to track parameters separately
+            Set<String> localVariables=new HashSet<>();
+            Set<String> paramSet=new HashSet<>(); // Set to track parameters separately
 
-            // Pattern for LOCAL variable declarations - stop at end of line to avoid matching across lines
-            // Also match PRIVATE and STATIC declarations within functions
-            Pattern localPattern = Pattern.compile("(?i)^\\s*(?:LOCAL|PRIVATE|STATIC)\\s+([\\w,\\s:=]+?)\\s*$", Pattern.MULTILINE);
-            Matcher localMatcher = localPattern.matcher(scopeText.toString());
+            // Pattern for LOCAL variable declarations
+            // Match LOCAL/PRIVATE/STATIC followed by variable declarations
+            // Allow for comments or other content after the declaration
+            Pattern localPattern=Pattern.compile("(?i)^\\s*(?:LOCAL|PRIVATE|STATIC)\\s+([\\w,\\s:=\"'().]+?)(?://|\\s*$)", Pattern.MULTILINE);
+            Matcher localMatcher=localPattern.matcher(scopeText.toString());
 
             while (localMatcher.find()) {
                 ProgressManager.checkCanceled(); // Check for cancellation
@@ -487,7 +488,8 @@ public class HarbourCompletionContributor extends CompletionContributor {
         return LookupElementBuilder.create(variable)
                 .withCaseSensitivity(false)
                 .withTypeText(isParameter ? "Parameter" : "Local Variable")
-                .withIcon(HarbourIcons.FILE);
+                .withIcon(HarbourIcons.FILE)
+                .withBoldness(true);
     }
 
     /**
@@ -760,105 +762,16 @@ public class HarbourCompletionContributor extends CompletionContributor {
      */
     private void addUserDefinedFunctions(CompletionResultSet result, Project project,
                                          CompletionParameters parameters) {
-        Set<String> projectFunctions = new HashSet<>();
-
         try {
-            // First, scan the current file for functions - most relevant to completion
-            PsiFile currentFile = null;
+            // Use the completion cache for much better performance
+            HarbourCompletionCache cache=HarbourCompletionCache.getInstance(project);
+            Set<String> projectFunctions=cache.getAllProjectFunctions();
 
-            try {
-                // Get the current file being edited from the parameters
-                currentFile = parameters.getOriginalFile();
-                if (currentFile != null && currentFile instanceof HarbourFile) {
-                    // Scan current file first for immediate functions
-                    scanFileForFunctions((HarbourFile)currentFile, projectFunctions);
-                    HarbourLogger.log("CompletionContributor", "Found " + projectFunctions.size() + " functions in current file");
-                }
-            } catch (ProcessCanceledException e) {
-                throw e;
-            } catch (Exception e) {
-                HarbourLogger.log("CompletionContributor", "Could not get current file: " + e.getMessage());
-            }
+            HarbourLogger.log("CompletionContributor", "Adding " + projectFunctions.size() + " user-defined functions from cache");
 
-            // Next, use reference service to find global functions
-            HarbourLogger.log("CompletionContributor", "Scanning project files for functions");
-
-            // Create final copy of currentFile for use in lambda
-            final PsiFile finalCurrentFile = currentFile;
-
-            // Collect functions from all Harbour files in the project
-            Set<String> globalFunctions = new HashSet<>();
-            try {
-                globalFunctions = ReadAction.compute(() -> {
-                    Set<String> functions = new HashSet<>();
-                    try {
-                        // Get all Harbour files in the project
-                        Collection<VirtualFile> virtualFiles = FileTypeIndex.getFiles(
-                                HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
-
-                        // Also find files with .prg extension explicitly
-                        FileTypeIndex.processFiles(HarbourFileType.INSTANCE, file -> {
-                            if (file.getName().endsWith(".prg")) {
-                                virtualFiles.add(file);
-                            }
-                            return true;
-                        }, GlobalSearchScope.projectScope(project));
-
-                        HarbourLogger.log("CompletionContributor", "Found " + virtualFiles.size() + " Harbour files in project");
-
-                        PsiManager psiManager = PsiManager.getInstance(project);
-                        int fileCount = 0;
-
-                        for (VirtualFile virtualFile : virtualFiles) {
-                            ProgressManager.checkCanceled();
-
-                            // Skip excluded files
-                            if (HarbourFileUtils.isFileExcluded(project, virtualFile)) {
-                                continue;
-                            }
-
-                            // Skip current file - we've already processed it
-                            if (finalCurrentFile != null && virtualFile.equals(finalCurrentFile.getVirtualFile())) {
-                                HarbourLogger.log("CompletionContributor", "Skipping current file: " + virtualFile.getName());
-                                continue;
-                            }
-
-                            // Get file content and scan for function declarations
-                            PsiFile psiFile = psiManager.findFile(virtualFile);
-                            if (psiFile != null) {
-                                fileCount++;
-                                String content = psiFile.getText();
-                                scanTextForFunctionsDirectly(content, functions);
-
-                                if (fileCount % 20 == 0) {
-                                    HarbourLogger.log("CompletionContributor", "Scanned " + fileCount + " files, found " +
-                                            functions.size() + " functions so far");
-                                }
-                            }
-                        }
-
-                        HarbourLogger.log("CompletionContributor", "Completed project scan: " + fileCount + " files, " +
-                                functions.size() + " total functions");
-
-                    } catch (ProcessCanceledException e) {
-                        throw e;
-                    } catch (Exception e) {
-                        HarbourLogger.log("CompletionContributor", "Project scan error: " + e.getMessage());
-                    }
-                    return functions;
-                });
-            } catch (ProcessCanceledException e) {
-                throw e;
-            }
-
-            // Add global functions to the project functions set
-            projectFunctions.addAll(globalFunctions);
-
-            HarbourLogger.log("CompletionContributor", "Adding " + projectFunctions.size() + " user-defined functions");
-
-            // Add each user function to completion results (only one case variant)
+            // Add each user function to completion results
             for (String function : projectFunctions) {
-                ProgressManager.checkCanceled(); // Check for cancellation
+                ProgressManager.checkCanceled();
 
                 // Skip standard functions - they've already been added
                 if (HarbourStandardFunctionCache.isStandardFunction(function)) {
@@ -868,7 +781,6 @@ public class HarbourCompletionContributor extends CompletionContributor {
                 result.addElement(createUserFunctionLookupElement(function));
             }
         } catch (ProcessCanceledException e) {
-            // Re-throw ProcessCanceledException
             throw e;
         } catch (Exception e) {
             HarbourLogger.log("CompletionContributor", "User function completion error: " + e.getMessage());

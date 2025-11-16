@@ -1,3 +1,0 @@
-looks quite good, only popup needs tuning,
-pls add details if matching navi line containers more context/test.
-see log-windows/.png
