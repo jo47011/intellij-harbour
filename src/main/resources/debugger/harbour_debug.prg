@@ -54,6 +54,7 @@ REQUEST HB_GT_STD_DEFAULT
 // STATIC declarations must be at the top before any procedures
 STATIC t_oDebugInfo
 STATIC s_lSocketEnabled := .T.  // ENABLED: Socket communication needed for PyCharm breakpoints
+STATIC s_lThisProcessConnected := .F.  // Track if THIS process successfully connected to debugger
 
 // Static variable to track if we've hooked the error handler
 // REMOVED: s_lErrorHandlerHooked - not needed with new monitoring approach
@@ -366,22 +367,31 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    LOCAL cCurrentFile, nCurrentLine, aStack, i
    LOCAL hLog  // Keep variable for existing code compatibility
    // Timeout variables removed - debugger will wait forever as requested
-   
+
    lStopSent := IF(Empty(lStopSent), .F., lStopSent)
-   
+
+   // Check if we should skip debugger (child process spawned by main debugged process)
+   // IMPORTANT: Only check this if THIS process hasn't already connected
+   IF !s_lThisProcessConnected .AND. GetEnv("HB_DBG_SKIP") == "1"
+      // This is a child process - skip debugger connection entirely
+      s_lSocketEnabled := .F.
+      LogDebugInfo("Child process detected (HB_DBG_SKIP=1) - skipping debugger connection")
+      RETURN
+   ENDIF
+
    // Simple error handling to prevent crashes
    BEGIN SEQUENCE
-   
+
    // Removed debug trace log file - socket debugging disabled to avoid file clutter
    hLog := -1  // Keep variable for existing code compatibility
-   
+
    // Try to connect if not connected
    IF Empty(oDebugInfo["socket"]) .AND. oDebugInfo["timeCheckForDebug"] <= 14
       // Connection attempt (logging removed)
       hb_inetInit()
       oDebugInfo["socket"] := hb_inetCreate(140 - oDebugInfo["timeCheckForDebug"]*10)
       hb_inetConnect("127.0.0.1", DBG_PORT, oDebugInfo["socket"])
-      
+
       IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
          // Connection failed (logging removed)
          tmp := "NO"
@@ -389,26 +399,38 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          // Connection success (logging removed)
          // Send handshake
          hb_inetSend(oDebugInfo["socket"], HB_ARGV(0) + CRLF + Str(__PIDNum()) + CRLF)
-         
+
          // Wait for response
          DO WHILE hb_inetDataReady(oDebugInfo["socket"]) != 1
             hb_idleSleep(0.1)
          ENDDO
-         
+
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
          // Handshake response (logging removed)
       ENDIF
-      
+
       IF tmp != "HELLO"
          // Handshake failed (logging removed)
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
          // Handshake success (logging removed)
+         // IMPORTANT: Mark this process as connected and set env var for child processes
+         s_lThisProcessConnected := .T.
+         hb_SetEnv("HB_DBG_SKIP", "1")
+         LogDebugInfo("Main process connected to debugger - setting HB_DBG_SKIP=1 for child processes")
       ENDIF
    ENDIF
    
    IF Empty(oDebugInfo["socket"])
+      // No socket - check if we've tried enough times
+      IF oDebugInfo["timeCheckForDebug"] > 14
+         // Failed to connect after multiple attempts - disable debugger for child processes
+         s_lSocketEnabled := .F.
+         hb_SetEnv("HB_DBG_SKIP", "1")
+         LogDebugInfo("Failed to connect to debugger after " + AllTrim(Str(oDebugInfo["timeCheckForDebug"])) + ;
+                      " attempts - disabling debugger and setting HB_DBG_SKIP=1 for child processes")
+      ENDIF
       // No socket - returning (logging removed)
       BREAK
    ENDIF
@@ -2619,7 +2641,13 @@ RETURN xValue
 // Override AltD() to trigger debugger (WORKING SOLUTION FROM GIT HISTORY)
 PROCEDURE AltD()
    LOCAL t_oDebugInfo := __DEBUGITEM()
-   
+
+   // Skip debugger if disabled (child process)
+   // IMPORTANT: Only check HB_DBG_SKIP if this process hasn't already connected
+   IF (!s_lThisProcessConnected .AND. GetEnv("HB_DBG_SKIP") == "1") .OR. !s_lSocketEnabled
+      RETURN
+   ENDIF
+
    // Ensure debugger is initialized
    IF !t_oDebugInfo["lInitialized"]
       // Manual initialization since we can't call INIT procedure

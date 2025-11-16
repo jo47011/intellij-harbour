@@ -1,0 +1,42 @@
+When running a harbour UI in debug mode I cannot open a 2nd or 3rd UI from within this app
+which I usually can.  Most likely it wants to connect to pycharm debugger port as well.
+Once I terminate the debugging process all pending UIs popup.
+
+Make sure only the 1st instance of an app is connected to the debugger.
+We had such a feature before so pls make a indepth investigation 1st how this was implemented
+and fix it.  If you cannot find any current approach tell me so.
+
+---
+my choice:
+❯ 1. Skip debugging for child processes
+     Child UI instances run normally without debugger. Simple and clean. Only the first instance connects to debugger.
+
+=> yes nothing else, pls.
+
+I am launching new programs like this, not sure you can track that?
+see workspace/hbmiki-test-windows/allg_miki.prg:
+
+function runHighestExe( starte_bei,gesperrt )
+LOCAL exeName := getFileBaseName( exeName() )
+LOCAL dir,newProg
+
+  // remove trailing digit, if already is a 2nd versione.g. miki1.exe
+  if isDigit( right( exeName ,1 ) )
+    exeName := left( exeName , len(exeName) -1 )
+  endif
+
+  dir := directory( exeName  + "?.exe")
+  if len(dir) > 1
+    // call highest name
+    newProg := dir[len(dir) , F_NAME]
+    if newProg <> getFileName( exeName() )
+      wapi_SHELLEXECUTE(,,newProg, starte_bei + " " + gesperrt )
+      // myRun( newProg , CRONTAB_KEYWORD , .f. )
+      return .t.
+    endif
+  endif
+return .f.
+
+maybe since only 1st one is called w/ debug flag/mode this could be the way to differ.
+
+

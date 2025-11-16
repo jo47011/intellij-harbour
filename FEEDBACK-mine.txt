@@ -1,0 +1,85 @@
+# TODOs
+
+- db viewer
+  - dbf file open in project explorer, right click => not available
+
+- new: 
+- tab completion: ctrl tab?
+- structure view, methode in der der Cusror steht sollte ge-highlighted werden
+- refactor: in Methode auslagern
+- hotkey zum linten des aktuellen programms => settings oder als commando mit default key
+- ctrl-T toggle
+- Klammer auf eingeben -> Klammer zu automatisch => konfigurierbar, default=False
+
+Code navigation:
+- clicking on a if/endif or while/enddo etc. => shpuld jump to the counterpart in code
+
+Harbour DBF View
+- offer option to sort workareas (default current order/numbering, alternativ: name)
+  same for proptery column, maybe also value
+
+Code completion:
+- very slow
+- local varaiable not proposed, e.g.
+  LOCAL erledigt:=.t.
+  LOCAL erledigt_fast:=.t.
+  erledigt_<ctrl-space>
+
+Bugs:
+- missing include -> link: configure include path should open the correct tab in settings
+- when debugging cannot open 2nd hbmiki UI
+
+Recherche:
+3. Command-line formatting - Confirmed support and documented usage:
+   - pycharm.sh format file.prg - format single file
+   - pycharm.sh format -recursive /directory - format directory
+   - Works when IDE is not running
+
+-----
+Gave up on this, will try later:
+Note testing in windows in your container here: workspace/hbmiki-test-windows
+see logs and screenshots (if any) in workspace/log, clean the content of this directory when finished.
+
+Pls use instructions on CLAUDE.md for formatting and testing.
+
+-----
+format bug:
+
+Now applied the formatting twice and the 2nd time still lines got reformatted
+which shouldn't be.
+
+Pls look in workspace/log/Screenshot* left hand site is after 1st format, right side after 2nd format.
+
+The original errors are back.  The indentation after 2nd format (right hand side) is correct and should have
+been applied right away on 1st reformat (right side)
+
+still wrong, see listen2.prg line 195
+        ? "Miki Plastik GMBH  ***  Auftragsbestandsliste  ***",space(1),;
+          left(alltrim(text)+space(50),50),space(20),"vom:",getUser():date,space(10),"  Seite :",;
+            str(seite,3)   you
+
+You have your own test framework.  pls reformat and test it yourself.  if it doesn't work don't come back.
+Start over again fix, reformat, test,....
+Start over again fix, reformat, test,....
+etc.
+
+
+-------------------
+
+Debugger:
+- alt N neues Fenster geht nicht auf, werden gequeued bis das Hauptfenster geschlossen wird => nix gut
+- wenn prorgamm im debugger on bp läuft, trotzdem sehr langsam => tunen?
+- In case of an error (roter Balken) => debugger sollte an den Fehlerpunkt springen
+
+- Display Stacktrace in console in case of error, not working for => alias not found here:
+static procedure MyTest()
+  Stueckliste():new("123"):getWerkzeugGruppen()
+
+- db viewer
+  - dbf file open in project explorer, right click => not available
+
+
+- new: 
+- tab completion: ctrl tab?
+
+---

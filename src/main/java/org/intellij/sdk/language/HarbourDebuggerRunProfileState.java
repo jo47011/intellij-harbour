@@ -762,7 +762,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         
         // CRITICAL: Do NOT set ALTD=BREAK as it conflicts with PyCharm remote debugging
         // ALTD=BREAK triggers Harbour's internal debugger instead of PyCharm debugger
-        
+
         // Add comprehensive logging for debugging analysis
         boolean isWindows = currentOS.contains("windows");
         

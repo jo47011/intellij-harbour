@@ -46,8 +46,9 @@ public class HarbourFileListener implements EditorFactoryListener {
             // Add document listener to track changes
             event.getEditor().getDocument().addDocumentListener(new HarbourDocumentListener(project));
 
-            // Must use read action for PSI operations
-            ReadAction.run(() -> {
+            // Use NON-BLOCKING read action to prevent EDT freeze
+            // This runs in background without blocking the UI
+            ReadAction.nonBlocking(() -> {
                 try {
                     PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
                     if (psiFile instanceof HarbourFile) {
@@ -78,7 +79,11 @@ public class HarbourFileListener implements EditorFactoryListener {
                 } catch (Exception e) {
                     LOG.error("Error analyzing file: " + e.getMessage(), e);
                 }
-            });
+                return null;
+            })
+            .inSmartMode(project)
+            .expireWhen(() -> project.isDisposed())
+            .submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService());
         }
     }
 
@@ -119,40 +124,49 @@ public class HarbourFileListener implements EditorFactoryListener {
                     if (lastUpdateTimestamp.compareAndSet(lastUpdate, currentTime)) {
                         HarbourLogger.log("FileListener", "Harbour document changed: " + file.getName() + " (processing)");
 
-                        // Use invokeLater to ensure this happens after the PSI has been updated
+                        // Use invokeLater for document commit, then run analysis in background
                         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
                             try {
                                 documentChanged = false;
 
-                                // Commit document to ensure PSI is updated
+                                // Commit document to ensure PSI is updated (must be on EDT)
                                 PsiDocumentManager.getInstance(project).commitDocument(document);
 
-                                // Get the PsiFile after the change
-                                PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
+                                // Run analysis in background using NON-BLOCKING read action
+                                ReadAction.nonBlocking(() -> {
+                                    try {
+                                        // Get the PsiFile after the change
+                                        PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
 
-                                if (psiFile instanceof HarbourFile) {
-                                    // Get reference service
-                                    HarbourReferenceService referenceService =
-                                            HarbourReferenceService.getInstance(project);
+                                        if (psiFile instanceof HarbourFile) {
+                                            // Get reference service
+                                            HarbourReferenceService referenceService =
+                                                    HarbourReferenceService.getInstance(project);
 
-                                    // Force a clear and rebuild of caches for this file
-                                    referenceService.forceClearCaches();
+                                            // Force a clear and rebuild of caches for this file
+                                            referenceService.forceClearCaches();
 
-                                    // Re-register all declarations
-                                    ReadAction.run(() -> {
-                                        referenceService.registerFunctions((HarbourFile) psiFile);
-                                        referenceService.registerProcedures((HarbourFile) psiFile);
-                                        referenceService.registerClasses((HarbourFile) psiFile);
+                                            // Re-register all declarations
+                                            referenceService.registerFunctions((HarbourFile) psiFile);
+                                            referenceService.registerProcedures((HarbourFile) psiFile);
+                                            referenceService.registerClasses((HarbourFile) psiFile);
 
-                                        // Clear function declaration cache
-                                        HarbourFunctionDeclarationCache.clearCache(project);
+                                            // Clear function declaration cache
+                                            HarbourFunctionDeclarationCache.clearCache(project);
 
-                                        // Make sure token references are updated
-                                        HarbourTokenTypeExtension.processFile(psiFile);
+                                            // Make sure token references are updated
+                                            HarbourTokenTypeExtension.processFile(psiFile);
 
-                                        HarbourLogger.log("FileListener", "Updated references for changed file: " + file.getName());
-                                    });
-                                }
+                                            HarbourLogger.log("FileListener", "Updated references for changed file: " + file.getName());
+                                        }
+                                    } catch (Exception e) {
+                                        LOG.error("Error in read action", e);
+                                    }
+                                    return null;
+                                })
+                                .inSmartMode(project)
+                                .expireWhen(() -> project.isDisposed())
+                                .submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService());
                             } catch (Exception e) {
                                 LOG.error("Error processing document change", e);
                             }
