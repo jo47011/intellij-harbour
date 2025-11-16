@@ -105,6 +105,9 @@ public class HarbourCompletionContributor extends CompletionContributor {
                             // Add local variables FIRST - they are most relevant
                             addLocalVariablesFromCurrentScope(caseInsensitiveResult, parameters);
 
+                            // Add workareas/aliases from current function scope
+                            addWorkareasFromCurrentScope(caseInsensitiveResult, parameters);
+
                             // Add public variables from current file scope
                             addPublicVariablesFromCurrentFile(caseInsensitiveResult, parameters);
 
@@ -416,6 +419,125 @@ public class HarbourCompletionContributor extends CompletionContributor {
         } catch (Exception e) {
             HarbourLogger.log("CompletionContributor", "Error adding local variables: " + e.getMessage());
         }
+    }
+
+    /**
+     * Adds workareas/aliases from current function scope to completion results
+     */
+    private void addWorkareasFromCurrentScope(CompletionResultSet result, CompletionParameters parameters) {
+        try {
+            // Get the current file and position
+            PsiFile file=parameters.getOriginalFile();
+            PsiElement position=parameters.getPosition();
+
+            if (file == null || position == null || !(file instanceof HarbourFile)) {
+                return;
+            }
+
+            // Get the scope of the current procedure/function
+            int[] scope=HarbourGoToDeclarationHandler.getProcedureFunctionScope(position);
+            if (scope == null) {
+                // Not in a procedure/function scope
+                return;
+            }
+
+            HarbourLogger.log("CompletionContributor", "Scanning for workareas from line " + scope[0] + " to line " + scope[1]);
+
+            // Extract the text of the current scope
+            String fileText=file.getText();
+            String[] lines=fileText.split("\n");
+
+            // Build the text of the current scope
+            StringBuilder scopeText=new StringBuilder();
+            for (int i=scope[0]; i <= Math.min(scope[1], lines.length - 1); i++) {
+                scopeText.append(lines[i]).append("\n");
+            }
+
+            // Find all workarea/alias declarations in the current scope
+            Set<String> workareas=new HashSet<>();
+
+            // Pattern 1: SELECT aliasname
+            Pattern selectPattern=Pattern.compile("(?i)\\bSELECT\\s+(\\w+)", Pattern.MULTILINE);
+            Matcher selectMatcher=selectPattern.matcher(scopeText.toString());
+            while (selectMatcher.find()) {
+                ProgressManager.checkCanceled();
+                String alias=selectMatcher.group(1);
+                if (!alias.isEmpty() && Character.isLetter(alias.charAt(0))) {
+                    workareas.add(alias);
+                    HarbourLogger.log("CompletionContributor", "Found workarea via SELECT: " + alias);
+                }
+            }
+
+            // Pattern 2: USE ... ALIAS aliasname
+            Pattern useAliasPattern=Pattern.compile("(?i)\\bUSE\\s+.*?\\bALIAS\\s+(\\w+)", Pattern.MULTILINE);
+            Matcher useAliasMatcher=useAliasPattern.matcher(scopeText.toString());
+            while (useAliasMatcher.find()) {
+                ProgressManager.checkCanceled();
+                String alias=useAliasMatcher.group(1);
+                if (!alias.isEmpty() && Character.isLetter(alias.charAt(0))) {
+                    workareas.add(alias);
+                    HarbourLogger.log("CompletionContributor", "Found workarea via USE ALIAS: " + alias);
+                }
+            }
+
+            // Pattern 3: aliasname-> (implicit workarea usage)
+            Pattern arrowPattern=Pattern.compile("(?i)\\b(\\w+)\\s*->", Pattern.MULTILINE);
+            Matcher arrowMatcher=arrowPattern.matcher(scopeText.toString());
+            while (arrowMatcher.find()) {
+                ProgressManager.checkCanceled();
+                String alias=arrowMatcher.group(1);
+                // Filter out common non-alias identifiers
+                if (!alias.isEmpty() && Character.isLetter(alias.charAt(0)) &&
+                    !alias.equalsIgnoreCase("SELF") &&
+                    !alias.equalsIgnoreCase("M")) {
+                    workareas.add(alias);
+                    HarbourLogger.log("CompletionContributor", "Found workarea via arrow operator: " + alias);
+                }
+            }
+
+            // Pattern 4: open("alias1", "alias2", "alias3") - custom database opening function
+            Pattern openPattern=Pattern.compile("(?i)\\bopen\\s*\\(([^)]+)\\)", Pattern.MULTILINE);
+            Matcher openMatcher=openPattern.matcher(scopeText.toString());
+            while (openMatcher.find()) {
+                ProgressManager.checkCanceled();
+                String params=openMatcher.group(1);
+                // Extract string literals from the parameters
+                Pattern stringPattern=Pattern.compile("\"([^\"]+)\"|'([^']+)'");
+                Matcher stringMatcher=stringPattern.matcher(params);
+                while (stringMatcher.find()) {
+                    String alias=stringMatcher.group(1);
+                    if (alias == null) alias=stringMatcher.group(2);
+                    if (alias != null && !alias.isEmpty() && Character.isLetter(alias.charAt(0))) {
+                        workareas.add(alias);
+                        HarbourLogger.log("CompletionContributor", "Found workarea via open() function: " + alias);
+                    }
+                }
+            }
+
+            // Add each workarea to completion results
+            for (String workarea : workareas) {
+                ProgressManager.checkCanceled();
+                result.addElement(createWorkareaLookupElement(workarea));
+            }
+
+            HarbourLogger.log("CompletionContributor", "Added " + workareas.size() + " workareas from current scope");
+
+        } catch (ProcessCanceledException e) {
+            throw e;
+        } catch (Exception e) {
+            HarbourLogger.log("CompletionContributor", "Error adding workareas: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Creates a lookup element for a workarea/alias
+     */
+    private LookupElement createWorkareaLookupElement(String workarea) {
+        return LookupElementBuilder.create(workarea)
+                .withCaseSensitivity(false)
+                .withTypeText("Workarea/Alias")
+                .withIcon(HarbourIcons.FILE)
+                .withBoldness(true);
     }
 
     /**
