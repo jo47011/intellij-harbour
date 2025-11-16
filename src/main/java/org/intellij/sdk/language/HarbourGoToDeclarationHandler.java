@@ -11,11 +11,13 @@ import com.intellij.pom.Navigatable;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.tree.IElementType;
 import org.intellij.sdk.language.psi.ClassDeclaration;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourFunctionDeclaration;
 import org.intellij.sdk.language.psi.HarbourTypes;
 import org.intellij.sdk.language.psi.impl.FunctionCallImpl;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
@@ -306,6 +308,12 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         if (element instanceof LeafPsiElement) {
             String elementText = element.getText();
             if (isKeyword(elementText)) {
+                // Check if it's a control structure keyword that should navigate to matching structures
+                PsiElement[] controlStructureMatches = findMatchingControlStructures(element);
+                if (controlStructureMatches.length > 0) {
+                    HarbourLogger.log(COMPONENT, "Found " + controlStructureMatches.length + " matching control structure(s) for: " + elementText);
+                    return controlStructureMatches;
+                }
                 HarbourLogger.log(COMPONENT, "Skipping keyword navigation: " + elementText);
                 return PsiElement.EMPTY_ARRAY;
             }
@@ -3678,6 +3686,248 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             HarbourLogger.log(COMPONENT, "STACK TRACE ANALYSIS ERROR: " + e.getMessage() + " - defaulting to HOVER");
             return false;
         }
+    }
+
+    /**
+     * Find matching control structures for keywords like IF/ENDIF, WHILE/ENDDO, etc.
+     */
+    private PsiElement[] findMatchingControlStructures(@NotNull PsiElement element) {
+        List<PsiElement> rawMatches = new ArrayList<>();
+        IElementType elementType = element.getNode().getElementType();
+
+        // Check if this is a control structure keyword
+        if (!isControlStructureKeyword(elementType)) {
+            return PsiElement.EMPTY_ARRAY;
+        }
+
+        // Determine if we're looking for opening or closing
+        boolean isOpening = isOpeningKeyword(elementType);
+        boolean isClosing = isClosingKeyword(elementType);
+        boolean isMiddle = isMiddleKeyword(elementType);
+
+        // Get all keywords in the file
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return PsiElement.EMPTY_ARRAY;
+        }
+
+        // Find all matching control structure elements
+        List<PsiElement> allKeywords = new ArrayList<>();
+        collectControlStructureKeywords(file, elementType, allKeywords);
+
+        if (allKeywords.isEmpty()) {
+            return PsiElement.EMPTY_ARRAY;
+        }
+
+        // Find the matching structure based on nesting
+        int nestingLevel = 0;
+        int startOffset = element.getTextRange().getStartOffset();
+
+        if (isOpening || isMiddle) {
+            // Looking forward for closing or middle keywords
+            for (PsiElement keyword : allKeywords) {
+                int keywordOffset = keyword.getTextRange().getStartOffset();
+
+                if (keywordOffset <= startOffset) {
+                    continue; // Skip keywords before our position
+                }
+
+                IElementType keywordType = keyword.getNode().getElementType();
+
+                if (isOpeningKeyword(keywordType)) {
+                    nestingLevel++;
+                } else if (isClosingKeyword(keywordType)) {
+                    if (nestingLevel == 0) {
+                        // Found matching closing
+                        rawMatches.add(keyword);
+                        if (!isMiddle) {
+                            break; // Only add closing for opening keywords
+                        }
+                    } else {
+                        nestingLevel--;
+                    }
+                } else if (isMiddleKeyword(keywordType) && nestingLevel == 0) {
+                    // Found middle keyword at same level
+                    rawMatches.add(keyword);
+                }
+            }
+        }
+
+        if (isClosing || isMiddle) {
+            // Looking backward for opening or middle keywords
+            nestingLevel = 0;
+            for (int i = allKeywords.size() - 1; i >= 0; i--) {
+                PsiElement keyword = allKeywords.get(i);
+                int keywordOffset = keyword.getTextRange().getStartOffset();
+
+                if (keywordOffset >= startOffset) {
+                    continue; // Skip keywords after our position
+                }
+
+                IElementType keywordType = keyword.getNode().getElementType();
+
+                if (isClosingKeyword(keywordType)) {
+                    nestingLevel++;
+                } else if (isOpeningKeyword(keywordType)) {
+                    if (nestingLevel == 0) {
+                        // Found matching opening
+                        rawMatches.add(0, keyword); // Add at beginning to maintain order
+                        if (!isMiddle) {
+                            break; // Only add opening for closing keywords
+                        }
+                    } else {
+                        nestingLevel--;
+                    }
+                } else if (isMiddleKeyword(keywordType) && nestingLevel == 0) {
+                    // Found middle keyword at same level
+                    rawMatches.add(0, keyword); // Add at beginning
+                }
+            }
+        }
+
+        // Wrap raw PsiElements in HarbourNavigationElement for proper display
+        List<PsiElement> wrappedMatches = new ArrayList<>();
+        for (PsiElement match : rawMatches) {
+            String lineText = getLineTextForElement(file, match);
+            String displayText = lineText != null ? lineText.trim() : match.getText();
+            int lineNumber = getLineNumber(file, match);
+
+            HarbourNavigationElement navElement = new HarbourNavigationElement(
+                match,
+                displayText,
+                file.getVirtualFile() != null ? file.getVirtualFile().getPath() : file.getName(),
+                lineNumber,
+                "Control structure"
+            );
+            wrappedMatches.add(navElement);
+        }
+
+        return wrappedMatches.toArray(new PsiElement[0]);
+    }
+
+    /**
+     * Get the full line text for a PsiElement
+     */
+    private String getLineTextForElement(PsiFile file, PsiElement element) {
+        try {
+            String fileText = file.getText();
+            if (fileText == null) return null;
+
+            int offset = element.getTextOffset();
+            String[] lines = fileText.split("\n");
+
+            int currentOffset = 0;
+            for (String line : lines) {
+                if (currentOffset <= offset && offset < currentOffset + line.length()) {
+                    return line;
+                }
+                currentOffset += line.length() + 1;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Get line number for a PsiElement
+     */
+    private int getLineNumber(PsiFile file, PsiElement element) {
+        try {
+            String fileText = file.getText();
+            if (fileText == null) return 1;
+
+            int offset = element.getTextOffset();
+            String textBefore = fileText.substring(0, Math.min(offset, fileText.length()));
+            return textBefore.split("\n").length;
+        } catch (Exception e) {
+            return 1;
+        }
+    }
+
+    /**
+     * Collect all control structure keywords of compatible types in the tree
+     */
+    private void collectControlStructureKeywords(@NotNull PsiElement root, @NotNull IElementType targetType, @NotNull List<PsiElement> result) {
+        PsiElement child = root.getFirstChild();
+        while (child != null) {
+            IElementType childType = child.getNode().getElementType();
+
+            if (isMatchingControlStructure(targetType, childType)) {
+                result.add(child);
+            }
+
+            // Recurse into children
+            collectControlStructureKeywords(child, targetType, result);
+
+            child = child.getNextSibling();
+        }
+    }
+
+    /**
+     * Check if two control structure types match (e.g., IF matches with ELSE, ELSEIF, ENDIF)
+     */
+    private boolean isMatchingControlStructure(@NotNull IElementType type1, @NotNull IElementType type2) {
+        // IF/ELSE/ELSEIF/ENDIF group
+        if ((type1 == HarbourTypes.IF || type1 == HarbourTypes.ELSE || type1 == HarbourTypes.ELSEIF || type1 == HarbourTypes.ENDIF) &&
+            (type2 == HarbourTypes.IF || type2 == HarbourTypes.ELSE || type2 == HarbourTypes.ELSEIF || type2 == HarbourTypes.ENDIF)) {
+            return true;
+        }
+
+        // WHILE/ENDDO group
+        if ((type1 == HarbourTypes.WHILE || type1 == HarbourTypes.ENDDO) &&
+            (type2 == HarbourTypes.WHILE || type2 == HarbourTypes.ENDDO)) {
+            return true;
+        }
+
+        // FOR/NEXT group
+        if ((type1 == HarbourTypes.FOR || type1 == HarbourTypes.NEXT) &&
+            (type2 == HarbourTypes.FOR || type2 == HarbourTypes.NEXT)) {
+            return true;
+        }
+
+        // SWITCH/CASE/ENDSWITCH/ENDCASE group
+        if ((type1 == HarbourTypes.SWITCH || type1 == HarbourTypes.CASE || type1 == HarbourTypes.ENDSWITCH || type1 == HarbourTypes.ENDCASE) &&
+            (type2 == HarbourTypes.SWITCH || type2 == HarbourTypes.CASE || type2 == HarbourTypes.ENDSWITCH || type2 == HarbourTypes.ENDCASE)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the keyword is a control structure keyword
+     */
+    private boolean isControlStructureKeyword(@NotNull IElementType type) {
+        return type == HarbourTypes.IF || type == HarbourTypes.ELSE || type == HarbourTypes.ELSEIF || type == HarbourTypes.ENDIF ||
+               type == HarbourTypes.WHILE || type == HarbourTypes.ENDDO ||
+               type == HarbourTypes.FOR || type == HarbourTypes.NEXT ||
+               type == HarbourTypes.SWITCH || type == HarbourTypes.CASE || type == HarbourTypes.ENDSWITCH || type == HarbourTypes.ENDCASE;
+    }
+
+    /**
+     * Check if the keyword is an opening keyword
+     */
+    private boolean isOpeningKeyword(@NotNull IElementType type) {
+        return type == HarbourTypes.IF || type == HarbourTypes.WHILE ||
+               type == HarbourTypes.FOR || type == HarbourTypes.SWITCH;
+    }
+
+    /**
+     * Check if the keyword is a closing keyword
+     */
+    private boolean isClosingKeyword(@NotNull IElementType type) {
+        return type == HarbourTypes.ENDIF || type == HarbourTypes.ENDDO ||
+               type == HarbourTypes.NEXT || type == HarbourTypes.ENDSWITCH ||
+               type == HarbourTypes.ENDCASE;
+    }
+
+    /**
+     * Check if the keyword is a middle keyword (like ELSE, ELSEIF, CASE)
+     */
+    private boolean isMiddleKeyword(@NotNull IElementType type) {
+        return type == HarbourTypes.ELSE || type == HarbourTypes.ELSEIF ||
+               type == HarbourTypes.CASE;
     }
 
 }

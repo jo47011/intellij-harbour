@@ -8,8 +8,6 @@
 - structure view, methode in der der Cusror steht sollte ge-highlighted werden
 - refactor: in Methode auslagern
 - hotkey zum linten des aktuellen programms => settings oder als commando mit default key
-- ctrl-T toggle
-- Klammer auf eingeben -> Klammer zu automatisch => konfigurierbar, default=False
 
 Code navigation:
 - clicking on a if/endif or while/enddo etc. => shpuld jump to the counterpart in code
@@ -63,23 +61,3 @@ Start over again fix, reformat, test,....
 Start over again fix, reformat, test,....
 etc.
 
-
--------------------
-
-Debugger:
-- alt N neues Fenster geht nicht auf, werden gequeued bis das Hauptfenster geschlossen wird => nix gut
-- wenn prorgamm im debugger on bp läuft, trotzdem sehr langsam => tunen?
-- In case of an error (roter Balken) => debugger sollte an den Fehlerpunkt springen
-
-- Display Stacktrace in console in case of error, not working for => alias not found here:
-static procedure MyTest()
-  Stueckliste():new("123"):getWerkzeugGruppen()
-
-- db viewer
-  - dbf file open in project explorer, right click => not available
-
-
-- new: 
-- tab completion: ctrl tab?
-
----

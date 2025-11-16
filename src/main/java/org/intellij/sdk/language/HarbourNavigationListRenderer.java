@@ -126,8 +126,11 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             
             // Read line content for context
             String lineContent = getLineText(containingFile, element);
+            HarbourLogger.log(COMPONENT, "Line content for element '" + variableName + "': " +
+                            (lineContent != null ? lineContent : "NULL"));
             String processedCode = truncateCodeText(lineContent != null ? lineContent.trim() : "");
-            
+            HarbourLogger.log(COMPONENT, "Processed code: " + processedCode);
+
             // Apply same formatting as HarbourNavigationElement
             String truncatedFileName = truncateFileName(fileName, maxFileNameWidth);
             String formattedFileName = String.format("%-" + maxFileNameWidth + "s", truncatedFileName);
@@ -157,32 +160,103 @@ public class HarbourNavigationListRenderer extends ColoredListCellRenderer<PsiEl
             
         } catch (Exception e) {
             // Fallback to simple rendering
+            HarbourLogger.log(COMPONENT, "Exception in handleVariablePsiElement: " + e.getMessage());
             append(element.getText(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
         }
     }
     
     /**
-     * Get line text for a PsiElement
+     * Get line text for a PsiElement with enhanced context for control structures
      */
     private String getLineText(PsiFile file, PsiElement element) {
         try {
+            // Use simple file text approach - more reliable than document
             String fileText = file.getText();
             if (fileText == null) return null;
-            
+
             int offset = element.getTextOffset();
             String[] lines = fileText.split("\n");
-            
+
             int currentOffset = 0;
-            for (String line : lines) {
-                if (currentOffset + line.length() >= offset) {
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
+                if (currentOffset <= offset && offset < currentOffset + line.length()) {
+                    // Found the line containing this element
+                    HarbourLogger.log(COMPONENT, "Found line at offset " + offset + ": '" + line + "'");
+                    String trimmedLine = line.trim();
+
+                    // For control structure keywords that are ALONE on the line (just the keyword),
+                    // add next line context for better clarity
+                    if (isStandaloneKeyword(trimmedLine)) {
+                        // Try to get next non-empty line for additional context
+                        for (int j = i + 1; j < lines.length; j++) {
+                            String nextLine = lines[j].trim();
+                            if (nextLine.length() > 0) {
+                                // Add continuation context if it's indented (likely part of the block)
+                                if (!startsWithKeyword(nextLine)) {
+                                    return line + " " + nextLine;
+                                }
+                                break; // Found a line, stop searching
+                            }
+                        }
+                    }
+
                     return line;
                 }
                 currentOffset += line.length() + 1; // +1 for newline
             }
         } catch (Exception e) {
-            // Ignore and return null
+            HarbourLogger.log(COMPONENT, "Error getting line text: " + e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Check if a line contains ONLY a standalone control structure keyword
+     * (keyword alone without condition/content on same line)
+     */
+    private boolean isStandaloneKeyword(String line) {
+        if (line == null || line.isEmpty()) return false;
+        String lower = line.toLowerCase();
+        // Check if line is JUST the keyword, nothing else
+        return lower.equals("case") || lower.equals("if") ||
+               lower.equals("while") || lower.equals("for") ||
+               lower.equals("switch") || lower.equals("else") ||
+               lower.equals("elseif") || lower.equals("endif") ||
+               lower.equals("enddo") || lower.equals("next") ||
+               lower.equals("endcase") || lower.equals("endswitch") ||
+               lower.equals("do case") || lower.equals("do while");
+    }
+
+    /**
+     * Check if a line starts with a control structure keyword
+     */
+    private boolean isControlStructureKeyword(String line) {
+        if (line == null || line.isEmpty()) return false;
+        String lower = line.toLowerCase();
+        return lower.startsWith("case ") || lower.equals("case") ||
+               lower.startsWith("if ") || lower.equals("if") ||
+               lower.startsWith("while ") || lower.equals("while") ||
+               lower.startsWith("for ") || lower.equals("for") ||
+               lower.startsWith("switch ") || lower.equals("switch") ||
+               lower.startsWith("else") || lower.equals("else") ||
+               lower.startsWith("elseif ") || lower.equals("elseif") ||
+               lower.equals("endif") || lower.equals("enddo") ||
+               lower.equals("next") || lower.equals("endcase") ||
+               lower.equals("endswitch");
+    }
+
+    /**
+     * Check if a line starts with any keyword that would indicate new structure
+     */
+    private boolean startsWithKeyword(String line) {
+        if (line == null || line.isEmpty()) return false;
+        String lower = line.toLowerCase();
+        return lower.startsWith("case ") || lower.startsWith("if ") ||
+               lower.startsWith("while ") || lower.startsWith("for ") ||
+               lower.startsWith("do ") || lower.startsWith("switch ") ||
+               lower.startsWith("function ") || lower.startsWith("procedure ") ||
+               lower.startsWith("return") || lower.startsWith("local ");
     }
 
 
