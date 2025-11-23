@@ -100,14 +100,27 @@ RETURN nKey
 // Idle block to check for PAUSE command during GET/READ
 STATIC FUNCTION IdleSocketCheck()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL tmp
+   LOCAL tmp, cCurrentFile, nCurrentLine
 
    IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
       IF !Empty(tmp) .AND. tmp == "PAUSE"
-         // Just set flag - will break at next __dbgEntry() call
+         // Get current location from stack
+         IF Len(oDebugInfo["aStack"]) > 0
+            cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
+            nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
+         ELSE
+            cCurrentFile := "unknown"
+            nCurrentLine := 0
+         ENDIF
+
+         // Send STOP immediately so IntelliJ shows paused state
+         hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+         LogDebugInfo("PAUSE in idle - sent STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
+
+         // Set flags so __dbgEntry doesn't send STOP again
          oDebugInfo["lRunning"] := .F.
-         LogDebugInfo("PAUSE received in idle block - setting lRunning=.F.")
+         oDebugInfo["lStopSent"] := .T.
       ENDIF
    ENDIF
 
@@ -169,7 +182,8 @@ STATIC FUNCTION __DEBUGITEM(xValue)
          "maxLevel" => NIL, ;
          "debugHandle" => NIL, ;
          "bOldKeyFilter" => NIL, ;
-         "nIdleHandle" => NIL ;
+         "nIdleHandle" => NIL, ;
+         "lStopSent" => .F. ;
       }
    ENDIF
 RETURN t_oDebugInfo
@@ -422,7 +436,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    LOCAL hLog  // Keep variable for existing code compatibility
    // Timeout variables removed - debugger will wait forever as requested
 
-   lStopSent := IF(Empty(lStopSent), .F., lStopSent)
+   oDebugInfo["lStopSent"] := IF(Empty(lStopSent), .F., lStopSent)
 
    // Check if we should skip debugger (child process spawned by main debugged process)
    // IMPORTANT: Only check this if THIS process hasn't already connected
@@ -513,28 +527,28 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                CASE tmp == "GO"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["maxLevel"] := NIL
-                  lStopSent := .F.
+                  oDebugInfo["lStopSent"] := .F.
                   lNeedExit := .T.
                   
                CASE tmp == "STEP"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := NIL
-                  lStopSent := .F.
+                  oDebugInfo["lStopSent"] := .F.
                   lNeedExit := .T.
                   
                CASE tmp == "NEXT"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"]
-                  lStopSent := .F.
+                  oDebugInfo["lStopSent"] := .F.
                   lNeedExit := .T.
                   
                CASE tmp == "OUT"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"] - 1
-                  lStopSent := .F.
+                  oDebugInfo["lStopSent"] := .F.
                   lNeedExit := .T.
                   
                CASE tmp == "EXIT"
@@ -545,7 +559,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                CASE tmp == "PAUSE"
                   // User requested pause - stop at next line execution
                   oDebugInfo["lRunning"] := .F.
-                  lStopSent := .F.
+                  oDebugInfo["lStopSent"] := .F.
 
                CASE tmp == "STACK"
                   SendStack()
@@ -659,7 +673,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                oDebugInfo["maxLevel"] := NIL
             ENDIF
             
-            IF !lStopSent
+            IF !oDebugInfo["lStopSent"]
                // Get current file and line
                cCurrentFile := ""
                nCurrentLine := 0
@@ -677,13 +691,13 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   NEXT
                ENDIF
                hb_inetSend(oDebugInfo["socket"], "STOP:step:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
-               lStopSent := .T.
+               oDebugInfo["lStopSent"] := .T.
             ENDIF
             
          // Check for breakpoints
          ELSEIF InBreakpoint()
             oDebugInfo["lRunning"] := .F.
-            IF !lStopSent
+            IF !oDebugInfo["lStopSent"]
                // Get current file and line
                cCurrentFile := ""
                nCurrentLine := 0
@@ -701,7 +715,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   NEXT
                ENDIF
                hb_inetSend(oDebugInfo["socket"], "STOP:break:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
-               lStopSent := .T.
+               oDebugInfo["lStopSent"] := .T.
             ENDIF
          ENDIF
          
@@ -709,7 +723,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          IF __dbgInvokeDebug()
             oDebugInfo["lRunning"] := .F.
             __dbgInvokeDebug(.T.)  // Clear flag after detecting
-            IF !lStopSent
+            IF !oDebugInfo["lStopSent"]
                // Get current file and line
                cCurrentFile := ""
                nCurrentLine := 0
@@ -727,7 +741,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   NEXT
                ENDIF
                hb_inetSend(oDebugInfo["socket"], "STOP:AltD:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
-               lStopSent := .T.
+               oDebugInfo["lStopSent"] := .T.
             ENDIF
          ENDIF
       ENDIF
