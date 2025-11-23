@@ -102,33 +102,30 @@ STATIC FUNCTION IdleSocketCheck()
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL tmp, cCurrentFile, nCurrentLine
 
-   // DON'T run if we're already in CheckSocket() - prevents race condition
-   IF oDebugInfo["lInternalRun"]
-      RETURN NIL
-   ENDIF
-
    IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
-      IF !Empty(tmp) .AND. tmp == "PAUSE"
-         // Use last known position (stored in __dbgEntry before GET/READ)
-         IF !Empty(oDebugInfo["lastFile"])
-            cCurrentFile := oDebugInfo["lastFile"]
-            nCurrentLine := oDebugInfo["lastLine"]
-         ELSEIF Len(oDebugInfo["aStack"]) > 0
-            cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
-            nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
-         ELSE
-            cCurrentFile := "unknown"
-            nCurrentLine := 0
+      IF !Empty(tmp)
+         // Only process PAUSE command in idle - others wait for CheckSocket()
+         IF tmp == "PAUSE"
+            // Get current location from stack
+            IF Len(oDebugInfo["aStack"]) > 0
+               cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
+               nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
+            ELSE
+               cCurrentFile := "unknown"
+               nCurrentLine := 0
+            ENDIF
+
+            // Send STOP message immediately to unblock IntelliJ
+            hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+            LogDebugInfo("PAUSE received in idle block - sent STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
+
+            // Set flag to break at next line execution
+            oDebugInfo["lRunning"] := .F.
+
+            // Wait for next command (GO/STEP) before continuing
+            CheckSocket(.T.)
          ENDIF
-
-         // Send STOP immediately so IntelliJ shows paused state
-         hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
-         LogDebugInfo("PAUSE in idle - sent STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
-
-         // Set flags so __dbgEntry doesn't send STOP again
-         oDebugInfo["lRunning"] := .F.
-         oDebugInfo["lStopSent"] := .T.
       ENDIF
    ENDIF
 
