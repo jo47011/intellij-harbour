@@ -105,8 +105,11 @@ STATIC FUNCTION IdleSocketCheck()
    IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
       IF !Empty(tmp) .AND. tmp == "PAUSE"
-         // Get current location from stack
-         IF Len(oDebugInfo["aStack"]) > 0
+         // Use last known position (stored in __dbgEntry before GET/READ)
+         IF !Empty(oDebugInfo["lastFile"])
+            cCurrentFile := oDebugInfo["lastFile"]
+            nCurrentLine := oDebugInfo["lastLine"]
+         ELSEIF Len(oDebugInfo["aStack"]) > 0
             cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
             nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
          ELSE
@@ -183,7 +186,9 @@ STATIC FUNCTION __DEBUGITEM(xValue)
          "debugHandle" => NIL, ;
          "bOldKeyFilter" => NIL, ;
          "nIdleHandle" => NIL, ;
-         "lStopSent" => .F. ;
+         "lStopSent" => .F., ;
+         "lastFile" => "", ;
+         "lastLine" => 0 ;
       }
    ENDIF
 RETURN t_oDebugInfo
@@ -268,15 +273,19 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       // Line execution - check for breakpoints
       oDebugInfo := __DEBUGITEM()
       oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
-      
+
       lAltDInvoked := __dbgInvokeDebug()  // Check without clearing
       IF lAltDInvoked
          __dbgInvokeDebug(.T.)  // Clear the flag after detecting
       ENDIF
-      
+
       // Update current line in stack
       IF Len(oDebugInfo["aStack"]) > 0
          ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE] := uParam1
+
+         // Store last known position for idle block PAUSE handling
+         oDebugInfo["lastFile"] := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
+         oDebugInfo["lastLine"] := uParam1
       ENDIF
       
       // Check socket and process commands if enabled
