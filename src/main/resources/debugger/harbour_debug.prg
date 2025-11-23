@@ -107,8 +107,11 @@ STATIC FUNCTION IdleSocketCheck()
       IF !Empty(tmp)
          // Process commands during GET/READ blocking
          IF tmp == "PAUSE"
-            // Get current location from stack
-            IF Len(oDebugInfo["aStack"]) > 0
+            // Get current location - use lastFile/lastLine which is stored before GET/READ
+            IF !Empty(oDebugInfo["lastFile"])
+               cCurrentFile := oDebugInfo["lastFile"]
+               nCurrentLine := oDebugInfo["lastLine"]
+            ELSEIF Len(oDebugInfo["aStack"]) > 0
                cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
                nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
             ELSE
