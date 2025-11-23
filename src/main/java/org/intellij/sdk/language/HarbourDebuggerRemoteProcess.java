@@ -2235,7 +2235,40 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue GO command");
         }
     }
-    
+
+    /**
+     * Pause execution at the current point without requiring a breakpoint.
+     * Sends a PAUSE command to the Harbour process which will stop at the next line execution.
+     */
+    public void pause() {
+        if (!isConnected) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring PAUSE command - not connected");
+            return;
+        }
+
+        // Can only pause when running
+        if (debuggerState != DebuggerState.RUNNING) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring PAUSE command - debugger state is " + debuggerState);
+            return;
+        }
+
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing PAUSE command");
+        try {
+            commandQueue.offer(new DebugCommand("PAUSE"), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue PAUSE command");
+        }
+    }
+
+    /**
+     * Get the current debugger state
+     * @return the current DebuggerState
+     */
+    public DebuggerState getDebuggerState() {
+        return debuggerState;
+    }
+
     /**
      * Check if we should stop at a conditional breakpoint by evaluating its condition
      */

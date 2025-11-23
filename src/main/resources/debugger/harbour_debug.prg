@@ -13,6 +13,7 @@ REQUEST HB_GT_STD_DEFAULT
 #include <hbmemvar.ch>
 #include <hbhash.ch>
 #include <hboo.ch>
+#include <inkey.ch>
 
 #ifndef DBG_PORT
 #define DBG_PORT 9876  // IntelliJ debugger port
@@ -53,18 +54,8 @@ REQUEST HB_GT_STD_DEFAULT
 
 // STATIC declarations must be at the top before any procedures
 STATIC t_oDebugInfo
-STATIC s_lSocketEnabled := .T.  // ENABLED: Socket communication needed for PyCharm breakpoints
+STATIC s_lSocketEnabled := .T.  // Socket communication enabled for debugger breakpoints
 STATIC s_lThisProcessConnected := .F.  // Track if THIS process successfully connected to debugger
-
-// Static variable to track if we've hooked the error handler
-// REMOVED: s_lErrorHandlerHooked - not needed with new monitoring approach
-// REMOVED: s_bOriginalHandler - not needed with new monitoring approach
-
-// REMOVED: Obsolete SetGlobalErrorHandler() and MonitoringErrorHandler() - replaced by harbour_error_monitor.prg
-
-// REMOVED: HookUserErrorHandler - part of abandoned approach
-
-// REMOVED: ErrorHandlerWrapper - part of abandoned approach
 
 // Debug logging function - writes to .hbmk/debug.log
 STATIC PROCEDURE LogDebugInfo(cMessage)
@@ -87,6 +78,96 @@ STATIC PROCEDURE LogDebugInfo(cMessage)
    ENDIF
 RETURN
 
+// Low-level keyboard filter - intercepts Alt-D before application processes it
+STATIC FUNCTION KeyboardFilter(nKey)
+   LOCAL oDebugInfo
+
+   // Check for Alt-D (K_ALT_D = 288)
+   IF nKey == 288
+      oDebugInfo := __DEBUGITEM()
+      IF oDebugInfo["socket"] != NIL
+         // Trigger debugger break
+         oDebugInfo["lRunning"] := .F.
+         LogDebugInfo("Alt-D intercepted - triggering debug break")
+         // Return 0 to consume the key (don't pass to application)
+         RETURN 0
+      ENDIF
+   ENDIF
+
+   // Return the key unchanged to pass to application
+RETURN nKey
+
+// Idle block to check socket for commands during GET/READ/MENU
+STATIC FUNCTION IdleSocketCheck()
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL tmp, cCurrentFile, nCurrentLine
+
+   IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
+      tmp := hb_inetRecvLine(oDebugInfo["socket"])
+      IF !Empty(tmp)
+         // Only process PAUSE command in idle - others wait for CheckSocket()
+         IF tmp == "PAUSE"
+            // Get current location from stack
+            IF Len(oDebugInfo["aStack"]) > 0
+               cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
+               nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
+            ELSE
+               cCurrentFile := "unknown"
+               nCurrentLine := 0
+            ENDIF
+
+            // Send STOP message immediately to unblock IntelliJ
+            // Format: STOP:file:line
+            hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+            LogDebugInfo("PAUSE received in idle block - sent STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
+
+            // Set flag to break at next line execution
+            oDebugInfo["lRunning"] := .F.
+
+            // Wait for next command (GO/STEP) before continuing
+            CheckSocket(.T.)
+         ENDIF
+      ENDIF
+   ENDIF
+
+RETURN NIL
+
+// Install keyboard filter and idle block
+STATIC PROCEDURE InstallKeyboardFilter()
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL bOldFilter, nIdleHandle
+
+   IF oDebugInfo["bOldKeyFilter"] == NIL
+      bOldFilter := hb_SetKeyCheck({|nKey| KeyboardFilter(nKey)})
+      oDebugInfo["bOldKeyFilter"] := bOldFilter
+      LogDebugInfo("Installed keyboard filter for Alt-D detection")
+
+      // Install idle block to check socket during GET/READ
+      nIdleHandle := hb_IdleAdd({|| IdleSocketCheck()})
+      oDebugInfo["nIdleHandle"] := nIdleHandle
+      LogDebugInfo("Installed idle block for socket checking")
+   ENDIF
+
+RETURN
+
+// Remove keyboard filter and idle block
+STATIC PROCEDURE RemoveKeyboardFilter()
+   LOCAL oDebugInfo := __DEBUGITEM()
+
+   IF oDebugInfo["bOldKeyFilter"] != NIL
+      hb_SetKeyCheck(oDebugInfo["bOldKeyFilter"])
+      oDebugInfo["bOldKeyFilter"] := NIL
+      LogDebugInfo("Removed keyboard filter")
+   ENDIF
+
+   IF oDebugInfo["nIdleHandle"] != NIL
+      hb_IdleDel(oDebugInfo["nIdleHandle"])
+      oDebugInfo["nIdleHandle"] := NIL
+      LogDebugInfo("Removed idle block")
+   ENDIF
+
+RETURN
+
 // Get or create debug info
 STATIC FUNCTION __DEBUGITEM(xValue)
    IF xValue != NIL
@@ -105,7 +186,9 @@ STATIC FUNCTION __DEBUGITEM(xValue)
          "lInitialized" => .F., ;
          "lSingleStep" => .F., ;
          "maxLevel" => NIL, ;
-         "debugHandle" => NIL ;
+         "debugHandle" => NIL, ;
+         "bOldKeyFilter" => NIL, ;
+         "nIdleHandle" => NIL ;
       }
    ENDIF
 RETURN t_oDebugInfo
@@ -121,14 +204,6 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
    // Add error handling and stacktrace logging
    BEGIN SEQUENCE WITH {|err| ErrorHandler(err, nMode) }
 
-   // REMOVED - Setting error handler here conflicts with user's error handler
-   // Now using EXIT procedure to wrap the error handler after all INIT procedures
-   // ErrorBlock({|oError| GlobalErrorHandler(oError)})
-   
-   // Removed hardcoded debug log file - error handler is set silently
-
-   // Simple error handling without complex hooks
-   // We'll rely on root.inf monitoring instead
    
    DO CASE
    CASE nMode == HB_DBG_GETENTRY
@@ -259,6 +334,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       IF !Empty(oDebugInfo["socket"])
          hb_inetSend(oDebugInfo["socket"], "VMQUIT" + CRLF)
          hb_inetClose(oDebugInfo["socket"])
+         RemoveKeyboardFilter()
          oDebugInfo["socket"] := NIL
       ENDIF
    ENDCASE
@@ -283,14 +359,11 @@ STATIC PROCEDURE ErrorHandler(oError, nMode)
       hb_inetSend(oDebugInfo["socket"], "ERROR:" + cErrorMsg + CRLF)
    ENDIF
    
-   // Removed hardcoded debug trace log file
    
-   // REMOVED: Print error to stdout - causes popup console
    // Errors should only go to PyCharm console via socket or file logging
    
    // Re-raise the error so the program crashes as expected
    BREAK(oError)
-   // RETURN statement removed as it's unreachable after BREAK
 
 // Global error handler for entire application (not just debug system)
 // Handles ALL runtime errors uniformly: array bounds, type mismatches, division by zero, file errors, etc.
@@ -382,21 +455,17 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    // Simple error handling to prevent crashes
    BEGIN SEQUENCE
 
-   // Removed debug trace log file - socket debugging disabled to avoid file clutter
    hLog := -1  // Keep variable for existing code compatibility
 
    // Try to connect if not connected
    IF Empty(oDebugInfo["socket"]) .AND. oDebugInfo["timeCheckForDebug"] <= 14
-      // Connection attempt (logging removed)
       hb_inetInit()
       oDebugInfo["socket"] := hb_inetCreate(140 - oDebugInfo["timeCheckForDebug"]*10)
       hb_inetConnect("127.0.0.1", DBG_PORT, oDebugInfo["socket"])
 
       IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
-         // Connection failed (logging removed)
          tmp := "NO"
       ELSE
-         // Connection success (logging removed)
          // Send handshake
          hb_inetSend(oDebugInfo["socket"], HB_ARGV(0) + CRLF + Str(__PIDNum()) + CRLF)
 
@@ -406,19 +475,20 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDDO
 
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
-         // Handshake response (logging removed)
       ENDIF
 
       IF tmp != "HELLO"
-         // Handshake failed (logging removed)
+         RemoveKeyboardFilter()
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
-         // Handshake success (logging removed)
          // IMPORTANT: Mark this process as connected and set env var for child processes
          s_lThisProcessConnected := .T.
          hb_SetEnv("HB_DBG_SKIP", "1")
          LogDebugInfo("Main process connected to debugger - setting HB_DBG_SKIP=1 for child processes")
+
+         // Install keyboard filter for Alt-D detection
+         InstallKeyboardFilter()
       ENDIF
    ENDIF
    
@@ -431,20 +501,17 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          LogDebugInfo("Failed to connect to debugger after " + AllTrim(Str(oDebugInfo["timeCheckForDebug"])) + ;
                       " attempts - disabling debugger and setting HB_DBG_SKIP=1 for child processes")
       ENDIF
-      // No socket - returning (logging removed)
       BREAK
    ENDIF
    
-   // Socket available - entering main loop (logging removed)
    
    // Main command loop - wait forever (timeout removed as requested)
    DO WHILE .T.
       // Removed loop counter - debugger will wait forever
       
-      // Main loop iteration (logging removed)
       
       IF Empty(oDebugInfo["socket"]) .OR. hb_inetErrorCode(oDebugInfo["socket"]) != 0
-         // Socket error (logging removed)
+         RemoveKeyboardFilter()
          oDebugInfo["socket"] := NIL
          oDebugInfo["lRunning"] := .T.
          oDebugInfo["aBreaks"] := {=>}
@@ -455,18 +522,14 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       DO WHILE hb_inetDataReady(oDebugInfo["socket"]) == 1
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
          
-         // Received command (logging removed)
          
          IF hb_inetErrorCode(oDebugInfo["socket"]) != 0
-            // Socket error in command loop (logging removed)
             EXIT
          ENDIF
          
          IF !Empty(tmp)
-            // Processing command (logging removed)
             DO CASE
                CASE tmp == "GO"
-                  // GO command (logging removed)
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
@@ -497,60 +560,47 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["maxLevel"] := -1
                   lNeedExit := .T.
-                  
+
+               CASE tmp == "PAUSE"
+                  // User requested pause - stop at next line execution
+                  oDebugInfo["lRunning"] := .F.
+                  lStopSent := .F.
+
                CASE tmp == "STACK"
                   SendStack()
                   
                CASE Left(tmp, 6) == "LOCALS"
-                  // LOCALS command (logging removed)
                   IF ":" $ tmp
-                     // Calling SendLocals (logging removed)
                      SendLocals(SubStr(tmp, 8))  // LOCALS: = 7 chars, so 8 gets after colon
                   ELSE
-                     // Calling SendLocals with 0 (logging removed)
                      SendLocals("0")
                   ENDIF
-                  // SendLocals completed (logging removed)
                   
                CASE Left(tmp, 7) == "STATICS"
-                  // STATICS command (logging removed)
                   IF ":" $ tmp
-                     // Calling SendStatics (logging removed)
                      SendStatics(SubStr(tmp, 8))  // STATICS: = 8 chars  
                   ELSE
-                     // Calling SendStatics with 0 (logging removed)
                      SendStatics("0")
                   ENDIF
-                  // SendStatics completed (logging removed)
                   
                CASE Left(tmp, 8) == "PRIVATES"
-                  // PRIVATES command (logging removed)
                   IF ":" $ tmp
-                     // Calling SendPrivates (logging removed)
                      SendPrivates(SubStr(tmp, 9))  // PRIVATES: = 9 chars
                   ELSE
-                     // Calling SendPrivates with 0 (logging removed)
                      SendPrivates("0")
                   ENDIF
-                  // SendPrivates completed (logging removed)
                   
                CASE Left(tmp, 7) == "PUBLICS"
-                  // PUBLICS command (logging removed)
                   IF ":" $ tmp
-                     // Calling SendPublics (logging removed)
                      SendPublics(SubStr(tmp, 8))  // PUBLICS: = 8 chars
                   ELSE
-                     // Calling SendPublics with 0 (logging removed)
                      SendPublics("0")
                   ENDIF
-                  // SendPublics completed (logging removed)
                   
                CASE tmp == "BREAKPOINT"
-                  // BREAKPOINT command (logging removed)
                   // BREAKPOINT command is just an acknowledgment - actual breakpoints come as ADDBREAK commands
                   
                CASE Left(tmp, 1) == "+" .OR. Left(tmp, 1) == "-"
-                  // BREAKPOINT set/remove (logging removed)
                   SetBreakpoint(tmp)
                   
                CASE Left(tmp, 8) == "ADDBREAK"
@@ -597,6 +647,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   ENDIF
                   
                CASE tmp == "DISCONNECT"
+                  RemoveKeyboardFilter()
                   oDebugInfo["socket"] := NIL
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["aBreaks"] := {=>}
@@ -607,7 +658,6 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       ENDDO
       
       IF lNeedExit
-         // lNeedExit=TRUE - exiting CheckSocket (logging removed)
          BREAK
       ENDIF
       
