@@ -97,20 +97,41 @@ STATIC FUNCTION KeyboardFilter(nKey)
    // Return the key unchanged to pass to application
 RETURN nKey
 
-// Install keyboard filter for Alt-D detection in Harbour UI
+// Idle block to check for PAUSE command during GET/READ
+STATIC FUNCTION IdleSocketCheck()
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL tmp
+
+   IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
+      tmp := hb_inetRecvLine(oDebugInfo["socket"])
+      IF !Empty(tmp) .AND. tmp == "PAUSE"
+         // Just set flag - will break at next __dbgEntry() call
+         oDebugInfo["lRunning"] := .F.
+         LogDebugInfo("PAUSE received in idle block - setting lRunning=.F.")
+      ENDIF
+   ENDIF
+
+RETURN NIL
+
+// Install keyboard filter and idle block for Alt-D detection
 STATIC PROCEDURE InstallKeyboardFilter()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL bOldFilter
+   LOCAL bOldFilter, nIdleHandle
 
    IF oDebugInfo["bOldKeyFilter"] == NIL
       bOldFilter := hb_SetKeyCheck({|nKey| KeyboardFilter(nKey)})
       oDebugInfo["bOldKeyFilter"] := bOldFilter
       LogDebugInfo("Installed keyboard filter for Alt-D detection")
+
+      // Install idle block to process PAUSE during GET/READ
+      nIdleHandle := hb_IdleAdd({|| IdleSocketCheck()})
+      oDebugInfo["nIdleHandle"] := nIdleHandle
+      LogDebugInfo("Installed idle block for PAUSE processing")
    ENDIF
 
 RETURN
 
-// Remove keyboard filter
+// Remove keyboard filter and idle block
 STATIC PROCEDURE RemoveKeyboardFilter()
    LOCAL oDebugInfo := __DEBUGITEM()
 
@@ -118,6 +139,12 @@ STATIC PROCEDURE RemoveKeyboardFilter()
       hb_SetKeyCheck(oDebugInfo["bOldKeyFilter"])
       oDebugInfo["bOldKeyFilter"] := NIL
       LogDebugInfo("Removed keyboard filter")
+   ENDIF
+
+   IF oDebugInfo["nIdleHandle"] != NIL
+      hb_IdleDel(oDebugInfo["nIdleHandle"])
+      oDebugInfo["nIdleHandle"] := NIL
+      LogDebugInfo("Removed idle block")
    ENDIF
 
 RETURN
@@ -141,7 +168,8 @@ STATIC FUNCTION __DEBUGITEM(xValue)
          "lSingleStep" => .F., ;
          "maxLevel" => NIL, ;
          "debugHandle" => NIL, ;
-         "bOldKeyFilter" => NIL ;
+         "bOldKeyFilter" => NIL, ;
+         "nIdleHandle" => NIL ;
       }
    ENDIF
 RETURN t_oDebugInfo
