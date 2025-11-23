@@ -102,6 +102,11 @@ STATIC FUNCTION IdleSocketCheck()
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL tmp, cCurrentFile, nCurrentLine
 
+   // DON'T run if we're already in CheckSocket() - prevents race condition
+   IF oDebugInfo["lInternalRun"]
+      RETURN NIL
+   ENDIF
+
    IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
       IF !Empty(tmp) .AND. tmp == "PAUSE"
