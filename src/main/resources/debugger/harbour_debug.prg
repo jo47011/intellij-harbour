@@ -105,7 +105,7 @@ STATIC FUNCTION IdleSocketCheck()
    IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
       IF !Empty(tmp)
-         // Only process PAUSE command in idle - others wait for CheckSocket()
+         // Process commands during GET/READ blocking
          IF tmp == "PAUSE"
             // Get current location from stack
             IF Len(oDebugInfo["aStack"]) > 0
@@ -123,9 +123,20 @@ STATIC FUNCTION IdleSocketCheck()
             // Set flag to break at next line execution
             oDebugInfo["lRunning"] := .F.
 
-            // Wait for next command (GO/STEP) before continuing
-            CheckSocket(.T.)
+         ELSEIF tmp == "GO"
+            // Resume execution when GET/READ completes
+            oDebugInfo["lRunning"] := .T.
+            oDebugInfo["lSingleStep"] := .F.
+            LogDebugInfo("GO received in idle block - will resume when GET/READ completes")
+
+         ELSEIF tmp == "STEP" .OR. tmp == "NEXT"
+            // Step when GET/READ completes
+            oDebugInfo["lRunning"] := .T.
+            oDebugInfo["lSingleStep"] := .T.
+            LogDebugInfo("STEP received in idle block - will step when GET/READ completes")
+
          ENDIF
+         // Other commands are ignored during GET/READ - they need CheckSocket context
       ENDIF
    ENDIF
 
