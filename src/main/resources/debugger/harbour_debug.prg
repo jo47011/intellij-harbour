@@ -97,60 +97,20 @@ STATIC FUNCTION KeyboardFilter(nKey)
    // Return the key unchanged to pass to application
 RETURN nKey
 
-// Idle block to check socket for commands during GET/READ/MENU
-STATIC FUNCTION IdleSocketCheck()
-   LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL tmp, cCurrentFile, nCurrentLine
-
-   IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
-      tmp := hb_inetRecvLine(oDebugInfo["socket"])
-      IF !Empty(tmp)
-         // Only process PAUSE command in idle - others wait for CheckSocket()
-         IF tmp == "PAUSE"
-            // Get current location from stack
-            IF Len(oDebugInfo["aStack"]) > 0
-               cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
-               nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
-            ELSE
-               cCurrentFile := "unknown"
-               nCurrentLine := 0
-            ENDIF
-
-            // Send STOP message immediately to unblock IntelliJ
-            // Format: STOP:file:line
-            hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
-            LogDebugInfo("PAUSE received in idle block - sent STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
-
-            // Set flag to break at next line execution
-            oDebugInfo["lRunning"] := .F.
-
-            // Wait for next command (GO/STEP) before continuing
-            CheckSocket(.T.)
-         ENDIF
-      ENDIF
-   ENDIF
-
-RETURN NIL
-
-// Install keyboard filter and idle block
+// Install keyboard filter for Alt-D detection in Harbour UI
 STATIC PROCEDURE InstallKeyboardFilter()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL bOldFilter, nIdleHandle
+   LOCAL bOldFilter
 
    IF oDebugInfo["bOldKeyFilter"] == NIL
       bOldFilter := hb_SetKeyCheck({|nKey| KeyboardFilter(nKey)})
       oDebugInfo["bOldKeyFilter"] := bOldFilter
       LogDebugInfo("Installed keyboard filter for Alt-D detection")
-
-      // Install idle block to check socket during GET/READ
-      nIdleHandle := hb_IdleAdd({|| IdleSocketCheck()})
-      oDebugInfo["nIdleHandle"] := nIdleHandle
-      LogDebugInfo("Installed idle block for socket checking")
    ENDIF
 
 RETURN
 
-// Remove keyboard filter and idle block
+// Remove keyboard filter
 STATIC PROCEDURE RemoveKeyboardFilter()
    LOCAL oDebugInfo := __DEBUGITEM()
 
@@ -158,12 +118,6 @@ STATIC PROCEDURE RemoveKeyboardFilter()
       hb_SetKeyCheck(oDebugInfo["bOldKeyFilter"])
       oDebugInfo["bOldKeyFilter"] := NIL
       LogDebugInfo("Removed keyboard filter")
-   ENDIF
-
-   IF oDebugInfo["nIdleHandle"] != NIL
-      hb_IdleDel(oDebugInfo["nIdleHandle"])
-      oDebugInfo["nIdleHandle"] := NIL
-      LogDebugInfo("Removed idle block")
    ENDIF
 
 RETURN
@@ -187,8 +141,7 @@ STATIC FUNCTION __DEBUGITEM(xValue)
          "lSingleStep" => .F., ;
          "maxLevel" => NIL, ;
          "debugHandle" => NIL, ;
-         "bOldKeyFilter" => NIL, ;
-         "nIdleHandle" => NIL ;
+         "bOldKeyFilter" => NIL ;
       }
    ENDIF
 RETURN t_oDebugInfo

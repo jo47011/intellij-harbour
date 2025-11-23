@@ -264,6 +264,25 @@ During debugging, the plugin provides a Database View tool window that shows all
 
 The Database View automatically updates when you step through code that opens, closes, or modifies database records.
 
+### Pause/Break Without Breakpoints
+
+The debugger supports pausing execution at the current point without setting breakpoints:
+
+**Method 1: Using Alt-D in PyCharm**
+- Press **Alt-D** in PyCharm while your Harbour program is running
+- The debugger will pause at the next line of code execution
+- **Important**: Alt-D must be pressed in PyCharm (not in the Harbour application window)
+- Works even when the application is waiting for user input (GET/READ operations)
+
+**Method 2: Calling AltD() in Your Code**
+- Add `AltD()` function calls in your Harbour code where you want to break
+- The debugger will stop at that line when executed
+- Useful for conditional breaks: `IF nError > 0; AltD(); ENDIF`
+
+**Limitations:**
+- Pressing Alt-D in the Harbour application window (not PyCharm) will not trigger a pause
+- During GET/READ operations, the pause occurs at the last executed line before waiting for input
+
 ### Limitations
 
 - **Static Variables**: Static variables are not visible in the debugger due to Harbour VM
