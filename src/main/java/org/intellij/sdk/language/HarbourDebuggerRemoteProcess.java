@@ -82,15 +82,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     
     private volatile DebuggerState debuggerState = DebuggerState.DISCONNECTED;
     private volatile boolean hasPendingStepCommand = false;
-    
-    // Variables for delayed position notification
+
+    // STACK-based positioning
+    private volatile boolean expectingStackForPosition = false;
+    private volatile String lastStopFile = null;
+    private volatile int lastStopLine = -1;
+
+    // Track variable scope completion for synchronized UI update
+    private final Set<String> receivedVariableScopes = Collections.synchronizedSet(new HashSet<>());
     private volatile boolean waitingForVariables = false;
-    private volatile int variablesExpected = 0;
-    private volatile int variablesReceived = 0;
-    private volatile String pendingStopFile = null;
-    private volatile int pendingStopLine = -1;
-    private volatile XSourcePosition pendingStopPosition = null;
-    
+
     // Hit count tracking for conditional breakpoints
     private final Map<String, Integer> breakpointHitCounts = new ConcurrentHashMap<>();
     
@@ -546,8 +547,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             }
         }
         
+        // Normalize STACK command (it may come as "STACK 3" with frame count)
+        String normalizedCommand = command;
+        if (command.startsWith("STACK ")) {
+            normalizedCommand = "STACK";
+        }
+
         // Handle multi-line commands (original format)
-        switch (command) {
+        switch (normalizedCommand) {
             case "STOP":
                 if (lines.length >= 3) {
                     try {
@@ -568,6 +575,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 break;
                 
             case "STACK":
+                // Handle "STACK" or "STACK n" where n is the number of frames
                 handleStackTrace(Arrays.copyOfRange(lines, 1, lines.length));
                 break;
                 
@@ -576,13 +584,29 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             case "PRIVATES":
             case "PUBLICS":
                 String[] varLines = Arrays.copyOfRange(lines, 1, lines.length);
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
                     "DEBUGGING: " + command + " with " + varLines.length + " variable lines");
                 for (int i = 0; i < varLines.length; i++) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
                         "DEBUGGING varLine[" + i + "]: " + varLines[i]);
                 }
                 handleVariables(command, varLines);
+                break;
+
+            case "END_LOCALS":
+            case "END_STATICS":
+            case "END_PRIVATES":
+            case "END_PUBLICS":
+                // Mark this variable scope as received
+                String scope = command.substring(4);  // Remove "END_" prefix
+                receivedVariableScopes.add(scope);
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                    "Variable scope completed: " + scope + " (total=" + receivedVariableScopes.size() + "/4)");
+                // All variables received - mark as ready
+                if (receivedVariableScopes.size() == 4) {
+                    waitingForVariables = false;
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "All variables ready");
+                }
                 break;
                 
             case "ARRAY":
@@ -785,232 +809,67 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private void handleStop(String file, int line) {
         currentFile = file;
         currentLine = line;
-        
-        // Build a stack trace
-        // Since Harbour debugger doesn't provide stack via TCP, we'll simulate it
-        currentStackTrace.clear();
-        
-        if (file != null) {
-            // Add current frame
-            String functionName = extractFunctionName(file);
-            currentStackTrace.add(new StackFrameInfo(functionName, file, line));
-            
-            // Add simulated parent frames based on common patterns
-            // This is a workaround until we can get real stack data
-            // Check if this looks like it was called from menu
-            if (file.toLowerCase().contains("mat2")) {
-                // mat2 is often called from menu.prg
-                currentStackTrace.add(new StackFrameInfo("menu", "menu.prg", 1830));
-            } else if (file.toLowerCase().contains("listen")) {
-                // listen procedures might be called from main menu
-                currentStackTrace.add(new StackFrameInfo("menu", "menu.prg", 1));
-            }
-            
-            // If we have tracked calls, add them
-            if (!callStack.isEmpty()) {
-                for (StackFrameInfo frame : callStack) {
-                    if (!isDuplicate(currentStackTrace, frame)) {
-                        currentStackTrace.add(frame);
-                    }
-                }
-            }
-        }
-        
+
         // Update debugger state to SUSPENDED when we stop and clear pending step flag
         updateDebuggerState(DebuggerState.SUSPENDED, false);
-        
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stopped at " + file + ":" + line + " (state: SUSPENDED, pendingStep=false)");
-        
-        // Auto-refresh DBF workareas when stopping at breakpoint
-        if (liveDBFConnection != null) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Auto-refreshing DBF workareas at breakpoint");
-            liveDBFConnection.requestWorkareaUpdate();
-        }
-        
-        VirtualFile vFile = findSourceFile(file);
-        if (vFile != null) {
-            XSourcePosition position = XDebuggerUtil.getInstance()
-                    .createPosition(vFile, line - 1); // Convert to 0-based
-            
-            lastPosition = position;
-            
-            // Store the position information for later use
-            pendingStopFile = file;
-            pendingStopLine = line;
-            pendingStopPosition = position;
-            
-            // Request variable information BEFORE notifying about position reached
-            requestVariables();
-            
-            // Don't send STACK command as it's not supported
-            // We'll track the stack ourselves or get it from other messages
-            
-            // Also request updated database information when stopped at breakpoint
-            // This ensures we see all databases that may have been opened since last check
-            liveDBFConnection.requestWorkareaUpdate();
-            
-            // Set a flag to indicate we're waiting for variables
-            waitingForVariables = true;
-            variablesExpected = 4; // LOCALS, STATICS, PRIVATES, PUBLICS
-            variablesReceived = 0;
-            
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Requesting variables and databases before notifying position reached");
-            
-            // TIMEOUT REMOVED: No automatic timeout that continues execution
-            // However, we still need a fallback to ensure position is reached if no variables arrive
-            // This ensures debugger always suspends at breakpoint, even without variable information
-            ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                try {
-                    Thread.sleep(10000); // Wait 10 seconds for variables  
-                    if (waitingForVariables && pendingStopPosition != null) {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                            "Variable fallback triggered - notifying position reached without full variable info");
-                        waitingForVariables = false;
-                        variablesReceived = 0;
-                        
-                        // Capture values before clearing them
-                        final String stopFile = pendingStopFile;
-                        final int stopLine = pendingStopLine;
-                        final XSourcePosition stopPosition = pendingStopPosition;
-                        
-                        // Clear pending info BEFORE invokeLater
-                        pendingStopFile = null;
-                        pendingStopLine = -1;
-                        pendingStopPosition = null;
-                        
-                        ApplicationManager.getApplication().invokeLater(() -> {
-                            if (getSession() == null) {
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null in fallback handler!");
-                                return;
-                            }
-                            
-                            HarbourDebuggerSuspendContext suspendContext = 
-                                    new HarbourDebuggerSuspendContext(this, 
-                                        stopFile != null ? stopFile : "Unknown", 
-                                        stopLine, 
-                                        stopPosition);
-                            
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                "Calling positionReached via fallback for " + (stopFile != null ? stopFile : "Unknown") + 
-                                ":" + stopLine + " - debugger will wait indefinitely at breakpoint");
-                            
-                            getSession().positionReached(suspendContext);
-                            
-                            // Auto-open Frames/Variables tab when hitting breakpoint
-                            try {
-                                getSession().showExecutionPoint();
-                                
-                                // Switch to Frames/Variables tab
-                                com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
-                                if (ui != null) {
-                                    com.intellij.ui.content.Content targetContent = null;
-                                    
-                                    // Look for first non-Console content (which should be Variables/Frames)
-                                    for (com.intellij.ui.content.Content content : ui.getContents()) {
-                                        String displayName = content.getDisplayName();
-                                        if (displayName != null && !displayName.equals("Console")) {
-                                            targetContent = content;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    if (targetContent != null) {
-                                        ui.selectAndFocus(targetContent, true, true);
-                                    }
-                                }
-                                
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                    "Auto-opened Frames/Variables tab on breakpoint (fallback)");
-                            } catch (Exception e) {
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                    "Failed to auto-open debug tabs: " + e.getMessage());
-                            }
-                            
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended via fallback - program will wait indefinitely");
-                        });
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-        } else {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Could not find source file: " + file);
-            
-            // Even if we can't find the file, we should still notify that we're suspended
-            // Create a suspend context without a valid position
-            ApplicationManager.getApplication().invokeLater(() -> {
-                if (getSession() == null) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null (no source file)!");
-                    return;
-                }
-                
-                HarbourDebuggerSuspendContext suspendContext = 
-                        new HarbourDebuggerSuspendContext(this, file, line, null);
-                
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                    "Calling positionReached without source position for " + file + ":" + line);
-                
-                getSession().positionReached(suspendContext);
-                
-                // Auto-open Frames/Variables tab when hitting breakpoint
-                try {
-                    getSession().showExecutionPoint();
-                    
-                    // Switch to Frames/Variables tab
-                    com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
-                    if (ui != null) {
-                        com.intellij.ui.content.Content targetContent = null;
-                        
-                        // Look for first non-Console content (which should be Variables/Frames)
-                        for (com.intellij.ui.content.Content content : ui.getContents()) {
-                            String displayName = content.getDisplayName();
-                            if (displayName != null && !displayName.equals("Console")) {
-                                targetContent = content;
-                                break;
-                            }
-                        }
-                        
-                        if (targetContent != null) {
-                            ui.selectAndFocus(targetContent, true, true);
-                        }
-                    }
-                    
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                        "Auto-opened Frames/Variables tab on breakpoint (no source)");
-                } catch (Exception e) {
-                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                        "Failed to auto-open debug tabs: " + e.getMessage());
-                }
-                
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended (no source file found)");
-            });
-        }
+
+        // Set flags to track STACK and variable scope arrivals
+        expectingStackForPosition = true;
+        waitingForVariables = true;
+        receivedVariableScopes.clear();
+        lastStopFile = file;
+        lastStopLine = line;
+
+        // Request stack trace for call stack panel AND position verification
+        sendCommand("STACK");
+
+        // Request variables for variables panel (async - they'll arrive soon)
+        sendCommand("LOCALS", "0");
+        sendCommand("STATICS", "0");
+        sendCommand("PRIVATES", "0");
+        sendCommand("PUBLICS");
+
+        // Start timeout thread to show position if STACK doesn't arrive
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                Thread.sleep(1000);  // Wait 1 second for STACK
+            } catch (InterruptedException e) {
+                // Interrupted, that's fine
+            }
+            // If we still haven't shown position, do it now with STOP data
+            if (expectingStackForPosition) {
+                expectingStackForPosition = false;
+                showPositionInUI(file, line);
+            }
+        });
+
+        // Note: We'll show UI when STACK arrives (fast), but variables will load async
+        // HarbourDebuggerStackFrame.computeChildren() will wait for variables if needed
     }
     
     
     // Store the current stack trace
     private List<StackFrameInfo> currentStackTrace = new ArrayList<>();
-    private Stack<StackFrameInfo> callStack = new Stack<>();  // Track function calls ourselves
-    
+
     private void handleStackTrace(String[] stackLines) {
         currentStackTrace.clear();
-        
+
         for (String line : stackLines) {
             if (line == null || line.trim().isEmpty()) {
                 continue;
             }
-            
+
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Stack: " + line);
-            
+
             // Try different parsing formats
             // Format 1: "function_name at file.prg:line"
             // Format 2: "function_name(file.prg:line)"
             // Format 3: "file.prg:line:function_name"
-            
+
             String functionName = null;
             String file = null;
             int lineNum = -1;
-            
+
             // Try format 1: "function_name at file.prg:line"
             if (line.contains(" at ")) {
                 String[] parts = line.split(" at ");
@@ -1075,22 +934,122 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     }
                 }
             }
-            
+
             // If we successfully parsed the stack frame, add it
             if (functionName != null && file != null && lineNum > 0) {
                 currentStackTrace.add(new StackFrameInfo(functionName, file, lineNum));
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
                     "Parsed stack frame: " + functionName + " at " + file + ":" + lineNum);
             } else {
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
                     "Could not parse stack line: " + line);
             }
         }
-        
-        // If we got stack frames, log them
-        if (!currentStackTrace.isEmpty()) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                "Stack trace has " + currentStackTrace.size() + " frames");
+
+        // Check if we should update position based on STACK response
+        if (expectingStackForPosition && !currentStackTrace.isEmpty()) {
+            StackFrameInfo firstFrame = currentStackTrace.get(0);
+
+            // Normalize file paths for comparison (remove .\ prefix if present)
+            String stackFile = firstFrame.file.startsWith(".\\") || firstFrame.file.startsWith("./")
+                ? firstFrame.file.substring(2) : firstFrame.file;
+            String stopFile = lastStopFile.startsWith(".\\") || lastStopFile.startsWith("./")
+                ? lastStopFile.substring(2) : lastStopFile;
+
+            // Compare STACK position with STOP position
+            boolean positionChanged = !stackFile.equalsIgnoreCase(stopFile) || firstFrame.line != lastStopLine;
+
+            if (positionChanged) {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                    "STACK position differs from STOP: STOP=" + lastStopFile + ":" + lastStopLine +
+                    ", STACK=" + firstFrame.file + ":" + firstFrame.line + " - updating position");
+
+                // Update current position
+                currentFile = firstFrame.file;
+                currentLine = firstFrame.line;
+            } else {
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                    "STACK position matches STOP position: " + stackFile + ":" + firstFrame.line);
+            }
+
+            // Mark that STACK has arrived and show UI immediately (fast!)
+            expectingStackForPosition = false;
+            showPositionInUI(currentFile, currentLine);
+        }
+
+        // Stack trace is now available for the Frames panel
+    }
+
+    // Check if all variables have arrived (used by HarbourDebuggerStackFrame)
+    public boolean areVariablesReady() {
+        return receivedVariableScopes.contains("LOCALS") &&
+               receivedVariableScopes.contains("STATICS") &&
+               receivedVariableScopes.contains("PRIVATES") &&
+               receivedVariableScopes.contains("PUBLICS");
+    }
+
+    // Wait for variables to be ready (with timeout)
+    public void waitForVariables(long timeoutMs) {
+        long startTime = System.currentTimeMillis();
+        while (!areVariablesReady() && System.currentTimeMillis() - startTime < timeoutMs) {
+            try {
+                Thread.sleep(10);  // Check every 10ms
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
+    }
+
+    // Show position in UI with current stack trace and variables
+    private void showPositionInUI(String file, int line) {
+        VirtualFile vFile = findSourceFile(file);
+        if (vFile != null) {
+            XSourcePosition position = XDebuggerUtil.getInstance()
+                    .createPosition(vFile, line - 1);
+
+            lastPosition = position;
+
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Showing position in UI: " + file + ":" + line + " (variables=" + variables.size() +
+                ", stackFrames=" + currentStackTrace.size() + ")");
+
+            // Update UI with position, stack trace, and variables
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (getSession() == null) {
+                    return;
+                }
+
+                HarbourDebuggerSuspendContext suspendContext =
+                        new HarbourDebuggerSuspendContext(this, file, line, position);
+
+                getSession().positionReached(suspendContext);
+
+                try {
+                    getSession().showExecutionPoint();
+
+                    com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
+                    if (ui != null) {
+                        com.intellij.ui.content.Content targetContent = null;
+
+                        for (com.intellij.ui.content.Content content : ui.getContents()) {
+                            String displayName = content.getDisplayName();
+                            if (displayName != null && !displayName.equals("Console")) {
+                                targetContent = content;
+                                break;
+                            }
+                        }
+
+                        if (targetContent != null) {
+                            ui.selectAndFocus(targetContent, true, true);
+                        }
+                    }
+                } catch (Exception e) {
+                    // Ignore
+                }
+            });
+        } else {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Could not find source file for position: " + file);
         }
     }
     
@@ -1596,15 +1555,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         "ERROR: Exception processing additive variable line " + i + " for scope " + scope + ": " + e.getMessage());
                 }
             }
-            
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                "Finished processing additive variables for scope: " + scope + " (total variables: " + variables.size() + ")");
-            
-            // Increment variables received counter for synchronization
-            variablesReceived++;
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                "Received " + scope + " additive variables (" + variablesReceived + "/" + variablesExpected + ")");
-            
+
         } catch (Exception e) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
                 "ERROR: Unhandled exception in handleVariablesAdditive for scope " + scope + ": " + e.getMessage());
@@ -1688,8 +1639,12 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         // Safely create variable entry
                         try {
                             String key = scope + "." + name.trim();
+
+                            // Check if variable already exists (may have pending expansion request)
+                            HarbourDebuggerValue existingValue = variables.get(key);
+
                             HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name.trim(), type.trim(), value);
-                            
+
                             // Parse array info if it's an array type
                             if ("A".equals(type.trim()) && value.startsWith("Array(") && value.endsWith(")")) {
                                 // Extract array size from "Array(n)" format
@@ -1698,10 +1653,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                     int arraySize = Integer.parseInt(sizeStr);
                                     debugValue.setArrayInfo(scope, name.trim(), arraySize);
                                     debugValue.setDebugProcess(this);  // Set reference to this debug process
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+
+                                    // Preserve pending expansion state from existing value
+                                    if (existingValue != null) {
+                                        debugValue.transferPendingState(existingValue);
+                                    }
+
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
                                         "Array detected: " + name.trim() + " with size " + arraySize);
                                 } catch (Exception e) {
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
                                         "Failed to parse array size from: " + value);
                                 }
                             }
@@ -1713,10 +1674,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                     int hashSize = Integer.parseInt(sizeStr);
                                     debugValue.setHashInfo(scope, name.trim(), hashSize);
                                     debugValue.setDebugProcess(this);  // Set reference to this debug process
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+
+                                    // Preserve pending expansion state from existing value
+                                    if (existingValue != null) {
+                                        debugValue.transferPendingState(existingValue);
+                                    }
+
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
                                         "Hash detected: " + name.trim() + " with size " + hashSize);
                                 } catch (Exception e) {
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
                                         "Failed to parse hash size from: " + value);
                                 }
                             }
@@ -1724,10 +1691,16 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             else if ("O".equals(type.trim())) {
                                 debugValue.setObjectInfo(scope, name.trim());
                                 debugValue.setDebugProcess(this);  // Set reference to this debug process
-                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+
+                                // Preserve pending expansion state from existing value
+                                if (existingValue != null) {
+                                    debugValue.transferPendingState(existingValue);
+                                }
+
+                                HarbourLogger.log("HarbourDebuggerRemoteProcess",
                                     "Object detected: " + name.trim() + " of type " + value);
                             }
-                            
+
                             variables.put(key, debugValue);
                             
                             HarbourLogger.log("HarbourDebuggerRemoteProcess", 
@@ -1760,249 +1733,23 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             // Don't let variable processing errors crash the entire debug session
             // Continue with partial variable information
         }
-        
-        // If we're waiting for variables, check if we've received all expected scopes
-        // Wrap in try-catch to prevent crashes during variable completion handling
-        try {
-            if (waitingForVariables) {
-                variablesReceived++;
-                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                    "Received " + scope + " variables (" + variablesReceived + "/" + variablesExpected + ")");
-                
-                if (variablesReceived >= variablesExpected) {
-                    // All variables received, now notify position reached
-                    waitingForVariables = false;
-                    variablesReceived = 0;
-                    
-                    if (pendingStopPosition != null) {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                            "All variables received, notifying position reached");
-                        
-                        // Capture values before clearing them - with null checks
-                        final String stopFile = pendingStopFile;
-                        final int stopLine = pendingStopLine;
-                        final XSourcePosition stopPosition = pendingStopPosition;
-                        
-                        // Check if this is a conditional breakpoint that needs evaluation
-                        try {
-                            if (conditionalBreakpointFile != null && conditionalBreakpointLine != -1) {
-                                if (stopFile != null && stopFile.equals(conditionalBreakpointFile) && stopLine == conditionalBreakpointLine) {
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "NORMAL DEBUG: About to evaluate condition for " + stopFile + ":" + stopLine);
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "NORMAL DEBUG: Current variables: " + variables);
-                                    
-                                    boolean shouldStop = shouldStopAtConditionalBreakpoint(stopFile, stopLine);
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "NORMAL DEBUG: shouldStopAtConditionalBreakpoint returned: " + shouldStop);
-                                    
-                                    if (!shouldStop) {
-                                        // Condition not met, continue execution without notifying position
-                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                            "Breakpoint condition not met at " + stopFile + ":" + stopLine + ", continuing");
-                                        
-                                        // Clear pending and conditional info
-                                        pendingStopFile = null;
-                                        pendingStopLine = -1;
-                                        pendingStopPosition = null;
-                                        conditionalBreakpointFile = null;
-                                        conditionalBreakpointLine = -1;
-                                        
-                                        // Continue execution
-                                        sendCommand("GO");
-                                        return;
-                                    } else {
-                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                            "Breakpoint condition met at " + stopFile + ":" + stopLine + ", stopping");
-                                    }
-                                }
-                                // Clear conditional breakpoint info
-                                conditionalBreakpointFile = null;
-                                conditionalBreakpointLine = -1;
-                            }
-                        } catch (Exception e) {
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                "ERROR: Exception during conditional breakpoint evaluation: " + e.getMessage());
-                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
-                            // Continue with normal debugging despite conditional breakpoint error
-                        }
-                        
-                        // Clear pending info BEFORE invokeLater to prevent race conditions
-                        pendingStopFile = null;
-                        pendingStopLine = -1;
-                        pendingStopPosition = null;
-                        
-                        // Safely schedule UI update with comprehensive error handling
-                        try {
-                            ApplicationManager.getApplication().invokeLater(() -> {
-                                try {
-                                    if (getSession() == null) {
-                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", "ERROR: Debug session is null!");
-                                        return;
-                                    }
-                                    
-                                    // Validate parameters before creating suspend context
-                                    String safeStopFile = stopFile != null ? stopFile : "Unknown";
-                                    int safeStopLine = stopLine > 0 ? stopLine : 1;
-                                    
-                                    HarbourDebuggerSuspendContext suspendContext = 
-                                            new HarbourDebuggerSuspendContext(this, safeStopFile, safeStopLine, stopPosition);
-                                    
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "Calling positionReached for " + safeStopFile + ":" + safeStopLine);
-                                    
-                                    // This is the critical call that may crash PyCharm
-                                    // Wrap in additional try-catch to detect crashes
-                                    try {
-                                        getSession().positionReached(suspendContext);
-                                        
-                                        // Auto-open Frames/Variables tab when hitting breakpoint
-                                        ApplicationManager.getApplication().invokeLater(() -> {
-                                            try {
-                                                // First show the execution point
-                                                getSession().showExecutionPoint();
-                                                
-                                                // Then switch away from Console to the Variables/Frames view
-                                                com.intellij.execution.ui.RunnerLayoutUi ui = getSession().getUI();
-                                                if (ui != null) {
-                                                    // Try to find and select the Variables content
-                                                    // The tab with Frames/Variables is typically not named "Debugger"
-                                                    // but uses a special content ID
-                                                    com.intellij.ui.content.Content targetContent = null;
-                                                    
-                                                    // Try various possible content IDs
-                                                    String[] possibleIds = {"Variables", "DebuggerView", "VariablesContent", 
-                                                                          "Debugger", "Debug", "DebuggerContent"};
-                                                    
-                                                    for (String id : possibleIds) {
-                                                        targetContent = ui.findContent(id);
-                                                        if (targetContent != null) {
-                                                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                                "Found content with ID: " + id);
-                                                            break;
-                                                        }
-                                                    }
-                                                    
-                                                    // If still not found, look for content that is not Console
-                                                    if (targetContent == null) {
-                                                        for (com.intellij.ui.content.Content content : ui.getContents()) {
-                                                            String displayName = content.getDisplayName();
-                                                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                                "Available content: " + displayName);
-                                                            // Select first non-Console content (which should be Variables/Frames)
-                                                            if (displayName != null && !displayName.equals("Console")) {
-                                                                targetContent = content;
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-                                                    
-                                                    if (targetContent != null) {
-                                                        ui.selectAndFocus(targetContent, true, true);
-                                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                            "Switched to tab: " + targetContent.getDisplayName());
-                                                    } else {
-                                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                            "Could not find Variables/Frames tab");
-                                                    }
-                                                }
-                                                
-                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                    "Completed auto-switch to Frames/Variables tab");
-                                            } catch (Exception e) {
-                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                    "Failed to auto-open debug tabs: " + e.getMessage());
-                                            }
-                                        });
-                                    } catch (Exception positionReachedException) {
-                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                            "CRASH DETECTED: Exception during positionReached: " + positionReachedException.getMessage());
-                                        HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", positionReachedException);
-                                        
-                                        // This might be a PyCharm crash - attempt recovery
-                                        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                                            try {
-                                                Thread.sleep(1000); // Brief delay before recovery attempt
-                                                if (isSessionCrashed()) {
-                                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                        "Session crash confirmed - initiating recovery");
-                                                    initiateCrashRecovery();
-                                                }
-                                            } catch (Exception recoveryException) {
-                                                HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                                    "Error during crash detection/recovery: " + recoveryException.getMessage());
-                                            }
-                                        });
-                                        
-                                        throw positionReachedException; // Re-throw to maintain original behavior
-                                    }
-                                    
-                                    // DISABLED: Remove popup notifications for breakpoint hits
-                                    if (stopFile != null) {
-                                        // User feedback: Remove popups that say "Debugger stopped at menu.prg:3028"
-                                        // HarbourDebuggerNotification.notifyBreakpointHit(getSession().getProject(), stopFile, stopLine);
-                                    }
-                                    
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session suspended, waiting for user action");
-                                    
-                                } catch (Exception e) {
-                                    HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                        "CRITICAL ERROR: Exception in UI thread during positionReached: " + e.getMessage());
-                                    HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
-                                    
-                                    // Try to continue debugging despite UI error
-                                    try {
-                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                            "Attempting to continue execution after UI error");
-                                        sendCommand("GO");
-                                    } catch (Exception continueError) {
-                                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                            "Failed to continue after UI error: " + continueError.getMessage());
-                                    }
-                                }
-                            });
-                        } catch (Exception e) {
-                            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                                "ERROR: Exception scheduling UI update: " + e.getMessage());
-                            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
-                        }
-                    } else {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                            "WARNING: All variables received but no pending stop position");
-                    }
-                }
-            }
-        } catch (Exception e) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                "CRITICAL ERROR: Exception in variable completion handling: " + e.getMessage());
-            HarbourLogger.logStackTrace("HarbourDebuggerRemoteProcess", e);
-            
-            // Reset state to prevent getting stuck
-            waitingForVariables = false;
-            variablesReceived = 0;
-            pendingStopFile = null;
-            pendingStopLine = -1;
-            pendingStopPosition = null;
-        }
     }
-    
+
     private void handleEnd() {
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug session ended");
         stop();
     }
-    
+
     private void handleError(String error) {
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Debug error: " + error);
-        // TODO: Show error in UI
     }
-    
+
     private void requestVariables() {
         sendCommand("LOCALS", "0");
         sendCommand("STATICS", "0");
         sendCommand("PRIVATES", "0");
         sendCommand("PUBLICS");
     }
-    
     private void sendBreakpointsAfterSessionReady() {
         // This method is called after session is properly initialized
         boolean globallyMuted = getSession().areBreakpointsMuted();
@@ -2235,13 +1982,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         "Error closing connection during crash recovery: " + e.getMessage());
                 }
             }
-            
+
+
             // Reset debug state
-            waitingForVariables = false;
-            variablesReceived = 0;
-            pendingStopFile = null;
-            pendingStopLine = -1;
-            pendingStopPosition = null;
             conditionalBreakpointFile = null;
             conditionalBreakpointLine = -1;
             debuggerState = DebuggerState.DISCONNECTED;
@@ -2492,7 +2235,40 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue GO command");
         }
     }
-    
+
+    /**
+     * Pause execution at the current point without requiring a breakpoint.
+     * Sends a PAUSE command to the Harbour process which will stop at the next line execution.
+     */
+    public void pause() {
+        if (!isConnected) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring PAUSE command - not connected");
+            return;
+        }
+
+        // Can only pause when running
+        if (debuggerState != DebuggerState.RUNNING) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring PAUSE command - debugger state is " + debuggerState);
+            return;
+        }
+
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing PAUSE command");
+        try {
+            commandQueue.offer(new DebugCommand("PAUSE"), 500, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            HarbourLogger.log("HarbourDebuggerRemoteProcess", "Failed to queue PAUSE command");
+        }
+    }
+
+    /**
+     * Get the current debugger state
+     * @return the current DebuggerState
+     */
+    public DebuggerState getDebuggerState() {
+        return debuggerState;
+    }
+
     /**
      * Check if we should stop at a conditional breakpoint by evaluating its condition
      */

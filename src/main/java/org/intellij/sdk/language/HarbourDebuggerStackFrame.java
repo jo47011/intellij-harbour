@@ -12,7 +12,10 @@ import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Represents a stack frame in the Harbour debugger.
@@ -47,49 +50,94 @@ public class HarbourDebuggerStackFrame extends XStackFrame {
     public void computeChildren(@NotNull XCompositeNode node) {
         // Execute on the proper thread to ensure UI safety
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            // Wait for variables to arrive if they're not ready yet
+            // This runs on a background thread, so it won't block the UI
+            if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                if (!remoteProcess.areVariablesReady()) {
+                    HarbourLogger.log("HarbourDebuggerStackFrame",
+                        "Variables not ready yet, waiting up to 500ms...");
+                    remoteProcess.waitForVariables(500);  // Wait max 500ms
+                    if (remoteProcess.areVariablesReady()) {
+                        HarbourLogger.log("HarbourDebuggerStackFrame", "Variables ready after wait");
+                    } else {
+                        HarbourLogger.log("HarbourDebuggerStackFrame",
+                            "Timeout waiting for variables, showing what we have");
+                    }
+                }
+            }
+
             Map<String, HarbourDebuggerValue> variables = debugProcess.getVariables();
 
             XValueChildrenList children = new XValueChildrenList();
-            
+
             // DEBUGGING: Log what's actually in the variables map
             HarbourLogger.log("HarbourDebuggerStackFrame", "=== DEBUGGING VARIABLES MAP ===");
             HarbourLogger.log("HarbourDebuggerStackFrame", "Variables map size: " + variables.size());
             for (Map.Entry<String, HarbourDebuggerValue> entry : variables.entrySet()) {
-                HarbourLogger.log("HarbourDebuggerStackFrame", 
-                    "Map entry: key='" + entry.getKey() + "', name='" + entry.getValue().getName() + 
+                HarbourLogger.log("HarbourDebuggerStackFrame",
+                    "Map entry: key='" + entry.getKey() + "', name='" + entry.getValue().getName() +
                     "', type='" + entry.getValue().getType() + "', value='" + entry.getValue().getValue() + "'");
             }
             HarbourLogger.log("HarbourDebuggerStackFrame", "=== END DEBUGGING ===");
-            
-            // Sort variables globally by name (case-insensitive) before adding to UI
-            variables.entrySet().stream()
-                .sorted((e1, e2) -> e1.getValue().getName().compareToIgnoreCase(e2.getValue().getName()))
-                .forEach(entry -> {
-                    String key = entry.getKey();
-                    HarbourDebuggerValue value = entry.getValue();
-                    String displayName = value.getName(); // Use the clean name from the value
-                    
-                    // Smart GETLIST filtering: Only filter if it's an empty system variable
-                    // Show GETLIST if it has content or is user-defined
-                    if ("GETLIST".equals(displayName) && "A".equals(value.getType()) && "Array(0)".equals(value.getValue())) {
-                        // Check if it's from PUBLICS scope (system variable) and empty
-                        if (key.startsWith("PUBLICS.")) {
-                            HarbourLogger.log("HarbourDebuggerStackFrame", 
-                                "Filtering empty system GETLIST variable");
-                            return; // Skip this variable
-                        }
+
+            // Pattern to match unnamed stack slots: Local_1, Local_2, etc.
+            Pattern unnamedSlotPattern = Pattern.compile("^Local_\\d+$");
+
+            // Separate variables into regular variables and unnamed stack slots
+            List<HarbourDebuggerValue> regularVariables = new ArrayList<>();
+            List<HarbourDebuggerValue> stackSlots = new ArrayList<>();
+
+            for (Map.Entry<String, HarbourDebuggerValue> entry : variables.entrySet()) {
+                String key = entry.getKey();
+                HarbourDebuggerValue value = entry.getValue();
+                String displayName = value.getName();
+
+                // Smart GETLIST filtering: Only filter if it's an empty system variable
+                if ("GETLIST".equals(displayName) && "A".equals(value.getType()) && "Array(0)".equals(value.getValue())) {
+                    if (key.startsWith("PUBLICS.")) {
+                        HarbourLogger.log("HarbourDebuggerStackFrame",
+                            "Filtering empty system GETLIST variable");
+                        continue; // Skip this variable
                     }
-                    
-                    HarbourLogger.log("HarbourDebuggerStackFrame", 
-                        "Adding to UI (sorted): displayName='" + displayName + "', key='" + key + "', value='" + value.getValue() + "'");
-                    
-                    // Add to children with clean display name
-                    children.add(displayName, value);
-                });
+                }
+
+                // Check if this is an unnamed stack slot from LOCALS scope
+                if (key.startsWith("LOCALS.") && unnamedSlotPattern.matcher(displayName).matches()) {
+                    HarbourLogger.log("HarbourDebuggerStackFrame",
+                        "Found unnamed stack slot: " + displayName);
+                    stackSlots.add(value);
+                } else {
+                    regularVariables.add(value);
+                }
+            }
+
+            // Sort regular variables by name (case-insensitive)
+            regularVariables.sort((v1, v2) -> v1.getName().compareToIgnoreCase(v2.getName()));
+
+            // Add regular variables first
+            for (HarbourDebuggerValue value : regularVariables) {
+                HarbourLogger.log("HarbourDebuggerStackFrame",
+                    "Adding regular variable: name='" + value.getName() + "', value='" + value.getValue() + "'");
+                children.add(value.getName(), value);
+            }
+
+            // Add unnamed stack slots as a collapsible group if there are any
+            if (!stackSlots.isEmpty()) {
+                // Sort stack slots by name for consistent ordering
+                stackSlots.sort((v1, v2) -> v1.getName().compareToIgnoreCase(v2.getName()));
+
+                HarbourLogger.log("HarbourDebuggerStackFrame",
+                    "Adding " + stackSlots.size() + " unnamed stack slots as a group");
+                HarbourUnnamedSlotsGroup slotsGroup = new HarbourUnnamedSlotsGroup(stackSlots);
+                children.add(slotsGroup);
+            }
 
             // Execute the final UI update on the EDT
             ApplicationManager.getApplication().invokeLater(() -> {
-                HarbourLogger.log("HarbourDebuggerStackFrame", "Calling node.addChildren with " + children.size() + " total variables");
+                HarbourLogger.log("HarbourDebuggerStackFrame", "Calling node.addChildren with " +
+                    regularVariables.size() + " regular variables" +
+                    (stackSlots.isEmpty() ? "" : " + 1 stack slots group (" + stackSlots.size() + " slots)"));
                 node.addChildren(children, true);
             });
         });

@@ -11,6 +11,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -26,6 +28,7 @@ public class HarbourLiveDBFConnection implements Disposable {
     private final Map<String, WorkareaInfo> workareas = new ConcurrentHashMap<>();
     private final List<WorkareaUpdateListener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean isActive = false;
+    private volatile CountDownLatch workareaUpdateLatch = null;
     
     public HarbourLiveDBFConnection(@NotNull Project project, 
                                    @NotNull HarbourDebuggerConnection debuggerConnection) {
@@ -46,9 +49,10 @@ public class HarbourLiveDBFConnection implements Disposable {
         
         isActive = true;
         HarbourLogger.log("HarbourLiveDBFConnection", "*** STARTED MONITORING workarea information - isActive = true ***");
-        
-        // Request initial workarea information
-        requestWorkareaUpdate();
+
+        // DO NOT request initial workarea information on startup
+        // Only refresh on debugger stop/step events
+        // requestWorkareaUpdate(); // REMOVED - user feedback: only refresh when debugger stops
     }
     
     /**
@@ -76,9 +80,9 @@ public class HarbourLiveDBFConnection implements Disposable {
         if (!isActive || !debuggerConnection.isConnected()) {
             return;
         }
-        
+
         HarbourLogger.log("HarbourLiveDBFConnection", "Requesting workarea update");
-        
+
         try {
             debuggerConnection.sendCommand("WORKAREAS");
         } catch (Exception e) {
@@ -86,7 +90,53 @@ public class HarbourLiveDBFConnection implements Disposable {
             HarbourLogger.logStackTrace("HarbourLiveDBFConnection", e);
         }
     }
-    
+
+    /**
+     * Request updated workarea information from the debugger SYNCHRONOUSLY.
+     * Blocks until the workarea list is received or timeout occurs.
+     *
+     * @return Collection of current workareas, or current cached list if request fails
+     */
+    @NotNull
+    public Collection<WorkareaInfo> requestWorkareaUpdateSync() {
+        if (!isActive || !debuggerConnection.isConnected()) {
+            HarbourLogger.log("HarbourLiveDBFConnection", "Sync workarea request skipped - not active or not connected");
+            return getWorkareas();
+        }
+
+        HarbourLogger.log("HarbourLiveDBFConnection", "Requesting SYNCHRONOUS workarea update");
+
+        try {
+            // Create latch to wait for END_WORKAREAS signal
+            workareaUpdateLatch = new CountDownLatch(1);
+
+            // Send the WORKAREAS command
+            debuggerConnection.sendCommand("WORKAREAS");
+
+            // Wait up to 3 seconds for the response
+            boolean received = workareaUpdateLatch.await(3, TimeUnit.SECONDS);
+
+            if (!received) {
+                HarbourLogger.log("HarbourLiveDBFConnection", "Sync workarea update TIMEOUT - returning cached data");
+            } else {
+                HarbourLogger.log("HarbourLiveDBFConnection", "Sync workarea update COMPLETED with " + workareas.size() + " workareas");
+            }
+
+            return getWorkareas();
+
+        } catch (InterruptedException e) {
+            HarbourLogger.log("HarbourLiveDBFConnection", "Sync workarea update INTERRUPTED: " + e.getMessage());
+            Thread.currentThread().interrupt();
+            return getWorkareas();
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourLiveDBFConnection", "Sync workarea update FAILED: " + e.getMessage());
+            HarbourLogger.logStackTrace("HarbourLiveDBFConnection", e);
+            return getWorkareas();
+        } finally {
+            workareaUpdateLatch = null;
+        }
+    }
+
     /**
      * Process workarea information received from the debugger
      */
@@ -112,6 +162,12 @@ public class HarbourLiveDBFConnection implements Disposable {
                 // Workarea enumeration complete, notify listeners
                 HarbourLogger.log("HarbourLiveDBFConnection", "Workarea enumeration complete, found " + workareas.size() + " workareas");
                 notifyListeners();
+
+                // Signal synchronous waiters that workareas are ready
+                if (workareaUpdateLatch != null) {
+                    workareaUpdateLatch.countDown();
+                    HarbourLogger.log("HarbourLiveDBFConnection", "Signaled sync waiter - workareas ready");
+                }
             } else if (message.equals("WORKAREAS")) {
                 // Clear existing workareas for fresh enumeration
                 workareas.clear();

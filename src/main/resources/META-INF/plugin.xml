@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.0.524</version>
+    <version>1.2.32</version>
     <vendor email="support@example.com" url="http://www.example.com">Harbour Development</vendor>
 
     <description><![CDATA[
@@ -200,6 +200,12 @@
             <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="IntroduceVariable"/>
             <add-to-group group-id="RefactoringMenu" anchor="after" relative-to-action="IntroduceVariable"/>
             <keyboard-shortcut keymap="$default" first-keystroke="alt L"/>
+        </action>
+
+        <!-- Pause Debug Action -->
+        <action id="HarbourPauseDebugAction" class="org.intellij.sdk.language.HarbourPauseDebugAction"
+                text="Pause Harbour Debugger" description="Break execution at current point without breakpoint">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt D"/>
         </action>
     </actions>
 </idea-plugin>

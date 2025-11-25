@@ -33,6 +33,9 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Default exclusion list
     private Set<String> excludedFiles = new HashSet<>();
 
+    // Directory patterns to exclude from indexing (e.g., "backup", "temp", ".hbmk")
+    private List<String> excludedDirectoryPatterns = new ArrayList<>(Arrays.asList(".hbmk"));
+
     // List of Harbour commands for code completion
     private List<String> harbourCommands = new ArrayList<>();
 
@@ -239,6 +242,15 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public void setExcludedFiles(Set<String> excludedFiles) {
         this.excludedFiles = excludedFiles;
+    }
+
+    // Excluded directory patterns methods
+    public List<String> getExcludedDirectoryPatterns() {
+        return excludedDirectoryPatterns;
+    }
+
+    public void setExcludedDirectoryPatterns(List<String> excludedDirectoryPatterns) {
+        this.excludedDirectoryPatterns = excludedDirectoryPatterns;
     }
 
     // Harbour commands methods

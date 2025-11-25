@@ -119,6 +119,65 @@ current file for easy navigation.
 Automatic code indentation and formatting follows Harbour conventions. Customize indentation, line breaks, and statement
 positioning in settings.
 
+#### Command-Line Formatting
+
+The Harbour plugin enables command-line formatting through PyCharm/IntelliJ's built-in CLI tools. This feature works automatically once the plugin is installed - no additional setup required.
+
+**How it works:**
+- PyCharm/IntelliJ IDEA provide the `format` command as part of their standard CLI tools
+- Our plugin registers the Harbour formatter with the IDE's formatting system
+- When you run the format command on `.prg` or `.ch` files, the IDE uses our plugin's formatter
+- The IDE runs in headless mode (no GUI) to perform the formatting
+
+#### PyCharm
+```bash
+# Format a single file
+pycharm.sh format /path/to/file.prg
+
+# Format all files in a directory recursively
+pycharm.sh format -recursive /path/to/project
+
+# Format with custom settings
+pycharm.sh format -s /path/to/settings.xml /path/to/project
+```
+
+#### IntelliJ IDEA
+```bash
+# Format a single file
+idea.sh format /path/to/file.prg
+
+# Format all files in a directory recursively
+idea.sh format -recursive /path/to/project
+```
+
+**Requirements:**
+- The Harbour plugin must be installed in the IDE
+- The IDE must not be running when using command-line formatting
+- The `pycharm.sh` or `idea.sh` script must be in your PATH or use full path to the script
+
+**Testing the formatter:**
+You can use these commands to test formatting during development without opening the IDE.
+
+### Format Exclusion
+
+You can exclude specific sections of code from automatic formatting using special comments:
+
+- **Block exclusion**: Use `// fmt: off` and `// fmt: on` (or `# fmt: off` and `# fmt: on`) to exclude a block of code:
+  ```harbour
+  // fmt: off
+  ? "This line will not be formatted"
+  ? "Neither will this one"
+  // fmt: on
+  ? "This line will be formatted normally"
+  ```
+
+- **Single line exclusion**: Use `// fmt: skip` (or `# fmt: skip`) to skip formatting for a single line:
+  ```harbour
+  ? "This will be formatted"
+  ? "This won't be formatted"  // fmt: skip
+  ? "This will be formatted"
+  ```
+
 <p align="center">
   <img src="img/settings-formatting.png" alt="Code Style Settings Format"/>
   <br>
@@ -205,6 +264,25 @@ During debugging, the plugin provides a Database View tool window that shows all
 
 The Database View automatically updates when you step through code that opens, closes, or modifies database records.
 
+### Pause/Break Without Breakpoints
+
+The debugger supports pausing execution at the current point without setting breakpoints:
+
+**Method 1: Using Alt-D in PyCharm**
+- Press **Alt-D** in PyCharm while your Harbour program is running
+- The debugger will pause at the next line of code execution
+- **Important**: Alt-D must be pressed in PyCharm (not in the Harbour application window)
+- Works even when the application is waiting for user input (GET/READ operations)
+
+**Method 2: Calling AltD() in Your Code**
+- Add `AltD()` function calls in your Harbour code where you want to break
+- The debugger will stop at that line when executed
+- Useful for conditional breaks: `IF nError > 0; AltD(); ENDIF`
+
+**Limitations:**
+- Pressing Alt-D in the Harbour application window (not PyCharm) will not trigger a pause
+- During GET/READ operations, the pause occurs at the last executed line before waiting for input
+
 ### Limitations
 
 - **Static Variables**: Static variables are not visible in the debugger due to Harbour VM
@@ -231,22 +309,23 @@ ErrorBlock({|oError| MyCustomHandler(oError)})
 
 FUNCTION MyCustomHandler(oError)
    // Your custom error logic here
-   LogToMyDatabase(oError)
-   SaveToLogFile(oError)
-   
-   // Generate PyCharm-compatible stack trace
-   printDebugStackTrace()
-   
+
+   // Generate PyCharm-compatible stack trace when running in PyCharm
+   #ifdef DBG_PORT
+      printDebugStackTrace()
+   #endif
+
    // Continue with your error handling
-   QUIT
 RETURN NIL
 ```
 
 **Key points:**
 
 - Add `printDebugStackTrace()` to your custom error handler
+- Use `#ifdef DBG_PORT` to conditionally include it (works for both debug and run modes in PyCharm)
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
+- The code compiles cleanly outside PyCharm (the function call is skipped)
 
 ## Code Helpers
 
@@ -298,8 +377,22 @@ Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 - **Build Output Directory** - Default `.hbmk` for build artifacts
 - **Auto-completion** - Enable while typing (default: Ctrl+Space only)
 - **Include Paths** - Add directories for #include file resolution
-- **Excluded Files** - Files to exclude from navigation and indexing
+- **Excluded Files** - Files and directory patterns to exclude from navigation and indexing
 - **Commands** - Customize code completion command list
+
+### Directory Exclusions
+
+To improve indexing performance, you can exclude directories from the plugin's indexing:
+
+**Settings** → **Tools** → **Harbour** → **Excluded Files** tab
+
+- **Directory patterns**: Add patterns like `backup`, `temp`, `Copy`, `.hbmk` to exclude matching directories
+- Use the **Browse** button to select a directory - its name is added as a pattern
+- Default: `.hbmk` (build output directory) is excluded
+- Patterns match case-insensitively against directory names in paths
+
+**Note:** This affects the Harbour plugin's indexing only. 
+For complete exclusion from IntelliJ's native indexing, also mark directories as **Excluded** in Project Structure (**F4**).
 
 ### Code Style Settings
 

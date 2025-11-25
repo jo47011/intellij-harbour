@@ -19,4 +19,6 @@ wrapper
 .tmp
 /src/main/resources/debug/.hbmk/linux/gcc/
 /log/
-/tmp/
+/TODOs-mine.md
+/FEEDBACK-harbour.txt
+/FEEDBACK-mine.txt

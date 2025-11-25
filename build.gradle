@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.1.4'
+version = '1.2.34'
 
 repositories {
     mavenCentral()
@@ -50,7 +50,7 @@ intellijPlatform {
 
     runIde {
         jvmArgs = ["-Xmx4096m"]
-        args = [file("../hbmiki-test").absolutePath]
+        args = [file("../hbmiki-test-windows").absolutePath]
     }
 }
 

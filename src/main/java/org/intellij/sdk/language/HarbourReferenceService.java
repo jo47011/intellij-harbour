@@ -117,41 +117,105 @@ public final class HarbourReferenceService {
      */
     public List<PsiElement> findDefines(String defineName) {
         HarbourLogger.log("ReferenceService", "Searching for #define: " + defineName);
-        
+
         if (defineName == null || defineName.isEmpty()) {
             return Collections.emptyList();
         }
-        
+
         List<PsiElement> result = new ArrayList<>();
-        
-        // Search for #define patterns in all Harbour files
-        Collection<VirtualFile> allFiles = FileTypeIndex.getFiles(HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
         Pattern definePattern = Pattern.compile("(?i)^\\s*#\\s*define\\s+" + Pattern.quote(defineName) + "(?:\\s|\\()", Pattern.MULTILINE);
-        
-        for (VirtualFile file : allFiles) {
+
+        // 1. Search in project files
+        Collection<VirtualFile> allFiles = FileTypeIndex.getFiles(HarbourFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+        result.addAll(searchDefinesInFiles(allFiles, defineName, definePattern));
+
+        // 2. Search in include paths (e.g., /home/developer/workspace/harbour/include)
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        if (settings != null && settings.getIncludePaths() != null) {
+            for (String includePath : settings.getIncludePaths()) {
+                result.addAll(searchDefinesInIncludePath(includePath, defineName, definePattern));
+            }
+        }
+
+        HarbourLogger.log("ReferenceService", "Found " + result.size() + " #define declarations for: " + defineName);
+        return result;
+    }
+
+    /**
+     * Search for #define in a collection of VirtualFiles
+     */
+    private List<PsiElement> searchDefinesInFiles(Collection<VirtualFile> files, String defineName, Pattern definePattern) {
+        List<PsiElement> result = new ArrayList<>();
+
+        for (VirtualFile file : files) {
             PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
             if (psiFile != null) {
-                String content = psiFile.getText();
-                String[] lines = content.split("\n");
-                
-                for (int i = 0; i < lines.length; i++) {
-                    Matcher matcher = definePattern.matcher(lines[i]);
-                    if (matcher.find()) {
-                        // Find the PSI element at this line
-                        int lineStartOffset = getLineStartOffset(content, i);
-                        int defineNameStart = lineStartOffset + matcher.end() - defineName.length();
-                        PsiElement element = psiFile.findElementAt(defineNameStart);
-                        
-                        if (element != null) {
-                            result.add(element);
-                            HarbourLogger.log("ReferenceService", "Found #define " + defineName + " in " + file.getName() + " at line " + (i + 1));
+                result.addAll(searchDefinesInPsiFile(psiFile, defineName, definePattern));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Search for #define in include path directory
+     */
+    private List<PsiElement> searchDefinesInIncludePath(String includePath, String defineName, Pattern definePattern) {
+        List<PsiElement> result = new ArrayList<>();
+
+        try {
+            java.io.File includeDir = new java.io.File(includePath);
+            if (!includeDir.exists() || !includeDir.isDirectory()) {
+                return result;
+            }
+
+            // Search for .ch files in include path
+            java.io.File[] chFiles = includeDir.listFiles((dir, name) ->
+                name.toLowerCase().endsWith(".ch") || name.toLowerCase().endsWith(".h"));
+
+            if (chFiles != null) {
+                for (java.io.File chFile : chFiles) {
+                    VirtualFile vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(chFile);
+                    if (vFile != null) {
+                        PsiFile psiFile = PsiManager.getInstance(project).findFile(vFile);
+                        if (psiFile != null) {
+                            result.addAll(searchDefinesInPsiFile(psiFile, defineName, definePattern));
                         }
                     }
                 }
+                HarbourLogger.log("ReferenceService", "Searched " + chFiles.length + " .ch files in " + includePath);
+            }
+        } catch (Exception e) {
+            HarbourLogger.log("ReferenceService", "Error searching include path " + includePath + ": " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Search for #define declarations in a single PSI file
+     */
+    private List<PsiElement> searchDefinesInPsiFile(PsiFile psiFile, String defineName, Pattern definePattern) {
+        List<PsiElement> result = new ArrayList<>();
+
+        String content = psiFile.getText();
+        String[] lines = content.split("\n");
+
+        for (int i = 0; i < lines.length; i++) {
+            Matcher matcher = definePattern.matcher(lines[i]);
+            if (matcher.find()) {
+                // Find the PSI element at this line
+                int lineStartOffset = getLineStartOffset(content, i);
+                int defineNameStart = lineStartOffset + matcher.end() - defineName.length();
+                PsiElement element = psiFile.findElementAt(defineNameStart);
+
+                if (element != null) {
+                    result.add(element);
+                    HarbourLogger.log("ReferenceService", "Found #define " + defineName + " in " + psiFile.getName() + " at line " + (i + 1));
+                }
             }
         }
-        
-        HarbourLogger.log("ReferenceService", "Found " + result.size() + " #define declarations for: " + defineName);
+
         return result;
     }
     
@@ -1783,6 +1847,7 @@ public final class HarbourReferenceService {
 
     /**
      * Check if a file is excluded from indexing based on its full path.
+     * Uses configurable directory patterns from settings.
      */
     public boolean isExcluded(VirtualFile file) {
         if (file == null) return false;
@@ -1794,7 +1859,32 @@ public final class HarbourReferenceService {
 
         // Also check by filename
         String filename = file.getName();
-        return excludedFilenames.contains(filename);
+        if (excludedFilenames.contains(filename)) {
+            return true;
+        }
+
+        // Check against configurable exclusion patterns from settings
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        if (settings != null) {
+            List<String> patterns = settings.getExcludedDirectoryPatterns();
+            if (patterns != null && !patterns.isEmpty()) {
+                String pathLower = path.toLowerCase();
+                for (String pattern : patterns) {
+                    if (pattern != null && !pattern.isEmpty()) {
+                        String patternLower = pattern.toLowerCase().trim();
+                        // Check if path contains the pattern (case-insensitive)
+                        if (pathLower.contains("/" + patternLower + "/") ||
+                            pathLower.contains("\\" + patternLower + "\\") ||
+                            pathLower.contains("/" + patternLower) ||
+                            pathLower.contains("\\" + patternLower)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
