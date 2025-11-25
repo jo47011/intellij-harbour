@@ -1847,7 +1847,7 @@ public final class HarbourReferenceService {
 
     /**
      * Check if a file is excluded from indexing based on its full path.
-     * Also auto-excludes common backup/temp directories.
+     * Uses configurable directory patterns from settings.
      */
     public boolean isExcluded(VirtualFile file) {
         if (file == null) return false;
@@ -1863,37 +1863,25 @@ public final class HarbourReferenceService {
             return true;
         }
 
-        // Auto-exclude common backup/temp directory patterns
-        String pathLower = path.toLowerCase();
-
-        // Skip directories containing "Copy" (backup copies like "DAT - Copy (2)")
-        if (pathLower.contains(" copy") || pathLower.contains("-copy") ||
-            pathLower.contains("_copy") || pathLower.contains("(copy")) {
-            return true;
-        }
-
-        // Skip TEMP directories
-        if (pathLower.contains("/temp/") || pathLower.contains("\\temp\\") ||
-            pathLower.contains("/tmp/") || pathLower.contains("\\tmp\\")) {
-            return true;
-        }
-
-        // Skip backup directories
-        if (pathLower.contains("/backup/") || pathLower.contains("\\backup\\") ||
-            pathLower.contains("/backups/") || pathLower.contains("\\backups\\") ||
-            pathLower.contains("/bak/") || pathLower.contains("\\bak\\")) {
-            return true;
-        }
-
-        // Skip archive/old directories
-        if (pathLower.contains("/old/") || pathLower.contains("\\old\\") ||
-            pathLower.contains("/archive/") || pathLower.contains("\\archive\\")) {
-            return true;
-        }
-
-        // Skip .hbmk build directory (only for navigation, not for debugging)
-        if (pathLower.contains("/.hbmk/") || pathLower.contains("\\.hbmk\\")) {
-            return true;
+        // Check against configurable exclusion patterns from settings
+        HarbourSettings settings = HarbourSettings.getInstance(project);
+        if (settings != null) {
+            List<String> patterns = settings.getExcludedDirectoryPatterns();
+            if (patterns != null && !patterns.isEmpty()) {
+                String pathLower = path.toLowerCase();
+                for (String pattern : patterns) {
+                    if (pattern != null && !pattern.isEmpty()) {
+                        String patternLower = pattern.toLowerCase().trim();
+                        // Check if path contains the pattern (case-insensitive)
+                        if (pathLower.contains("/" + patternLower + "/") ||
+                            pathLower.contains("\\" + patternLower + "\\") ||
+                            pathLower.contains("/" + patternLower) ||
+                            pathLower.contains("\\" + patternLower)) {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
 
         return false;

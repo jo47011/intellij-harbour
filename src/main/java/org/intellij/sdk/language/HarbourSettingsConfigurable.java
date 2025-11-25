@@ -36,6 +36,8 @@ public class HarbourSettingsConfigurable implements Configurable {
     private JPanel myMainPanel;
     private JBList<String> myExcludedFilesList;
     private CollectionListModel<String> myExcludedFilesModel;
+    private JBList<String> myExcludedDirPatternsList;
+    private CollectionListModel<String> myExcludedDirPatternsModel;
     private JBList<String> myIncludePathsList;
     private CollectionListModel<String> myIncludePathsModel;
     private JBList<String> myHarbourCommandsList;
@@ -274,7 +276,43 @@ public class HarbourSettingsConfigurable implements Configurable {
         );
         excludedFilesListPanel.add(excludedFilesDecorator.createPanel(), BorderLayout.CENTER);
 
-        excludedFilesPanel.add(excludedFilesListPanel, BorderLayout.CENTER);
+        // Create model for excluded directory patterns
+        myExcludedDirPatternsModel = new CollectionListModel<>();
+        myExcludedDirPatternsList = new JBList<>(myExcludedDirPatternsModel);
+
+        // Create UI for excluded directory patterns with add/remove buttons
+        ToolbarDecorator excludedDirPatternsDecorator = ToolbarDecorator.createDecorator(myExcludedDirPatternsList)
+                .setAddAction(button -> {
+                    String pattern = Messages.showInputDialog(
+                            myMainPanel,
+                            "Enter directory pattern to exclude (e.g. backup, temp, .hbmk):",
+                            "Add Excluded Directory Pattern",
+                            null);
+
+                    if (pattern != null && !pattern.isEmpty()) {
+                        myExcludedDirPatternsModel.add(pattern);
+                    }
+                })
+                .setRemoveAction(button -> {
+                    int selectedIndex = myExcludedDirPatternsList.getSelectedIndex();
+                    if (selectedIndex != -1) {
+                        myExcludedDirPatternsModel.remove(selectedIndex);
+                    }
+                });
+
+        JPanel excludedDirPatternsPanel = new JPanel(new BorderLayout());
+        excludedDirPatternsPanel.add(
+                new JLabel("Directory patterns to exclude from indexing (e.g. backup, temp, Copy):"),
+                BorderLayout.NORTH
+        );
+        excludedDirPatternsPanel.add(excludedDirPatternsDecorator.createPanel(), BorderLayout.CENTER);
+
+        // Use a split layout for both lists
+        JPanel combinedExclusionsPanel = new JPanel(new GridLayout(2, 1, 0, 10));
+        combinedExclusionsPanel.add(excludedFilesListPanel);
+        combinedExclusionsPanel.add(excludedDirPatternsPanel);
+
+        excludedFilesPanel.add(combinedExclusionsPanel, BorderLayout.CENTER);
 
 
         // Add all tabs to the tabbed pane (General first)
@@ -727,6 +765,7 @@ public class HarbourSettingsConfigurable implements Configurable {
         HarbourSettings settings = HarbourSettings.getInstance(myProject);
         return !settings.getIncludePaths().equals(new ArrayList<>(myIncludePathsModel.getItems())) ||
                 !settings.getExcludedFiles().equals(new HashSet<>(myExcludedFilesModel.getItems())) ||
+                !settings.getExcludedDirectoryPatterns().equals(new ArrayList<>(myExcludedDirPatternsModel.getItems())) ||
                 !settings.getHarbourCommands().equals(new ArrayList<>(myHarbourCommandsModel.getItems())) ||
                 !settings.getDocumentationBaseUrl().equals(myDocumentationBaseUrlField.getText()) ||
                 !settings.getDebugLogPath().equals(myDebugLogPathField.getText()) ||
@@ -747,8 +786,9 @@ public class HarbourSettingsConfigurable implements Configurable {
         HarbourSettings settings = HarbourSettings.getInstance(myProject);
         settings.setIncludePaths(new ArrayList<>(myIncludePathsModel.getItems()));
         settings.setExcludedFiles(new HashSet<>(myExcludedFilesModel.getItems()));
+        settings.setExcludedDirectoryPatterns(new ArrayList<>(myExcludedDirPatternsModel.getItems()));
         settings.setHarbourCommands(new ArrayList<>(myHarbourCommandsModel.getItems()));
-        
+
         // Update HarbourReferenceService with new excluded files
         HarbourReferenceService referenceService = HarbourReferenceService.getInstance(myProject);
         referenceService.refreshExclusions();
@@ -810,6 +850,12 @@ public class HarbourSettingsConfigurable implements Configurable {
         myExcludedFilesModel.removeAll();
         for (String filename : settings.getExcludedFiles()) {
             myExcludedFilesModel.add(filename);
+        }
+
+        // Load excluded directory patterns
+        myExcludedDirPatternsModel.removeAll();
+        for (String pattern : settings.getExcludedDirectoryPatterns()) {
+            myExcludedDirPatternsModel.add(pattern);
         }
 
         // Load Harbour commands
