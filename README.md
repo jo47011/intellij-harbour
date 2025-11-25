@@ -391,7 +391,8 @@ To improve indexing performance, you can exclude directories from the plugin's i
 - Default: `.hbmk` (build output directory) is excluded
 - Patterns match case-insensitively against directory names in paths
 
-**Note:** This affects the Harbour plugin's indexing only. For complete exclusion from IntelliJ's native indexing, also mark directories as **Excluded** in Project Structure (**F4**).
+**Note:** This affects the Harbour plugin's indexing only. 
+For complete exclusion from IntelliJ's native indexing, also mark directories as **Excluded** in Project Structure (**F4**).
 
 ### Code Style Settings
 
