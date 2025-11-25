@@ -102,31 +102,118 @@ STATIC FUNCTION IdleSocketCheck()
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL tmp, cCurrentFile, nCurrentLine
 
+   // Skip if internal operation in progress to prevent recursion
+   IF oDebugInfo["lInternalRun"] == .T.
+      RETURN NIL
+   ENDIF
+
    IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
       IF !Empty(tmp)
-         // Only process PAUSE command in idle - others wait for CheckSocket()
-         IF tmp == "PAUSE"
-            // Get current location from stack
-            IF Len(oDebugInfo["aStack"]) > 0
-               cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
-               nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
-            ELSE
-               cCurrentFile := "unknown"
-               nCurrentLine := 0
-            ENDIF
-
-            // Send STOP message immediately to unblock IntelliJ
-            // Format: STOP:file:line
-            hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
-            LogDebugInfo("PAUSE received in idle block - sent STOP:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
-
-            // Set flag to break at next line execution
-            oDebugInfo["lRunning"] := .F.
-
-            // Wait for next command (GO/STEP) before continuing
-            CheckSocket(.T.)
+         // Get current location for all commands
+         IF Len(oDebugInfo["aStack"]) > 0
+            cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
+            nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
+         ELSE
+            cCurrentFile := "unknown"
+            nCurrentLine := 0
          ENDIF
+
+         DO CASE
+            CASE tmp == "PAUSE"
+               // Send STOP message immediately to unblock IntelliJ
+               hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)) + CRLF)
+               LogDebugInfo("PAUSE received in idle - sent STOP:" + cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)))
+               // Set flag to break at next line execution
+               oDebugInfo["lRunning"] := .F.
+
+            CASE tmp == "GO" .AND. !oDebugInfo["lRunning"]
+               // Resume execution when stopped during GET/READ
+               oDebugInfo["lRunning"] := .T.
+               oDebugInfo["maxLevel"] := NIL
+               LogDebugInfo("GO received in idle - resuming execution")
+
+            CASE tmp == "STEP" .AND. !oDebugInfo["lRunning"]
+               // Single step when stopped during GET/READ
+               oDebugInfo["lRunning"] := .T.
+               oDebugInfo["lSingleStep"] := .T.
+               oDebugInfo["maxLevel"] := NIL
+               LogDebugInfo("STEP received in idle - single step mode")
+
+            CASE tmp == "NEXT" .AND. !oDebugInfo["lRunning"]
+               // Step over when stopped during GET/READ
+               oDebugInfo["lRunning"] := .T.
+               oDebugInfo["lSingleStep"] := .T.
+               oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"]
+               LogDebugInfo("NEXT received in idle - step over mode")
+
+            CASE tmp == "OUT" .AND. !oDebugInfo["lRunning"]
+               // Step out when stopped during GET/READ
+               oDebugInfo["lRunning"] := .T.
+               oDebugInfo["lSingleStep"] := .T.
+               oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"] - 1
+               LogDebugInfo("OUT received in idle - step out mode")
+
+            CASE tmp == "STACK"
+               // Send stack info
+               SendStack()
+               LogDebugInfo("STACK received in idle")
+
+            CASE Left(tmp, 6) == "LOCALS"
+               IF ":" $ tmp
+                  SendLocals(SubStr(tmp, 8))
+               ELSE
+                  SendLocals("0")
+               ENDIF
+               LogDebugInfo("LOCALS received in idle")
+
+            CASE Left(tmp, 7) == "STATICS"
+               IF ":" $ tmp
+                  SendStatics(SubStr(tmp, 9))
+               ELSE
+                  SendStatics("0")
+               ENDIF
+               LogDebugInfo("STATICS received in idle")
+
+            CASE Left(tmp, 8) == "PRIVATES"
+               IF ":" $ tmp
+                  SendPrivates(SubStr(tmp, 10))
+               ELSE
+                  SendPrivates("0")
+               ENDIF
+               LogDebugInfo("PRIVATES received in idle")
+
+            CASE Left(tmp, 7) == "PUBLICS"
+               IF ":" $ tmp
+                  SendPublics(SubStr(tmp, 9))
+               ELSE
+                  SendPublics("0")
+               ENDIF
+               LogDebugInfo("PUBLICS received in idle")
+
+            CASE tmp == "BREAKPOINT"
+               // Just acknowledgment
+               LogDebugInfo("BREAKPOINT ack received in idle")
+
+            CASE Left(tmp, 1) == "+" .OR. Left(tmp, 1) == "-"
+               SetBreakpoint(tmp)
+               LogDebugInfo("Breakpoint set in idle: " + tmp)
+
+            CASE Left(tmp, 4) == "EVAL" .OR. Left(tmp, 10) == "EXPRESSION"
+               IF ":" $ tmp
+                  IF Left(tmp, 4) == "EVAL"
+                     SendExpression(SubStr(tmp, 6))
+                  ELSE
+                     SendExpression(SubStr(tmp, 12))
+                  ENDIF
+               ENDIF
+               LogDebugInfo("EVAL received in idle")
+
+            OTHERWISE
+               LogDebugInfo("Unhandled command in idle: " + tmp)
+         ENDCASE
       ENDIF
    ENDIF
 
@@ -755,7 +842,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       IF !oDebugInfo["lRunning"] .AND. !Empty(oDebugInfo["socket"])
          // Wait for debugger commands - sleep to prevent CPU spinning
          oDebugInfo["lInternalRun"] := .T.
-         hb_idleSleep(0.01)
+         hb_idleSleep(0.001)
          oDebugInfo["lInternalRun"] := .F.
       ELSE
          // Running or no socket - exit
