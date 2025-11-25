@@ -1,6 +1,8 @@
 package org.intellij.sdk.language;
 
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
@@ -297,6 +299,21 @@ public class HarbourSettingsConfigurable implements Configurable {
                     int selectedIndex = myExcludedDirPatternsList.getSelectedIndex();
                     if (selectedIndex != -1) {
                         myExcludedDirPatternsModel.remove(selectedIndex);
+                    }
+                })
+                .addExtraAction(new AnAction("Browse...", "Select directory to exclude", AllIcons.Actions.Menu_open) {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e) {
+                        FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
+                        descriptor.setTitle("Select Directory to Exclude");
+                        descriptor.setDescription("Choose a directory - its name will be added as exclusion pattern");
+                        VirtualFile selected = FileChooser.chooseFile(descriptor, myProject, null);
+                        if (selected != null) {
+                            String dirName = selected.getName();
+                            if (!myExcludedDirPatternsModel.getItems().contains(dirName)) {
+                                myExcludedDirPatternsModel.add(dirName);
+                            }
+                        }
                     }
                 });
 

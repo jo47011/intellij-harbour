@@ -377,8 +377,21 @@ Access Harbour plugin settings: **Settings** → **Tools** → **Harbour**
 - **Build Output Directory** - Default `.hbmk` for build artifacts
 - **Auto-completion** - Enable while typing (default: Ctrl+Space only)
 - **Include Paths** - Add directories for #include file resolution
-- **Excluded Files** - Files to exclude from navigation and indexing
+- **Excluded Files** - Files and directory patterns to exclude from navigation and indexing
 - **Commands** - Customize code completion command list
+
+### Directory Exclusions
+
+To improve indexing performance, you can exclude directories from the plugin's indexing:
+
+**Settings** → **Tools** → **Harbour** → **Excluded Files** tab
+
+- **Directory patterns**: Add patterns like `backup`, `temp`, `Copy`, `.hbmk` to exclude matching directories
+- Use the **Browse** button to select a directory - its name is added as a pattern
+- Default: `.hbmk` (build output directory) is excluded
+- Patterns match case-insensitively against directory names in paths
+
+**Note:** This affects the Harbour plugin's indexing only. For complete exclusion from IntelliJ's native indexing, also mark directories as **Excluded** in Project Structure (**F4**).
 
 ### Code Style Settings
 
