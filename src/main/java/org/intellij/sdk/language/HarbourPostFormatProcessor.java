@@ -73,10 +73,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             Pattern.compile("^\\s*(?://.*|/\\*.*|.*\\*/\\s*|\\*.*?)$");
 
     // Patterns for fmt:off and fmt:on comments
+    // Allow optional space after colon (fmt:off or fmt: off)
     private static final Pattern FMT_OFF_PATTERN =
-            Pattern.compile("^\\s*//\\s*fmt:off\\s*$", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("^\\s*//\\s*fmt:\\s*off\\s*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern FMT_ON_PATTERN =
-            Pattern.compile("^\\s*//\\s*fmt:on\\s*$", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("^\\s*//\\s*fmt:\\s*on\\s*$", Pattern.CASE_INSENSITIVE);
             
     // Pattern for detecting array/block syntax that should not be broken
     private static final Pattern ARRAY_BLOCK_PATTERN =
@@ -296,8 +297,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     // First, check if joining is needed - only join if one of the lines is too long
                     boolean needsJoining = false;
 
-                    // Check if current line (without semicolon) is too long
-                    if (currentLine.trim().length() - 1 > 99) {
+                    // Check if current line content is too long
+                    // For string continuations ending with "+; or '+;, subtract the full suffix length
+                    String trimmedForLen = currentLine.trim();
+                    int contentLen;
+                    if (trimmedForLen.endsWith("\"+;") || trimmedForLen.endsWith("'+;")) {
+                        // String continuation: subtract 3 chars for "+; or '+;
+                        contentLen = trimmedForLen.length() - 3;
+                    } else if (trimmedForLen.endsWith(";")) {
+                        // Regular continuation: subtract 1 for ;
+                        contentLen = trimmedForLen.length() - 1;
+                    } else {
+                        contentLen = trimmedForLen.length();
+                    }
+                    if (contentLen > 99) {
                         needsJoining = true;
                     }
 
@@ -307,8 +320,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         while (tempIdx < lines.length) {
                             String tempLine = lines[tempIdx].trim();
                             if (!tempLine.isEmpty()) {
-                                // Check line length (remove semicolon if present)
-                                int len = tempLine.endsWith(";") ? tempLine.length() - 1 : tempLine.length();
+                                // Check line length - properly account for string continuation suffix
+                                int len;
+                                if (tempLine.endsWith("\"+;") || tempLine.endsWith("'+;")) {
+                                    len = tempLine.length() - 3;
+                                } else if (tempLine.endsWith(";")) {
+                                    len = tempLine.length() - 1;
+                                } else {
+                                    len = tempLine.length();
+                                }
                                 if (len > 99) {
                                     needsJoining = true;
                                     break;
@@ -478,9 +498,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     }
 
                     // Check if it ends with string concatenation pattern
-                    if (firstPart.endsWith("\"+ ") || firstPart.endsWith("' +") ||
+                    // This flag determines if we should strip quotes from continuation lines
+                    boolean isStringContinuation = firstPart.endsWith("\"+ ") || firstPart.endsWith("' +") ||
                         firstPart.endsWith("\" +") || firstPart.endsWith("'+ ") ||
-                        firstPart.endsWith("\"+") || firstPart.endsWith("'+")) {
+                        firstPart.endsWith("\"+") || firstPart.endsWith("'+");
+
+                    if (isStringContinuation) {
                         // Remove the concatenation operator when joining strings
                         firstPart = firstPart.replaceAll("[\"']\\s*\\+\\s*$", "");
                     }
@@ -533,8 +556,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             }
 
                             // Handle string concatenation when joining
-                            if (lineToAdd.startsWith("\"") || lineToAdd.startsWith("'")) {
-                                // This is a string continuation - just append the content
+                            if (isStringContinuation && (lineToAdd.startsWith("\"") || lineToAdd.startsWith("'"))) {
+                                // This is a STRING CONTINUATION (first line ended with "+;)
+                                // Strip quotes and join string content
                                 char quote = lineToAdd.charAt(0);
                                 int endQuote = lineToAdd.lastIndexOf(quote);
                                 if (endQuote > 0) {
@@ -555,7 +579,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                                     joined.append(" ").append(lineToAdd);
                                 }
                             } else {
-                                // Not a string, add with space
+                                // NOT a string continuation (first line ended with ,; or similar)
+                                // Preserve the continuation line as-is with space
                                 joined.append(" ").append(lineToAdd);
                             }
 
@@ -989,7 +1014,6 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             if (shouldPreserveCompletely) {
                 // DO NOT FORMAT - preserve exactly as-is
-                // log("SKIPPING ALL PROCESSING for line: " + checkTrimmed.substring(0, Math.min(50, checkTrimmed.length())));
                 result.append(processedLine);
                 if (i < lines.length - 1) {
                     result.append("\n");
@@ -2327,12 +2351,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check if the remaining line is still too long
             if (continuationIndent.length() + remaining.length() > maxLen) {
                 // Recursively break the remaining content
+                // Pass continuationIndent as indent, but indentSize=0 to avoid accumulating indentation
+                // All continuation lines should have the same indent (base + 1 level), not cumulative
                 List<String> subLines = breakRegularLine(
                     continuationIndent + remaining,
-                    continuationIndent,
+                    continuationIndent,  // Use continuationIndent for all continuation lines
                     remaining,
                     lineBreakPosition,
-                    indentSize
+                    0  // indentSize=0 prevents further accumulation
                 );
                 result.addAll(subLines);
             } else {
