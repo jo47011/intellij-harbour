@@ -1,14 +1,26 @@
 # $Id:
 
-IDEA=/home/gruhn/.local/share/JetBrains/IdeaIC2024.3
-KIT=$(IDEA)/Grammar-Kit/lib
-IDEA_LIB=/opt/idea-IC-243.25659.39/lib/
-PRJ = /home/developer/workspace/intellij-harbour
+# Paths - auto-detect where possible
+PRJ := $(shell pwd)
 TOOLS = $(PRJ)/tools
+GEN = $(PRJ)/src/main/gen
+GEN_PKG = $(GEN)/org/intellij/sdk/language
 
-all: flex bnf plugin
+# IntelliJ libs - try multiple locations
+IDEA_LIB := $(shell if [ -d "/opt/idea-ce/lib" ]; then echo "/opt/idea-ce/lib"; \
+            elif [ -d "/opt/idea-IC-243.25659.39/lib" ]; then echo "/opt/idea-IC-243.25659.39/lib"; \
+            else echo "/opt/idea-ce/lib"; fi)
 
-flex:
+.PHONY: all flex bnf clean clean-log clean-plugins build run plugin help check-main release release-dry-run up update ci diff
+
+all: flex bnf plugin  ## Build everything (flex, bnf, plugin)
+
+help:  ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
+		awk -F ':.*## ' '{printf "  %-16s %s\n", $$1, $$2}' | sort
+
+flex:  ## Generate lexer from Harbour.flex
+	@mkdir -p $(GEN_PKG)
 	java \
 		-Xmx512m \
 		-Dfile.encoding=UTF-8 \
@@ -16,23 +28,22 @@ flex:
 		-Dsun.stderr.encoding=UTF-8 \
 		-jar $(TOOLS)/jflex-1.9.2.jar \
 		-skel $(TOOLS)/idea-flex.skeleton \
-		-d $(PRJ)/src/main/gen \
+		-d $(GEN_PKG) \
 		$(PRJ)/src/main/grammar/Harbour.flex
 
-bnf:
+bnf:  ## Generate parser from Harbour.bnf
 	java \
-	  -cp "$(KIT)/instrumented-grammar-kit-2023.3.jar:$(IDEA_LIB)/*" \
+	  -cp "$(TOOLS)/instrumented-grammar-kit-2023.3.jar:$(IDEA_LIB)/*" \
 	  org.intellij.grammar.Main \
-	  "$(PRJ)/src/main/gen" \
+	  "$(GEN)" \
 	  "$(PRJ)/src/main/grammar/Harbour.bnf"
 
-clean-log:
+clean-log:  ## Clean log files only
 	rm -rf ~/log/*
 	rm -f ../logs/*.log
 	rm -f ./build/idea-sandbox/IC-2024.3.4/log/idea.log
 
-clean: clean-log
-	# Remove all generated Java code from src/main/gen etc.
+clean: clean-log  ## Clean all generated files and logs
 	./gradlew clean
 	rm -rf $(PRJ)/src/main/gen/*
 	@$(RM) *~ *.*~ .#* .??*~
@@ -40,49 +51,44 @@ clean: clean-log
 	@$(RM) -f ../hbmiki-test/log/*
 	@echo cleaned.
 
-build:
-	# ./gradlew build
+build:  ## Build plugin with gradle
 	./gradlew buildPlugin --no-configuration-cache
 
-run: build
+run: build  ## Build and run IDE with plugin
 	./gradlew runIde
 
-plugin:
+plugin:  ## Build plugin distribution zip
 	./gradlew buildPlugin
 
-# Clean old plugin files before building new one
-clean-plugins:
+clean-plugins:  ## Remove old plugin zips
 	rm -f ./build/distributions/harbour-language-plugin-*.zip
 	rm -f ./build/distributions/harbour-language-plugin-*.js
 
-# Check if on main branch
-check-main:
+check-main:  ## Verify on main branch
 	@if [ "$$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then \
 		echo "Error: This operation can only be performed from main branch."; \
 		echo "Current branch: $$(git rev-parse --abbrev-ref HEAD)"; \
 		exit 1; \
 	fi
 
-# Create GitHub release with the built plugin
-release: check-main plugin
+release: check-main plugin  ## Create GitHub release
 	@echo "Creating GitHub release for version $$(grep "^version" build.gradle | cut -d"'" -f2)..."
 	./gradlew githubRelease
 	@echo "Release created! Check https://github.com/jo47011/intellij-harbour/releases"
 
-# Dry run - preview what would be released
-release-dry-run: check-main plugin
+release-dry-run: check-main plugin  ## Preview release without publishing
 	./gradlew githubRelease --dry-run
 
-up:
+up:  ## Git pull
 	git pull
 
-update:	up
+update: up  ## Git pull (alias)
 
-ci:	clean
+ci: clean  ## Clean and commit all changes
 	git add -A
 	git commit -am "commit all changes"
 
-diff:
+diff:  ## Show git diff
 	git diff
 
 # eof
