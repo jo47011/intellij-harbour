@@ -497,15 +497,38 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         else if (c == ')') totalOpenParens--;
                     }
 
-                    // Check if it ends with string concatenation pattern
-                    // This flag determines if we should strip quotes from continuation lines
-                    boolean isStringContinuation = firstPart.endsWith("\"+ ") || firstPart.endsWith("' +") ||
-                        firstPart.endsWith("\" +") || firstPart.endsWith("'+ ") ||
-                        firstPart.endsWith("\"+") || firstPart.endsWith("'+");
+                    // Check if it ends with an OPEN string (string continuation)
+                    // This means the string is NOT closed before the continuation marker
+                    // Example TRUE:  "this is an unclosed string+;
+                    // Example FALSE: +" "+; (complete string " " followed by +)
+                    boolean isStringContinuation = false;
+
+                    // Count quotes from the end to determine if string is open
+                    // Start from the end (before any +; suffix) and track string state
+                    String contentToCheck = firstPart.replaceAll("\\s*\\+\\s*$", ""); // Remove trailing + and spaces
+                    if (!contentToCheck.isEmpty()) {
+                        // Track string state from beginning to end
+                        boolean inString = false;
+                        char stringDelim = 0;
+                        for (int i = 0; i < contentToCheck.length(); i++) {
+                            char c = contentToCheck.charAt(i);
+                            if ((c == '"' || c == '\'') && (i == 0 || contentToCheck.charAt(i - 1) != '\\')) {
+                                if (!inString) {
+                                    inString = true;
+                                    stringDelim = c;
+                                } else if (c == stringDelim) {
+                                    inString = false;
+                                }
+                            }
+                        }
+                        // If we end up in an open string, this is a true string continuation
+                        isStringContinuation = inString;
+                    }
 
                     if (isStringContinuation) {
-                        // Remove the concatenation operator when joining strings
-                        firstPart = firstPart.replaceAll("[\"']\\s*\\+\\s*$", "");
+                        // Only remove the + if it's a true string continuation (open string)
+                        // This joins: "unclosed string+; with "rest of string"
+                        firstPart = firstPart.replaceAll("\\s*\\+\\s*$", "");
                     }
                     joined.append(firstPart);
 
