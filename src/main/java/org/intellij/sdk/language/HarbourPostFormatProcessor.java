@@ -1839,6 +1839,57 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 return result;
             }
             // If no good logical break point found, fall through to regular breaking
+        } else if (trimmedLower.startsWith("for ")) {
+            // Special handling for standalone "for" statements (Xbase/Clipper loop)
+            // Pattern: for <condition> - e.g., "for BESPOST->ArtNr == ::artNr .and. ..."
+            // Never break between "for" and the condition variable
+            if (line.length() <= lineBreakPosition) {
+                // Fits on one line, don't break
+                result.add(line);
+                return result;
+            }
+
+            // Line is too long, find optimal break point at logical operators
+            int breakAfterLogical = -1;
+
+            // Look for the LAST .and. or .or. that would fit on the first line
+            for (String op : new String[]{".and.", ".or."}) {
+                int searchStart = 4; // Start after "for "
+                while (searchStart < content.length()) {
+                    int pos = contentLower.indexOf(op, searchStart);
+                    if (pos < 0) break;
+
+                    int actualPos = pos + op.length();
+                    String firstPart = indent + content.substring(0, actualPos);
+
+                    // Keep updating to find the last one that fits
+                    if (firstPart.length() + 1 <= lineBreakPosition) {
+                        breakAfterLogical = actualPos;
+                    }
+
+                    searchStart = pos + op.length();
+                }
+            }
+
+            if (breakAfterLogical > 0) {
+                // Break after the logical operator
+                String firstPart = content.substring(0, breakAfterLogical);
+                String remaining = content.substring(breakAfterLogical).trim();
+
+                // Remove trailing spaces
+                while (firstPart.endsWith(" ")) {
+                    firstPart = firstPart.substring(0, firstPart.length() - 1);
+                }
+
+                // Add semicolon at the break point
+                result.add(indent + firstPart + ";");
+
+                // Add continuation with proper indentation
+                String continuationIndent = indent + " ".repeat(indentSize);
+                result.add(continuationIndent + remaining);
+                return result;
+            }
+            // If no good logical break point found, fall through to regular breaking
         } else if (trimmedLower.startsWith("loca for ") || trimmedLower.startsWith("locate for ")) {
             // Special handling for locate/loca statements - keep "for" with the command
             // Check length without inline comment
@@ -2182,6 +2233,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             String checkDoWhile = content.substring(0, i).toLowerCase().trim();
                             if (checkDoWhile.equals("do while") || checkDoWhile.endsWith(" do while")) {
                                 continue; // Don't break right after "do while"
+                            }
+                        }
+                    }
+
+                    // Don't break right after standalone "for" keyword at the start
+                    if (i >= 3) {
+                        String beforeSpace = content.substring(Math.max(0, i-3), i).toLowerCase();
+                        if (beforeSpace.equals("for")) {
+                            // Make sure this is at the start (not part of another word)
+                            String contentBeforeFor = content.substring(0, Math.max(0, i-3)).trim();
+                            if (contentBeforeFor.isEmpty()) {
+                                continue; // Don't break right after "for" at line start
                             }
                         }
                     }
