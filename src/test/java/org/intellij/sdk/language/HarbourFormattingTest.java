@@ -1,5 +1,6 @@
 package org.intellij.sdk.language;
 
+import org.junit.Assume;
 import org.junit.Test;
 
 import java.io.*;
@@ -8,26 +9,77 @@ import java.util.*;
 
 import static org.junit.Assert.*;
 
+// Already included in java.io.*, but make explicit for clarity
+
 /**
  * Tests Harbour formatting by calling the PostFormatProcessor's formatHarbourCodeWithDefaults method.
  * This bypasses the need for IntelliJ's test framework while still testing our actual formatting code.
+ *
+ * Usage:
+ *   ./gradlew test --tests "*HarbourFormattingTest*" -DtestDir=/path/to/prg/files
+ *
+ * Optional parameters:
+ *   -DharbourCompiler=/path/to/harbour   (default: searches PATH, then common locations)
+ *   -DharbourInclude=/path/to/include    (default: derived from compiler path)
+ *   -DlineBreakPosition=99               (default: 99)
  */
 public class HarbourFormattingTest {
 
-    private static final String TEST_DIR = "/home/developer/workspace/hbmiki-test-windows";
-    private static final String HARBOUR_COMPILER = "/home/developer/workspace/harbour/bin/linux/gcc/harbour";
-    private static final String HARBOUR_INCLUDE = "/home/developer/workspace/harbour/include";
-    private static final int LINE_BREAK_POSITION = 99;
+    // Configurable via system properties
+    private static final String TEST_DIR = System.getProperty("testDir");
+    private static final String HARBOUR_COMPILER = getHarbourCompiler();
+    private static final String HARBOUR_INCLUDE = getHarbourInclude();
+    private static final int LINE_BREAK_POSITION = Integer.getInteger("lineBreakPosition", 99);
 
-    // Files that compile without external dependencies
-    private static final String[] COMPILABLE_FILES = {
-        "dummyjob.prg", "errorsys.prg", "hilfdef.prg"
-    };
+    // All PRG files in the test directory (will be discovered at runtime)
+    // Set to null to auto-discover all .prg files
+    private static final String[] COMPILABLE_FILES = null;
+
+    private static String getHarbourCompiler() {
+        String prop = System.getProperty("harbourCompiler");
+        if (prop != null && !prop.isEmpty()) {
+            return prop;
+        }
+        // Try common locations
+        String[] locations = {
+            "/home/developer/workspace/harbour/bin/linux/gcc/harbour",
+            "/usr/local/bin/harbour",
+            "/usr/bin/harbour"
+        };
+        for (String loc : locations) {
+            if (new File(loc).exists()) {
+                return loc;
+            }
+        }
+        return "harbour"; // Hope it's in PATH
+    }
+
+    private static String getHarbourInclude() {
+        String prop = System.getProperty("harbourInclude");
+        if (prop != null && !prop.isEmpty()) {
+            return prop;
+        }
+        // Derive from compiler path
+        if (HARBOUR_COMPILER != null && HARBOUR_COMPILER.contains("/bin/")) {
+            String base = HARBOUR_COMPILER.substring(0, HARBOUR_COMPILER.indexOf("/bin/"));
+            return base + "/include";
+        }
+        return "/usr/local/include/harbour";
+    }
 
     @Test
     public void testFormatAndCompileAllFiles() throws Exception {
+        // Skip test if mandatory parameter is missing (use Assume to mark as skipped, not failed)
+        Assume.assumeTrue(
+            "Skipping: -DtestDir parameter required. " +
+            "Usage: ./gradlew test --tests \"*HarbourFormattingTest*\" -DtestDir=/path/to/prg/files",
+            TEST_DIR != null && !TEST_DIR.isEmpty()
+        );
+
         System.out.println("=== Harbour Formatting Test ===");
         System.out.println("Testing directory: " + TEST_DIR);
+        System.out.println("Harbour compiler: " + HARBOUR_COMPILER);
+        System.out.println("Harbour include:  " + HARBOUR_INCLUDE);
         System.out.println("Line break position: " + LINE_BREAK_POSITION);
 
         // Create the formatter instance
@@ -37,8 +89,27 @@ public class HarbourFormattingTest {
         int success = 0;
         int total = 0;
 
+        // Discover all .prg files if COMPILABLE_FILES is null
+        String[] filesToProcess;
+        if (COMPILABLE_FILES == null) {
+            File dir = new File(TEST_DIR);
+            File[] prgFiles = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".prg"));
+            if (prgFiles == null) {
+                fail("Could not list files in " + TEST_DIR);
+                return;
+            }
+            filesToProcess = new String[prgFiles.length];
+            for (int i = 0; i < prgFiles.length; i++) {
+                filesToProcess[i] = prgFiles[i].getName();
+            }
+            Arrays.sort(filesToProcess);
+            System.out.println("Discovered " + filesToProcess.length + " .prg files");
+        } else {
+            filesToProcess = COMPILABLE_FILES;
+        }
+
         // Process each compilable file
-        for (String fileName : COMPILABLE_FILES) {
+        for (String fileName : filesToProcess) {
             Path filePath = Paths.get(TEST_DIR, fileName);
             if (!Files.exists(filePath)) {
                 System.out.println("SKIP: " + fileName + " (not found)");
@@ -83,6 +154,14 @@ public class HarbourFormattingTest {
     private boolean formatAndCompileFile(Path filePath, HarbourPostFormatProcessor processor) throws Exception {
         // Read original content
         String originalContent = new String(Files.readAllBytes(filePath));
+
+        // FIRST: Check if original file compiles
+        // If it doesn't, skip this file - it needs includes we don't have
+        boolean originalCompiles = compileFile(filePath.toString());
+        if (!originalCompiles) {
+            System.out.println("SKIP: Original file doesn't compile (missing includes?)");
+            return true; // Return true to not count as failure - this is not a formatter bug
+        }
 
         // Call formatHarbourCodeWithDefaults - the public method with default settings
         String formattedContent = processor.formatHarbourCodeWithDefaults(originalContent, LINE_BREAK_POSITION);

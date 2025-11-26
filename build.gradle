@@ -36,6 +36,34 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
 }
 
+// Forward system properties to test JVM for HarbourFormattingTest
+test {
+    // Forward all -D properties that start with 'test', 'harbour', or 'lineBreak'
+    systemProperties System.properties.findAll { k, v ->
+        k.startsWith('testDir') || k.startsWith('harbour') || k.startsWith('lineBreak')
+    }
+
+    // Show test output in console
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = false  // Set to true for detailed output
+        exceptionFormat = "full"
+    }
+
+    // Print summary after tests
+    afterSuite { desc, result ->
+        if (!desc.parent) {
+            println "\n=========================================="
+            println "Test Results: ${result.resultType}"
+            println "  Tests run: ${result.testCount}"
+            println "  Passed: ${result.successfulTestCount}"
+            println "  Failed: ${result.failedTestCount}"
+            println "  Skipped: ${result.skippedTestCount}"
+            println "==========================================\n"
+        }
+    }
+}
+
 intellijPlatform {
     buildSearchableOptions = false
     instrumentCode = false

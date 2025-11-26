@@ -17,6 +17,7 @@ the [MAKING-OF](./MAKING_OF.md).
 - [Known Issues](#known-issues)
 - [VS Code Users](#vs-code-users)
 - [Building Plugin](#building-plugin)
+- [Development](#development)
 - [License](#license)
 
 ## Installation
@@ -481,6 +482,47 @@ For plugin development, you can also run a development instance:
 ```
 
 This launches PyCharm with the plugin pre-installed for testing.
+
+## Development
+
+### Test Files
+
+Located in: `src/test/java/org/intellij/sdk/language/`
+
+| Test File | Purpose |
+|-----------|---------|
+| `HarbourFormattingTest.java` | Format all PRG files in a directory and verify they compile |
+| `SingleFileTest.java` | Individual file tests for specific formatting bugs |
+| `StringContinuationTest.java` | Tests for string continuation handling |
+
+### Running Tests
+
+**HarbourFormattingTest** (main formatter test - formats PRG files and verifies compilation):
+
+```bash
+# Format all PRG files in a directory
+./gradlew test --tests "*HarbourFormattingTest*" -DtestDir=/path/to/prg/files
+
+# With optional parameters
+./gradlew test --tests "*HarbourFormattingTest*" \
+  -DtestDir=/path/to/prg/files \
+  -DharbourCompiler=/path/to/harbour \
+  -DharbourInclude=/path/to/include \
+  -DlineBreakPosition=99
+```
+
+**Other tests:**
+
+```bash
+# Run all SingleFileTest tests
+./gradlew test --tests "*SingleFileTest*"
+
+# Run StringContinuationTest
+./gradlew test --tests "*StringContinuationTest*"
+
+# Run all tests (HarbourFormattingTest is skipped without -DtestDir)
+./gradlew test
+```
 
 ## License
 

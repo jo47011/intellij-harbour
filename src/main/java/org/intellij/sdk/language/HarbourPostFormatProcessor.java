@@ -255,7 +255,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private String formatHarbourCodeInternal(String text, int lineBreakPosition,
             int localIndent, int returnIndent, int dataIndent, int methodIndent,
             int memvarIndent, int privateIndent, boolean sequenceLikeNormalCode) {
-        String[] lines = text.split("\n", -1);
+        // Normalize line endings - handle Windows CRLF by removing CR characters
+        // This prevents off-by-one errors in indent calculation when lines end with \r
+        boolean hadCRLF = text.contains("\r\n");
+        String normalizedText = text.replace("\r\n", "\n").replace("\r", "\n");
+        String[] lines = normalizedText.split("\n", -1);
         StringBuilder result = new StringBuilder(text.length());
 
         int indentLevel = 0;
@@ -297,6 +301,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (inFmtOffBlock) {
                 processedLines.add(currentLine);
                 originalIndents.add("");
+                lineIdx++;
+                continue;
+            }
+
+            // Check for block comment lines and preserve them as-is
+            // This prevents any corruption of comment content like /** eom */
+            if (currentTrimmed.startsWith("/*") || currentTrimmed.startsWith("*") ||
+                currentTrimmed.endsWith("*/") || currentTrimmed.contains("/*") || currentTrimmed.contains("*/")) {
+                // This line is or contains a block comment - preserve it exactly
+                processedLines.add(currentLine);
+                String indent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                originalIndents.add(indent);
                 lineIdx++;
                 continue;
             }
@@ -375,22 +391,40 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             String nextLine = lines[j];
                             String nextTrimmed = nextLine.trim();
 
-                            if (!nextTrimmed.isEmpty()) {
-                                // Get the existing indentation of this line
-                                String existingIndent = nextLine.substring(0, Math.max(0, nextLine.length() - nextTrimmed.length()));
-                                // Add extra indentation to the existing indentation
-                                String continuationIndent = existingIndent + " ".repeat(indentSize);
+                            // CRITICAL: Empty lines END continuation blocks in Harbour
+                            // An empty line after a line ending with ; stops the continuation
+                            if (nextTrimmed.isEmpty()) {
+                                // Add the empty line and stop processing continuation
+                                processedLines.add("");
+                                originalIndents.add("");
+                                break; // Empty line ends continuation
+                            }
 
-                                // Fix spaces around := if present and apply proper indentation
-                                String fixedContent = nextTrimmed.replaceAll("\\s*:=\\s*", ":=");
-                                String fixedNextLine = continuationIndent + fixedContent;
-                                processedLines.add(fixedNextLine);
-                                originalIndents.add(continuationIndent);
+                            // IMPORTANT: Check if this line is a block comment - if so, don't process as continuation
+                            if (nextTrimmed.startsWith("/*") || nextTrimmed.startsWith("*") ||
+                                nextTrimmed.endsWith("*/") || nextTrimmed.contains("/*") || nextTrimmed.contains("*/")) {
+                                // This is a comment line - break out and let the main loop handle it
+                                // Decrement j so that lineIdx = j + 1 will point to this comment line
+                                j--;
+                                break;
+                            }
 
-                                // Check if this line continues
-                                if (!nextTrimmed.endsWith(";") || j == lines.length - 1) {
-                                    break;
-                                }
+                            // Get the existing indentation of this line
+                            // Use stripLeading().length() to avoid including trailing spaces in the calculation
+                            int leadingSpaces = nextLine.length() - nextLine.stripLeading().length();
+                            String existingIndent = nextLine.substring(0, leadingSpaces);
+                            // Add extra indentation to the existing indentation
+                            String continuationIndent = existingIndent + " ".repeat(indentSize);
+
+                            // Fix spaces around := if present and apply proper indentation
+                            String fixedContent = nextTrimmed.replaceAll("\\s*:=\\s*", ":=");
+                            String fixedNextLine = continuationIndent + fixedContent;
+                            processedLines.add(fixedNextLine);
+                            originalIndents.add(continuationIndent);
+
+                            // Check if this line continues
+                            if (!nextTrimmed.endsWith(";") || j == lines.length - 1) {
+                                break;
                             }
                             j++;
                         }
@@ -470,7 +504,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
                             if (!nextTrimmed.isEmpty()) {
                                 // Get the existing indentation of this line
-                                String existingIndent = nextLine.substring(0, Math.max(0, nextLine.length() - nextTrimmed.length()));
+                                // Use stripLeading().length() to avoid including trailing spaces in the calculation
+                                int leadingSpaces = nextLine.length() - nextLine.stripLeading().length();
+                                String existingIndent = nextLine.substring(0, leadingSpaces);
                                 // Add extra indentation to the existing indentation
                                 String continuationIndent = existingIndent + " ".repeat(indentSize);
                                 log("Existing indent: " + existingIndent.length() + " spaces, adding " + indentSize + " more");
@@ -478,6 +514,47 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                                 // Apply proper indentation
                                 String fixedNextLine = continuationIndent + nextTrimmed;
                                 log("Original line: '" + nextLine + "' -> Fixed: '" + fixedNextLine + "'");
+                                processedLines.add(fixedNextLine);
+                                originalIndents.add(continuationIndent);
+
+                                // Check if this line continues
+                                if (!nextTrimmed.endsWith(";") || j == lines.length - 1) {
+                                    break;
+                                }
+                            }
+                            j++;
+                        }
+
+                        lineIdx = j + 1;
+                        continue;
+                    }
+
+                    // Check if this is a CASE statement continuation - don't join, preserve as-is
+                    // Breaking CASE conditions incorrectly creates invalid syntax
+                    String currentTrimmedLower = currentTrimmed.toLowerCase();
+                    if (currentTrimmedLower.startsWith("case ")) {
+                        // Add first line with fixed := spacing
+                        String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
+                        processedLines.add(fixedLine);
+                        String firstIndent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                        originalIndents.add(firstIndent);
+
+                        // Add all continuation lines with proper indentation
+                        int j = lineIdx + 1;
+                        while (j < lines.length) {
+                            String nextLine = lines[j];
+                            String nextTrimmed = nextLine.trim();
+
+                            if (!nextTrimmed.isEmpty()) {
+                                // Get the existing indentation of this line
+                                // Use stripLeading().length() to avoid including trailing spaces in the calculation
+                                int leadingSpaces = nextLine.length() - nextLine.stripLeading().length();
+                                String existingIndent = nextLine.substring(0, leadingSpaces);
+                                // Add extra indentation to the existing indentation
+                                String continuationIndent = existingIndent + " ".repeat(indentSize);
+
+                                // Apply proper indentation
+                                String fixedNextLine = continuationIndent + nextTrimmed;
                                 processedLines.add(fixedNextLine);
                                 originalIndents.add(continuationIndent);
 
@@ -548,7 +625,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         String nextLine = lines[j];
                         String nextTrimmed = nextLine.trim();
 
-                        if (!nextTrimmed.isEmpty()) {
+                        // CRITICAL: Empty lines END continuation blocks in Harbour
+                        if (nextTrimmed.isEmpty()) {
+                            break; // Empty line ends continuation, don't join across it
+                        }
+
+                        {
                             String lineToAdd = nextTrimmed;
 
                             // Update total parentheses count with this line
@@ -686,10 +768,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Clean up malformed continuations
             // This fixes code that was previously malformed
+            // But preserve ,; followed by a comment (the semicolon is needed for continuation)
             if (line.contains(",;") && !line.endsWith(",;")) {
-                // Replace ,; in the middle of line with just ,
-                line = line.replaceAll(",;\\s+", ", ");
-                lineWithWhitespace = lineWithWhitespace.replaceAll(",;\\s+", ", ");
+                // Only replace ,; if it's NOT followed by a comment
+                // Use possessive quantifier (\\s++) to prevent backtracking
+                // This ensures the lookahead checks at the END of all whitespace
+                line = line.replaceAll(",;(\\s++)(?!//)", ",$1");
+                lineWithWhitespace = lineWithWhitespace.replaceAll(",;(\\s++)(?!//)", ",$1");
             }
 
             // Clean up semicolons before logical operators on the SAME line
@@ -903,12 +988,16 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (prevLine.endsWith(";")) {
                     String prevLower = prevLine.toLowerCase();
                     // It's a continuation if it ends with operators followed by ;
-                    // Added {; for array initializations like addColumnsByName({;
-                    if (prevLower.endsWith(".or.;") || prevLower.endsWith(".and.;") ||
-                        prevLower.endsWith("+;") || prevLower.endsWith("-;") ||
-                        prevLower.endsWith("*;") || prevLower.endsWith("/;") ||
-                        prevLower.endsWith(",;") || prevLower.endsWith("$;") ||
-                        prevLower.endsWith("{;") ||   // array/block start continuation
+                    // Also handle space before ; like ".or. ;" or ", ;"
+                    if (prevLower.endsWith(".or.;") || prevLower.endsWith(".or. ;") ||
+                        prevLower.endsWith(".and.;") || prevLower.endsWith(".and. ;") ||
+                        prevLower.endsWith("+;") || prevLower.endsWith("+ ;") ||
+                        prevLower.endsWith("-;") || prevLower.endsWith("- ;") ||
+                        prevLower.endsWith("*;") || prevLower.endsWith("* ;") ||
+                        prevLower.endsWith("/;") || prevLower.endsWith("/ ;") ||
+                        prevLower.endsWith(",;") || prevLower.endsWith(", ;") ||
+                        prevLower.endsWith("$;") || prevLower.endsWith("$ ;") ||
+                        prevLower.endsWith("{;") || prevLower.endsWith("{ ;") ||
                         prevLower.endsWith("for ;")) {  // index ... for ; continuation
                         prevLineHasContinuation = true;
                     }
@@ -1215,12 +1304,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Now check if we should break the line
             if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 &&
-                       !isLineContinuation && !prevLineHasContinuation && !isCommentOnlyLine && !shouldKeepManualContinuation) {
+                       !isLineContinuation && !prevLineHasContinuation && !isCommentOnlyLine && !shouldKeepManualContinuation &&
+                       shouldBreakLine(processedLine)) {
                 // Line needs breaking (skip for very large files to improve performance)
                 // Never break continuation lines - they're already part of a multi-line statement
                 // Don't break lines if previous line has continuation (part of manual formatting)
                 // Never break comment-only lines - they should be preserved as-is
                 // Never break lines that have manual continuation markers
+                // shouldBreakLine checks for CASE and other patterns that shouldn't be broken
 
                 // Debug logging for lines being broken
                 if (processedLine.contains("Miki Plastik") || processedLine.contains("open(") || processedLine.contains("region==DATA->Region")) {
@@ -1393,8 +1484,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             if (availableLen <= 0) {
-                // Can't fit anything, bail out
-                return breakRegularLine(line, indent, content, lineBreakPosition, indentSize);
+                // Can't fit anything, return line as-is to prevent infinite recursion
+                log("WARN: breakStringAssignment can't fit anything, returning line as-is");
+                List<String> fallback = new ArrayList<>();
+                fallback.add(line);
+                return fallback;
             }
 
             // Find break point
@@ -1528,7 +1622,22 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private List<String> breakRegularLine(String line, String indent, String content,
                                           int lineBreakPosition, int indentSize) {
+        return breakRegularLineWithDepth(line, indent, content, lineBreakPosition, indentSize, 0);
+    }
+
+    /**
+     * Break a regular line with recursion depth limit to prevent StackOverflow
+     */
+    private List<String> breakRegularLineWithDepth(String line, String indent, String content,
+                                          int lineBreakPosition, int indentSize, int depth) {
         List<String> result = new ArrayList<>();
+
+        // Prevent infinite recursion - max depth of 50 should be more than enough
+        if (depth > 50) {
+            log("WARN: Max recursion depth reached in breakRegularLine, returning line as-is");
+            result.add(line);
+            return result;
+        }
 
         // Debug logging for problematic cases
         if (content.startsWith(".or.") || content.startsWith(".and.")) {
@@ -1658,12 +1767,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 // Check if remaining needs further breaking
                 if (continuationIndent.length() + remaining.length() > lineBreakPosition) {
                     // Recursively break the remaining
-                    List<String> subLines = breakRegularLine(
+                    List<String> subLines = breakRegularLineWithDepth(
                         continuationIndent + remaining,
                         continuationIndent,
                         remaining,
                         lineBreakPosition,
-                        indentSize
+                        indentSize,
+                        depth + 1
                     );
                     result.addAll(subLines);
                 } else {
@@ -2259,12 +2369,36 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
                     }
 
+                    // Don't break right after "if " at the start of content (if is 2 chars)
+                    if (i == 2) {
+                        String beforeSpace = content.substring(0, i).toLowerCase();
+                        if (beforeSpace.equals("if")) {
+                            continue; // Don't break right after "if" at line start
+                        }
+                    }
+
+                    // Don't break right after "elseif " at the start
+                    if (i >= 6) {
+                        String beforeSpace = content.substring(Math.max(0, i-6), i).toLowerCase();
+                        if (beforeSpace.equals("elseif")) {
+                            String contentBefore = content.substring(0, Math.max(0, i-6)).trim();
+                            if (contentBefore.isEmpty()) {
+                                continue; // Don't break right after "elseif" at line start
+                            }
+                        }
+                    }
+
                     lastSpace = i + 1;
                     if (bestBreakPos < 0 && !preferLogicalBreak) {
                         bestBreakPos = lastSpace;
                     }
                 } else if ((c == '+' || c == '-') && !inString && i < maxPos) {
                     // Can break after + or - operators
+                    // BUT NOT if '-' is part of '->' accessor operator
+                    if (c == '-' && i + 1 < content.length() && content.charAt(i + 1) == '>') {
+                        // This is -> accessor, don't break here
+                        continue;
+                    }
                     lastOperator = i + 1;
                 }
             }
@@ -2349,13 +2483,71 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
         }
 
+        // CRITICAL FIX: If we're still inside a string and have no valid break point outside,
+        // we must NOT break inside the string. Check if bestBreakPos would land inside a string.
+        if (inString && bestBreakPos <= 0) {
+            // We have no break point and we're inside a string
+            // This means the line is mostly a string - don't break it with semicolon
+            // as that would corrupt the string content
+            log("WARN: Cannot break line - would break inside string. Returning as-is.");
+            result.add(line);
+            return result;
+        }
+
+        // Also check if our best break position is inside a string
+        if (bestBreakPos > 0 && stringStart >= 0 && bestBreakPos > stringStart) {
+            // Check if we're still inside the string at bestBreakPos
+            // Re-scan to find actual string boundaries
+            boolean insideStringAtBreak = false;
+            boolean inStr = false;
+            char strDelim = 0;
+            for (int i = 0; i < bestBreakPos && i < content.length(); i++) {
+                char c = content.charAt(i);
+                if ((c == '"' || c == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
+                    if (!inStr) {
+                        inStr = true;
+                        strDelim = c;
+                    } else if (c == strDelim) {
+                        inStr = false;
+                    }
+                }
+            }
+            if (inStr) {
+                // Break position is inside a string - don't break
+                log("WARN: Break position " + bestBreakPos + " is inside a string. Returning as-is.");
+                result.add(line);
+                return result;
+            }
+        }
+
         // Use best break point found
         if (bestBreakPos <= 0) {
             // No good break point found - try operator or last resort
             if (lastOperator > 0 && lastOperator <= maxPos) {
                 bestBreakPos = lastOperator;
             } else {
-                // Last resort - break at max position
+                // Last resort - break at max position, but only if NOT inside a string
+                // Final safety check: verify maxPos is not inside a string
+                boolean inStrAtMax = false;
+                boolean inStr = false;
+                char strDelim = 0;
+                for (int i = 0; i < maxPos && i < content.length(); i++) {
+                    char c = content.charAt(i);
+                    if ((c == '"' || c == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
+                        if (!inStr) {
+                            inStr = true;
+                            strDelim = c;
+                        } else if (c == strDelim) {
+                            inStr = false;
+                        }
+                    }
+                }
+                if (inStr) {
+                    // maxPos is inside a string - don't break at all
+                    log("WARN: maxPos " + maxPos + " is inside a string. Returning as-is.");
+                    result.add(line);
+                    return result;
+                }
                 bestBreakPos = maxPos;
             }
         }
@@ -2453,12 +2645,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 // Recursively break the remaining content
                 // Pass continuationIndent as indent, but indentSize=0 to avoid accumulating indentation
                 // All continuation lines should have the same indent (base + 1 level), not cumulative
-                List<String> subLines = breakRegularLine(
+                List<String> subLines = breakRegularLineWithDepth(
                     continuationIndent + remaining,
                     continuationIndent,  // Use continuationIndent for all continuation lines
                     remaining,
                     lineBreakPosition,
-                    0  // indentSize=0 prevents further accumulation
+                    0,  // indentSize=0 prevents further accumulation
+                    depth + 1
                 );
                 result.addAll(subLines);
             } else {
@@ -2509,14 +2702,21 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             return false;
         }
         
-        // Don't break simple SAY ... GET constructs 
+        // Don't break simple SAY ... GET constructs
         if (SIMPLE_SAY_GET_PATTERN.matcher(trimmed).matches()) {
             return false;
         }
-        
+
+        // Don't break CASE statements - breaking them requires proper continuation handling
+        // which the current line breaker doesn't do correctly
+        String trimmedLower = trimmed.toLowerCase();
+        if (trimmedLower.startsWith("case ")) {
+            return false;
+        }
+
         // Note: Removed array/block restrictions - user wants long lines to break
         // The issue was incorrect semicolon placement, not that they shouldn't break
-        
+
         // Allow breaking complex long lines (including complex GET statements)
         return true;
     }
