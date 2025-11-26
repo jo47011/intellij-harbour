@@ -893,10 +893,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (prevLine.endsWith(";")) {
                     String prevLower = prevLine.toLowerCase();
                     // It's a continuation if it ends with operators followed by ;
+                    // Added {; for array initializations like addColumnsByName({;
                     if (prevLower.endsWith(".or.;") || prevLower.endsWith(".and.;") ||
                         prevLower.endsWith("+;") || prevLower.endsWith("-;") ||
                         prevLower.endsWith("*;") || prevLower.endsWith("/;") ||
                         prevLower.endsWith(",;") || prevLower.endsWith("$;") ||
+                        prevLower.endsWith("{;") ||   // array/block start continuation
                         prevLower.endsWith("for ;")) {  // index ... for ; continuation
                         prevLineHasContinuation = true;
                     }
@@ -1023,7 +1025,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (checkLower.endsWith(".or.;") || checkLower.endsWith(".and.;") ||
                     checkLower.endsWith("+;") || checkLower.endsWith("-;") ||
                     checkLower.endsWith("*;") || checkLower.endsWith("/;") ||
-                    checkLower.endsWith(",;") || checkLower.endsWith("$;")) {
+                    checkLower.endsWith(",;") || checkLower.endsWith("$;") ||
+                    checkLower.endsWith("{;")) {  // array/block start continuation
                     shouldPreserveCompletely = true;
                     // log("PRESERVING manual continuation line ending with: " + checkTrimmed.substring(Math.max(0, checkTrimmed.length() - 20)));
                 }
@@ -1147,7 +1150,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (trimmedLower.endsWith(".or.;") || trimmedLower.endsWith(".and.;") ||
                     trimmedLower.endsWith("+;") || trimmedLower.endsWith("-;") ||
                     trimmedLower.endsWith("*;") || trimmedLower.endsWith("/;") ||
-                    trimmedLower.endsWith(",;") || trimmedLower.endsWith("$;")) {
+                    trimmedLower.endsWith(",;") || trimmedLower.endsWith("$;") ||
+                    trimmedLower.endsWith("{;")) {  // array/block start continuation
                     isManualContinuationLine = true;
                     log("Manual continuation line detected: " + trimmed.substring(Math.max(0, trimmed.length() - 10)));
                 }
