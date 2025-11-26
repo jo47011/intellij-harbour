@@ -43,11 +43,18 @@ test {
         k.startsWith('testDir') || k.startsWith('harbour') || k.startsWith('lineBreak')
     }
 
+    // Always run tests (don't use cache)
+    outputs.upToDateWhen { false }
+
     // Show test output in console
     testLogging {
         events "passed", "skipped", "failed"
         showStandardStreams = false  // Set to true for detailed output
         exceptionFormat = "full"
+
+        // Show skip reasons
+        showCauses = true
+        showExceptions = true
     }
 
     // Print summary after tests
@@ -59,6 +66,10 @@ test {
             println "  Passed: ${result.successfulTestCount}"
             println "  Failed: ${result.failedTestCount}"
             println "  Skipped: ${result.skippedTestCount}"
+            if (result.skippedTestCount > 0) {
+                println "\n  Note: HarbourFormattingTest is skipped without -DtestDir"
+                println "  Run with: ./gradlew test -DtestDir=/path/to/prg/files"
+            }
             println "==========================================\n"
         }
     }
