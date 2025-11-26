@@ -233,9 +233,28 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     }
 
     /**
+     * Public formatting method with default settings - for testing and CLI usage
+     */
+    public String formatHarbourCodeWithDefaults(String text, int lineBreakPosition) {
+        return formatHarbourCodeInternal(text, lineBreakPosition, 0, 0, 0, 0, 0, 0, true);
+    }
+
+    /**
      * Main formatting method
      */
     private String formatHarbourCode(String text, int lineBreakPosition, HarbourCodeStyleSettings settings) {
+        return formatHarbourCodeInternal(text, lineBreakPosition,
+                settings.LOCAL_INDENT, settings.RETURN_INDENT, settings.DATA_INDENT,
+                settings.METHOD_INDENT, settings.MEMVAR_INDENT, settings.PRIVATE_INDENT,
+                settings.SEQUENCE_LIKE_NORMAL_CODE);
+    }
+
+    /**
+     * Internal formatting method with explicit settings values
+     */
+    private String formatHarbourCodeInternal(String text, int lineBreakPosition,
+            int localIndent, int returnIndent, int dataIndent, int methodIndent,
+            int memvarIndent, int privateIndent, boolean sequenceLikeNormalCode) {
         String[] lines = text.split("\n", -1);
         StringBuilder result = new StringBuilder(text.length());
 
@@ -247,17 +266,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         boolean inBlockComment = false; // Track if we're inside a block comment
         boolean inFmtOffBlock = false; // Track if we're inside a fmt:off block
         int indentSize = 2; // Default indentation size for Harbour
-        
-        // Get custom indentation settings
-        int localIndent = settings.LOCAL_INDENT;
-        int returnIndent = settings.RETURN_INDENT;
-        int dataIndent = settings.DATA_INDENT;
-        int methodIndent = settings.METHOD_INDENT;
-        int memvarIndent = settings.MEMVAR_INDENT;
-        int privateIndent = settings.PRIVATE_INDENT;
-        boolean sequenceLikeNormalCode = settings.SEQUENCE_LIKE_NORMAL_CODE;
 
-        // Removed verbose logging for performance
+        // Settings are now passed as parameters
 
         // First pass - join continuation lines that need re-wrapping
         List<String> processedLines = new ArrayList<>();

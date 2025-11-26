@@ -163,9 +163,12 @@
         <com.intellij.database.dataSourceProvider implementation="org.intellij.sdk.language.HarbourDBFDataSourceProvider"/> -->
         
         <!-- Tool Window -->
-        <toolWindow id="Harbour DBF" secondary="true" anchor="bottom" 
+        <toolWindow id="Harbour DBF" secondary="true" anchor="bottom"
                     factoryClass="org.intellij.sdk.language.HarbourDBFToolWindow"
                     icon="/icons/harbour.png"/>
+
+        <!-- Command Line Formatter -->
+        <appStarter implementation="org.intellij.sdk.language.HarbourFormatStarter"/>
     </extensions>
 
     <actions>
