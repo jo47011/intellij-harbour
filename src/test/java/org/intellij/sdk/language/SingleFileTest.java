@@ -195,6 +195,251 @@ public class SingleFileTest {
         testFile("listen2.prg");
     }
 
+    @Test
+    public void testElseIndentation() throws Exception {
+        // Test from FEEDBACK: else should be indented to match its if
+        // This is the case from fakt.prg#229
+        String input =
+            "FUNCTION test()\n" +
+            "  if condA\n" +
+            "    if condB\n" +
+            "      doSomething()\n" +
+            "    endif\n" +
+            "  else // comment\n" +
+            "    doOther()\n" +
+            "  endif\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // else should have same indent as the outer if (2 spaces)
+        String elseLine = outputLines[5];
+        int elseIndent = elseLine.length() - elseLine.stripLeading().length();
+
+        String outerIfLine = outputLines[1];
+        int outerIfIndent = outerIfLine.length() - outerIfLine.stripLeading().length();
+
+        System.out.println("\nIndentation check:");
+        System.out.printf("  Outer if: %d spaces%n", outerIfIndent);
+        System.out.printf("  else: %d spaces%n", elseIndent);
+
+        assertEquals("else should have same indent as its matching if", outerIfIndent, elseIndent);
+    }
+
+    @Test
+    public void testFaktPrgElseIndentation() throws Exception {
+        // Test the actual fakt.prg around line 229
+        Path origPath = Paths.get("/home/developer/workspace/hbmiki-test-windows/fakt.prg");
+        if (!Files.exists(origPath)) {
+            System.out.println("fakt.prg not found, skipping test");
+            return;
+        }
+
+        String input = new String(Files.readAllBytes(origPath));
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        String[] outputLines = formatted.split("\n", -1);
+
+        // Find the "else // alter Auftrag" line around line 229
+        int elseLineIdx = -1;
+        for (int i = 220; i < Math.min(240, outputLines.length); i++) {
+            if (outputLines[i].trim().startsWith("else") && outputLines[i].contains("alter Auftrag")) {
+                elseLineIdx = i;
+                break;
+            }
+        }
+
+        if (elseLineIdx > 0) {
+            System.out.println("=== Lines around else ===");
+            for (int i = Math.max(0, elseLineIdx - 3); i < Math.min(outputLines.length, elseLineIdx + 3); i++) {
+                int indent = outputLines[i].length() - outputLines[i].stripLeading().length();
+                System.out.printf("Line %d [%d spaces]: '%s'%n", i+1, indent, outputLines[i]);
+            }
+
+            // Find the matching if (line 181: "if AUFAUS->AufNr == TEMP_NUMMER")
+            int ifLineIdx = -1;
+            for (int i = 175; i < Math.min(190, outputLines.length); i++) {
+                if (outputLines[i].trim().startsWith("if AUFAUS->AufNr")) {
+                    ifLineIdx = i;
+                    break;
+                }
+            }
+
+            if (ifLineIdx > 0) {
+                int ifIndent = outputLines[ifLineIdx].length() - outputLines[ifLineIdx].stripLeading().length();
+                int elseIndent = outputLines[elseLineIdx].length() - outputLines[elseLineIdx].stripLeading().length();
+                System.out.printf("\nif indent: %d, else indent: %d%n", ifIndent, elseIndent);
+                assertEquals("else should have same indent as its matching if", ifIndent, elseIndent);
+            }
+        }
+    }
+
+    @Test
+    public void testCommaSemicolonContinuation() throws Exception {
+        // Test from FEEDBACK: continuation after ,; should have same indent as other continuation lines
+        // This is the case from fakt.prg#80
+        String input =
+            "FUNCTION test()\n" +
+            "  if ! open( \"Auftrag\" , \"AufAus\" , \"ZahlKond\" ;\n" +
+            "    ,\"Mwst_Kz\" , \"Artikel\", \"Einheit\";\n" +
+            "    ,\"Text\" ,\"Abruf\",\"BesPost\",;\n" +
+            "    \"AufZeit\",\"Konsig\",\"BesAus\")\n" +
+            "    Error(TRY_AGAIN)\n" +
+            "  endif\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // All continuation lines (lines 3, 4, 5) should have the same indent (4 spaces = if indent + 2)
+        // Line 5 is after ,; but should NOT get extra indent
+        int line3Indent = outputLines[2].length() - outputLines[2].stripLeading().length();
+        int line4Indent = outputLines[3].length() - outputLines[3].stripLeading().length();
+        int line5Indent = outputLines[4].length() - outputLines[4].stripLeading().length();
+
+        System.out.println("\nIndentation check:");
+        System.out.printf("  Continuation line 1: %d spaces%n", line3Indent);
+        System.out.printf("  Continuation line 2 (ends with ,;): %d spaces%n", line4Indent);
+        System.out.printf("  Continuation line 3 (after ,;): %d spaces%n", line5Indent);
+
+        assertEquals("All continuation lines should have same indent", line3Indent, line4Indent);
+        assertEquals("Line after ,; should have same indent as other continuations", line3Indent, line5Indent);
+    }
+
+    @Test
+    public void testContinuationLineIndentation() throws Exception {
+        // Test from FEEDBACK: continuation lines should indent one step relative to statement
+        // This is the exact case from fakt.prg#151
+        String input =
+            "FUNCTION test()\n" +
+            "  do while .t.\n" +
+            "    Error(ACHTUNG+\"Eingabe Ansprechpartner und mind. eine Kontaktmöglichkeit |\"+;\n" +
+            "         \"         sind Pflicht bei neuen Aufträgen||\"+;\n" +
+            "         \"         F12 aus Kundenstamm übernehmen\",.t.)\n" +
+            "    editAnsprechPartner()\n" +
+            "  enddo\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Line 3 (Error call) should have 4 spaces (inside do while)
+        // Lines 4-5 (continuation) should have 6 spaces (4 + 2 = one extra level)
+        String errorLine = outputLines[2];
+        String cont1Line = outputLines[3];
+        String cont2Line = outputLines[4];
+
+        int errorIndent = errorLine.length() - errorLine.stripLeading().length();
+        int cont1Indent = cont1Line.length() - cont1Line.stripLeading().length();
+        int cont2Indent = cont2Line.length() - cont2Line.stripLeading().length();
+
+        System.out.println("\nIndentation check:");
+        System.out.printf("  Error line: %d spaces (expected 4)%n", errorIndent);
+        System.out.printf("  Continuation 1: %d spaces (expected 6)%n", cont1Indent);
+        System.out.printf("  Continuation 2: %d spaces (expected 6)%n", cont2Indent);
+
+        assertEquals("Error line should have 4 spaces indent", 4, errorIndent);
+        assertEquals("Continuation line 1 should have 6 spaces (4+2)", 6, cont1Indent);
+        assertEquals("Continuation line 2 should have 6 spaces (4+2)", 6, cont2Indent);
+    }
+
+    @Test
+    public void testFaktPrgContinuationLine() throws Exception {
+        // Test the exact case from fakt.prg line 151
+        Path origPath = Paths.get("/home/developer/workspace/hbmiki-test-windows/fakt.prg");
+        if (!Files.exists(origPath)) {
+            System.out.println("fakt.prg not found, skipping test");
+            return;
+        }
+
+        String input = new String(Files.readAllBytes(origPath));
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        String[] outputLines = formatted.split("\n", -1);
+
+        // Find the Error line around line 151
+        int errorLineIdx = -1;
+        for (int i = 145; i < Math.min(160, outputLines.length); i++) {
+            if (outputLines[i].contains("Error(ACHTUNG+\"Eingabe Ansprechpartner")) {
+                errorLineIdx = i;
+                break;
+            }
+        }
+
+        if (errorLineIdx > 0) {
+            System.out.println("=== Lines around Error call ===");
+            for (int i = Math.max(0, errorLineIdx - 2); i < Math.min(outputLines.length, errorLineIdx + 4); i++) {
+                int indent = outputLines[i].length() - outputLines[i].stripLeading().length();
+                System.out.printf("Line %d [%d spaces]: '%s'%n", i+1, indent, outputLines[i]);
+            }
+
+            String errorLine = outputLines[errorLineIdx];
+            int errorIndent = errorLine.length() - errorLine.stripLeading().length();
+
+            // Continuation lines should be errorIndent + 2
+            if (errorLineIdx + 1 < outputLines.length) {
+                String cont1 = outputLines[errorLineIdx + 1];
+                int cont1Indent = cont1.length() - cont1.stripLeading().length();
+                System.out.printf("\nError line indent: %d, Continuation indent: %d, Expected: %d%n",
+                    errorIndent, cont1Indent, errorIndent + 2);
+                assertEquals("Continuation should be Error indent + 2", errorIndent + 2, cont1Indent);
+            }
+        }
+    }
+
     private void testFile(String filename) throws Exception {
         Path bakPath = Paths.get("/home/developer/workspace/hbmiki-test-windows/" + filename + ".bak");
         Path origPath = Paths.get("/home/developer/workspace/hbmiki-test-windows/" + filename);

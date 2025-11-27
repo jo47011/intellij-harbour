@@ -380,12 +380,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
 
                         // Add current line unchanged but remove spaces around :=
+                        // NOTE: Keep original indentation - the second pass will recalculate it correctly
                         String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
                         processedLines.add(fixedLine);
                         String firstIndent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
                         originalIndents.add(firstIndent);
 
-                        // Add all continuation lines with proper indentation (one extra level)
+                        // Add all continuation lines - keep their original content with trimmed whitespace
+                        // The second pass will handle proper indentation based on code structure
                         int j = lineIdx + 1;
                         while (j < lines.length) {
                             String nextLine = lines[j];
@@ -409,18 +411,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                                 break;
                             }
 
-                            // Get the existing indentation of this line
-                            // Use stripLeading().length() to avoid including trailing spaces in the calculation
-                            int leadingSpaces = nextLine.length() - nextLine.stripLeading().length();
-                            String existingIndent = nextLine.substring(0, leadingSpaces);
-                            // Add extra indentation to the existing indentation
-                            String continuationIndent = existingIndent + " ".repeat(indentSize);
+                            // Keep original indentation for continuation lines
+                            // The second pass will recalculate based on code structure
+                            String existingIndent = nextLine.substring(0, Math.max(0, nextLine.length() - nextTrimmed.length()));
 
-                            // Fix spaces around := if present and apply proper indentation
+                            // Fix spaces around := if present, keep original indentation
                             String fixedContent = nextTrimmed.replaceAll("\\s*:=\\s*", ":=");
-                            String fixedNextLine = continuationIndent + fixedContent;
+                            String fixedNextLine = existingIndent + fixedContent;
                             processedLines.add(fixedNextLine);
-                            originalIndents.add(continuationIndent);
+                            originalIndents.add(existingIndent);
 
                             // Check if this line continues
                             if (!nextTrimmed.endsWith(";") || j == lines.length - 1) {
@@ -503,13 +502,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             String nextTrimmed = nextLine.trim();
 
                             if (!nextTrimmed.isEmpty()) {
-                                // Get the existing indentation of this line
-                                // Use stripLeading().length() to avoid including trailing spaces in the calculation
-                                int leadingSpaces = nextLine.length() - nextLine.stripLeading().length();
-                                String existingIndent = nextLine.substring(0, leadingSpaces);
-                                // Add extra indentation to the existing indentation
-                                String continuationIndent = existingIndent + " ".repeat(indentSize);
-                                log("Existing indent: " + existingIndent.length() + " spaces, adding " + indentSize + " more");
+                                // Use first line indent + one indentation level for continuation lines
+                                String continuationIndent = firstIndent + " ".repeat(indentSize);
+                                log("First indent: " + firstIndent.length() + " spaces, adding " + indentSize + " more");
 
                                 // Apply proper indentation
                                 String fixedNextLine = continuationIndent + nextTrimmed;
@@ -546,12 +541,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             String nextTrimmed = nextLine.trim();
 
                             if (!nextTrimmed.isEmpty()) {
-                                // Get the existing indentation of this line
-                                // Use stripLeading().length() to avoid including trailing spaces in the calculation
-                                int leadingSpaces = nextLine.length() - nextLine.stripLeading().length();
-                                String existingIndent = nextLine.substring(0, leadingSpaces);
-                                // Add extra indentation to the existing indentation
-                                String continuationIndent = existingIndent + " ".repeat(indentSize);
+                                // Use first line indent + one indentation level for continuation lines
+                                String continuationIndent = firstIndent + " ".repeat(indentSize);
 
                                 // Apply proper indentation
                                 String fixedNextLine = continuationIndent + nextTrimmed;
@@ -959,8 +950,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Check for else/elseif statements that need special handling
-            boolean isElseStatement = lowerLine.equals("else") || lowerLine.startsWith("elseif");
-            
+            // Include "else " to handle else with inline comments like "else // comment"
+            boolean isElseStatement = lowerLine.equals("else") || lowerLine.startsWith("elseif") ||
+                                      lowerLine.startsWith("else ");
+
             // Handle else/elseif indentation - they should be at the same level as their corresponding if
             if (isElseStatement) {
                 // Temporarily decrease effectiveIndentLevel for this line only
@@ -980,27 +973,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (indentLevel > 0) indentLevel--;
             }
 
-            // Check if previous line ends with semicolon (manual continuation formatting)
+            // Check if previous line ends with semicolon (continuation marker in Harbour)
+            // In Harbour, ANY semicolon at end of line means the statement continues on the next line
             boolean prevLineHasContinuation = false;
             if (i > 0) {
                 String prevLine = lines[i - 1].trim();
-                // Check if previous line ends with continuation semicolon
+                // Any line ending with ; indicates continuation in Harbour
                 if (prevLine.endsWith(";")) {
-                    String prevLower = prevLine.toLowerCase();
-                    // It's a continuation if it ends with operators followed by ;
-                    // Also handle space before ; like ".or. ;" or ", ;"
-                    if (prevLower.endsWith(".or.;") || prevLower.endsWith(".or. ;") ||
-                        prevLower.endsWith(".and.;") || prevLower.endsWith(".and. ;") ||
-                        prevLower.endsWith("+;") || prevLower.endsWith("+ ;") ||
-                        prevLower.endsWith("-;") || prevLower.endsWith("- ;") ||
-                        prevLower.endsWith("*;") || prevLower.endsWith("* ;") ||
-                        prevLower.endsWith("/;") || prevLower.endsWith("/ ;") ||
-                        prevLower.endsWith(",;") || prevLower.endsWith(", ;") ||
-                        prevLower.endsWith("$;") || prevLower.endsWith("$ ;") ||
-                        prevLower.endsWith("{;") || prevLower.endsWith("{ ;") ||
-                        prevLower.endsWith("for ;")) {  // index ... for ; continuation
-                        prevLineHasContinuation = true;
-                    }
+                    prevLineHasContinuation = true;
                 }
             }
 
@@ -1042,7 +1022,6 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             } else if (isLineContinuation) {
                 // For continuation lines, add extra indent
                 newIndent = previousLineActualIndent + " ".repeat(indentSize);
-                // Using continuation indentation for line line
             } else if (isClassStatement || isEndClassStatement) {
                 // CLASS and ENDCLASS should never be indented
                 newIndent = "";
@@ -1142,6 +1121,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 result.append(processedLine);
                 if (i < lines.length - 1) {
                     result.append("\n");
+                }
+                // IMPORTANT: Still update previousLineActualIndent for non-continuation lines
+                // so that continuation lines following this one get correct indentation
+                if (!isCommentOnlyLine && !isLineContinuation) {
+                    previousLineActualIndent = newIndent;
                 }
                 continue;  // Skip all further processing for this line
             }
