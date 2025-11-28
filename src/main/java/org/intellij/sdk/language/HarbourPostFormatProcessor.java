@@ -2276,12 +2276,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         boolean preferLogicalBreak = false;
 
         // SPECIAL HANDLING: For GET commands, prefer breaking BEFORE valid/when clauses
-        // This keeps the GET clause together and puts validation on the next line
+        // This keeps as much of the GET clause as possible on the first line
+        // Prefer 'when' over 'valid' since it usually comes later and keeps more together
         boolean preferGetClauseBreak = false;
         String contentLowerForGet = content.toLowerCase();
         if (contentLowerForGet.contains(" get ")) {
             // Look for valid/when keywords as preferred break points
-            for (String clause : new String[]{" valid ", " when "}) {
+            // Check 'when' first since it's usually after 'valid' and we want to keep more on first line
+            for (String clause : new String[]{" when ", " valid "}) {
                 int clausePos = contentLowerForGet.indexOf(clause);
                 if (clausePos > 0 && clausePos <= maxPos) {
                     // Found a clause keyword - prefer breaking BEFORE it (at the space before)

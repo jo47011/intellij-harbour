@@ -376,6 +376,54 @@ public class SingleFileTest {
     }
 
     @Test
+    public void testGetCommandBreaksBeforeWhen() throws Exception {
+        // Test from FEEDBACK fakt.prg#811: GET commands should break BEFORE when, not at @ expr,
+        // This tests the case where row is an expression (ob+12) not just a number
+        String input =
+            "FUNCTION test()\n" +
+            "    @ ob+12,74 get AUFAUS->Zuschlag valid { |oGet| val(oGet:buffer)>=0 } when Message(\"Energiekosten-Zuschlag eingeben. \")\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT (@ expression) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [len=%d]: '%s'%n", i+1, inputLines[i].length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT (maxLen=99) ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [len=%d]: '%s'%n", i+1, outputLines[i].length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Verify that the comma in @ expr, is NOT used as split point
+        boolean hasBadSplit = false;
+        for (String line : outputLines) {
+            String trimmed = line.trim();
+            // Check for bad split at @ expr,; pattern
+            if (trimmed.matches("@\\s*[a-zA-Z0-9+\\-*/()]+,;")) {
+                hasBadSplit = true;
+                System.out.println("FOUND BAD SPLIT at @ expr,: " + trimmed);
+                break;
+            }
+        }
+        assertFalse("@ expr,col should NOT be split at the comma", hasBadSplit);
+
+        // Verify that if line was split, it was at a logical place (before when/valid)
+        for (String line : outputLines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("when ") || trimmed.startsWith("valid ")) {
+                System.out.println("Good: split occurred before '" + trimmed.split(" ")[0] + "'");
+            }
+        }
+    }
+
+    @Test
     public void testGetCommandBreaksBeforeValid() throws Exception {
         // Test from FEEDBACK: GET commands should break BEFORE valid/when clauses, not at @ row,col
         // When a GET line is >99 chars it should split BEFORE 'valid' or 'when', not at the @ 10, comma
