@@ -294,6 +294,129 @@ public class SingleFileTest {
     }
 
     @Test
+    public void testAtRowColNoBreak() throws Exception {
+        // Test from FEEDBACK: @ row,col commands should NOT be split at the comma
+        // This is the case from fakt.prg#377
+        String input =
+            "FUNCTION test()\n" +
+            "  @ 10,20 say 'Drucker/Bildschirm/PDF (D/B/PDF) ' get Ausgabe Picture \"!\" valid Ausgabe $\"DBP\"\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d: '%s'%n", i+1, inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d: '%s'%n", i+1, outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // The @ 10,20 should NOT be split - it should stay on one line or break elsewhere
+        // Check that no line starts with just a number (like "20 say...")
+        for (String line : outputLines) {
+            String trimmed = line.trim();
+            assertFalse("Line should not start with number after @ row,col split: " + trimmed,
+                trimmed.matches("^\\d+\\s+say.*"));
+        }
+
+        // Check that @ command is not followed by just a number on next line
+        for (int i = 0; i < outputLines.length - 1; i++) {
+            String current = outputLines[i].trim();
+            String next = outputLines[i + 1].trim();
+            if (current.matches("@\\s*\\d+,;?\\s*$")) {
+                fail("@ row,col should not be split: current='" + current + "', next='" + next + "'");
+            }
+        }
+    }
+
+    @Test
+    public void testAtRowColJoinExistingSplit() throws Exception {
+        // Test that an EXISTING incorrect split at @ row,col is JOINED back together
+        // This is the case from fakt.prg#376-377 where the file already has the bad split
+        String input =
+            "FUNCTION test()\n" +
+            "  @ 10,;\n" +
+            "    20 say 'Test' get x\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT (with bad split) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d: '%s'%n", i+1, inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d: '%s'%n", i+1, outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // After formatting, the @ row,col should be joined on one line
+        boolean foundJoinedLine = false;
+        for (String line : outputLines) {
+            if (line.contains("@ 10,20 say") || line.contains("@ 10, 20 say")) {
+                foundJoinedLine = true;
+                break;
+            }
+        }
+        assertTrue("@ row,col should be joined back together", foundJoinedLine);
+    }
+
+    @Test
+    public void testGetCommandBreaksBeforeValid() throws Exception {
+        // Test from FEEDBACK: GET commands should break BEFORE valid/when clauses, not at @ row,col
+        // When a GET line is >99 chars it should split BEFORE 'valid' or 'when', not at the @ 10, comma
+        // Use maxLen=80 to force wrapping since normal 99 limit doesn't trigger it with typical indents
+        String input =
+            "FUNCTION test()\n" +
+            "  @ 10,20 say 'Drucker/Bildschirm/PDF (D/B/PDF) ' get Ausgabe Picture \"!\" valid Ausgabe $\"DBP\"\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT (long GET line) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [len=%d]: '%s'%n", i+1, inputLines[i].length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        // Use 80 char limit to force wrapping
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 80);
+
+        System.out.println("=== OUTPUT (maxLen=80) ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [len=%d]: '%s'%n", i+1, outputLines[i].length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Verify @ row,col is NOT split (no line ending with "@ 10,;")
+        boolean hasAtRowColSplit = false;
+        for (String line : outputLines) {
+            String trimmed = line.trim();
+            if (trimmed.matches("@\\s*\\d+,;")) {
+                hasAtRowColSplit = true;
+                System.out.println("FOUND BAD SPLIT at @ row,col: " + trimmed);
+                break;
+            }
+        }
+        assertFalse("@ row,col should NOT be split at the comma", hasAtRowColSplit);
+    }
+
+    @Test
     public void testCommaSemicolonContinuation() throws Exception {
         // Test from FEEDBACK: continuation after ,; should have same indent as other continuation lines
         // This is the case from fakt.prg#80

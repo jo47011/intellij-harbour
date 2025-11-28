@@ -368,6 +368,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
                     }
 
+                    // SPECIAL CASE: @ row,col commands split at comma should ALWAYS be joined
+                    // Pattern like "@ 10,;" is an incorrect split - the comma separates row,col coordinates
+                    if (!needsJoining && currentTrimmed.matches("@\\s*\\d+,;")) {
+                        log("Detected @ row,col split that needs joining: " + currentTrimmed);
+                        needsJoining = true;
+                    }
+
                     // If no lines are too long, don't join - keep as is
                     if (!needsJoining) {
                         log("Continuation lines are properly formatted, not joining");
@@ -2232,6 +2239,29 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int lastLogical = -1;
         boolean preferLogicalBreak = false;
 
+        // SPECIAL HANDLING: For GET commands, prefer breaking BEFORE valid/when clauses
+        // This keeps the GET clause together and puts validation on the next line
+        boolean preferGetClauseBreak = false;
+        String contentLowerForGet = content.toLowerCase();
+        if (contentLowerForGet.contains(" get ")) {
+            // Look for valid/when keywords as preferred break points
+            for (String clause : new String[]{" valid ", " when "}) {
+                int clausePos = contentLowerForGet.indexOf(clause);
+                if (clausePos > 0 && clausePos <= maxPos) {
+                    // Found a clause keyword - prefer breaking BEFORE it (at the space before)
+                    log("GET command: preferring break before '" + clause.trim() + "' at position " + clausePos);
+                    bestBreakPos = clausePos + 1; // Position after the leading space
+                    preferGetClauseBreak = true;
+                    break;
+                }
+            }
+        }
+
+        // If we have a preferred GET clause break, use it directly
+        if (preferGetClauseBreak) {
+            // Skip the regular break point search loop - we have our preferred break point
+            log("Using GET clause break at position " + bestBreakPos);
+        } else {
         for (int i = 0; i < content.length() && i <= maxPos; i++) {
             char c = content.charAt(i);
 
@@ -2285,9 +2315,16 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
                 // Track other break points (but don't immediately use them if we have a preferred logical break)
                 if (c == ',' && i < maxPos) {
-                    lastComma = i + 1;
-                    if (!preferLogicalBreak) {
-                        bestBreakPos = lastComma;
+                    // Skip commas in @ row,col commands - they separate screen coordinates
+                    String beforeComma = content.substring(0, i + 1).trim();
+                    if (beforeComma.matches("@\\s*\\d+,")) {
+                        // This is a @ row, comma - don't use as break point
+                        log("Skipping comma in @ row,col at position " + i);
+                    } else {
+                        lastComma = i + 1;
+                        if (!preferLogicalBreak) {
+                            bestBreakPos = lastComma;
+                        }
                     }
                 } else if (c == ' ' && i > 0 && i < maxPos) {
                     // Don't break right after := or ( or :
@@ -2387,15 +2424,19 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
             }
         }
+        } // End of else block for !preferGetClauseBreak
 
         // If we found a preferred logical break point (before parenthesis), use it
-        if (preferLogicalBreak && lastLogical > 0) {
-            bestBreakPos = lastLogical;
-            log("Using preferred logical operator break at " + lastLogical);
-        } else if (lastLogical > 0 && bestBreakPos < 0) {
-            // Use logical operator break if we have no other break point
-            bestBreakPos = lastLogical;
-            log("Using logical operator break as fallback at " + lastLogical);
+        // But NOT if we already have a preferred GET clause break
+        if (!preferGetClauseBreak) {
+            if (preferLogicalBreak && lastLogical > 0) {
+                bestBreakPos = lastLogical;
+                log("Using preferred logical operator break at " + lastLogical);
+            } else if (lastLogical > 0 && bestBreakPos < 0) {
+                // Use logical operator break if we have no other break point
+                bestBreakPos = lastLogical;
+                log("Using logical operator break as fallback at " + lastLogical);
+            }
         }
 
         // If we're in a string at max position, we need to break the string
@@ -2861,6 +2902,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
         }
 
+        // Special handling for GET commands: prefer to break BEFORE valid/when clauses
+        // This keeps the GET clause intact and puts validation logic on the next line
+        if (lowerContent.contains(" get ")) {
+            // Look for valid/when keywords as preferred break points
+            for (String clause : new String[]{" valid ", " when "}) {
+                int clausePos = lowerContent.indexOf(clause, startPos);
+                if (clausePos > startPos && clausePos <= endPos) {
+                    // Found a clause keyword - break BEFORE it (at the space before)
+                    log("Breaking GET command before '" + clause.trim() + "' clause at position " + clausePos);
+                    return clausePos + 1; // Return position after the leading space
+                }
+            }
+        }
+
         // Second pass: Look for good break points, starting from the end and working backwards
         for (int i = endPos; i > startPos; i--) {
             char c = content.charAt(i);
@@ -2876,7 +2931,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Good break points (in order of preference)
             if (c == ' ') return i + 1;        // Prefer spaces
-            if (c == ',') return i + 1;        // Then commas
+            // Skip commas in @ row,col commands - don't break there
+            if (c == ',') {
+                // Check if this comma is part of @ row,col pattern
+                String beforeComma = content.substring(0, i + 1).trim();
+                if (!beforeComma.matches(".*@\\s*\\d+,$")) {
+                    return i + 1; // Safe to break after this comma
+                }
+                // Otherwise skip this comma (it's in @ row,col)
+            }
             if (c == '+') return i + 1;        // Then plus operators
             if (c == ';') return i + 1;        // Then semicolons
             if (c == ')') return i + 1;        // Then closing parentheses
