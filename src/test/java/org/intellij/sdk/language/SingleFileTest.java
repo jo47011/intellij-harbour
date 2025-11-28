@@ -417,6 +417,70 @@ public class SingleFileTest {
     }
 
     @Test
+    public void testCommentAfterIfBlock() throws Exception {
+        // Test from FEEDBACK: comments after if/else should be indented inside the block
+        // This is the case from fakt.prg#527ff
+        String input =
+            "FUNCTION test()\n" +
+            "  // Posten gelöscht?\n" +
+            "  if ! AUFTRAG->geloescht $ \"N \"\n" +
+            "\n" +
+            "    // Auftragsbestand neu berechnen in Art.Stamm\n" +
+            "    changedAB:=.t.\n" +
+            "\n" +
+            "    if AUFPOST->(eof())\n" +
+            "      // neuer Satz gelöscht -> NOP\n" +
+            "    else\n" +
+            "\n" +
+            "      // alter Satz gelöscht\n" +
+            "      diffKVMenge:=AUFPOST->GeliefGes * (-1)\n" +
+            "    endif\n" +
+            "  endif\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Check that comments after if/else are correctly indented inside the block
+        // Line "// Auftragsbestand..." after "if" should have 4 spaces (inside the outer if block)
+        // Line "// neuer Satz..." after inner "if" should have 6 spaces (inside inner if block)
+        // Line "// alter Satz..." after "else" should have 6 spaces (inside else block)
+
+        for (int i = 0; i < outputLines.length; i++) {
+            String line = outputLines[i];
+            String trimmed = line.trim();
+            int indent = line.length() - trimmed.length();
+
+            if (trimmed.startsWith("// Auftragsbestand")) {
+                // This comment should be inside the outer if block (4 spaces)
+                assertEquals("Comment after outer if should have 4 spaces indent", 4, indent);
+            } else if (trimmed.startsWith("// neuer Satz")) {
+                // This comment should be inside the inner if block (6 spaces)
+                assertEquals("Comment after inner if should have 6 spaces indent", 6, indent);
+            } else if (trimmed.startsWith("// alter Satz")) {
+                // This comment should be inside the else block (6 spaces)
+                assertEquals("Comment after else should have 6 spaces indent", 6, indent);
+            }
+        }
+    }
+
+    @Test
     public void testCommaSemicolonContinuation() throws Exception {
         // Test from FEEDBACK: continuation after ,; should have same indent as other continuation lines
         // This is the case from fakt.prg#80

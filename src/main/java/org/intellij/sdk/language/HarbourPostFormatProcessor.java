@@ -726,6 +726,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
         // Store previous line's *actual* indentation for comment alignment
         String previousLineActualIndent = "";
+        // Track if previous line was a block-opening statement (if, else, for, etc.)
+        // Comments after block openers should be indented inside the block
+        boolean previousLineWasBlockOpener = false;
 
         // Track format exclusion
         boolean inFormatExclusion = false;
@@ -1015,13 +1018,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 boolean nextLineIsFunction = false;
                 if (i < lines.length - 1) {
                     String nextLine = lines[i + 1].trim();
-                    nextLineIsFunction = FUNCTION_START_PATTERN.matcher(nextLine).matches() || 
+                    nextLineIsFunction = FUNCTION_START_PATTERN.matcher(nextLine).matches() ||
                                        METHOD_IMPLEMENTATION_PATTERN.matcher(nextLine).matches();
                 }
-                
+
                 if (nextLineIsFunction) {
                     // Comments above functions should not be indented
                     newIndent = "";
+                } else if (previousLineWasBlockOpener) {
+                    // Comment after block opener (if, else, for, etc.) should be indented inside the block
+                    newIndent = previousLineActualIndent + " ".repeat(indentSize);
+                    log("Comment after block opener - adding indent: '" + newIndent + "'");
                 } else {
                     // Other comments should use previous line's indentation
                     newIndent = previousLineActualIndent;
@@ -1133,6 +1140,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 // so that continuation lines following this one get correct indentation
                 if (!isCommentOnlyLine && !isLineContinuation) {
                     previousLineActualIndent = newIndent;
+                    // Check if this line is a block-opening statement
+                    String lineLower = line.toLowerCase();
+                    previousLineWasBlockOpener =
+                        lineLower.startsWith("if ") || lineLower.equals("if") ||
+                        lineLower.startsWith("else") || lineLower.equals("else") ||
+                        lineLower.startsWith("elseif ") ||
+                        lineLower.startsWith("for ") ||
+                        lineLower.startsWith("while ") ||
+                        lineLower.startsWith("do while ") || lineLower.startsWith("do case") ||
+                        lineLower.startsWith("switch ") ||
+                        lineLower.startsWith("case ") || lineLower.equals("otherwise") ||
+                        lineLower.startsWith("begin ") ||
+                        lineLower.startsWith("try") || lineLower.startsWith("catch") ||
+                        lineLower.startsWith("recover") || lineLower.startsWith("finally");
                 }
                 continue;  // Skip all further processing for this line
             }
@@ -1228,6 +1249,21 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // This needs to be stored AFTER all special handling is done
             if (!isCommentOnlyLine && !isLineContinuation) {
                 previousLineActualIndent = newIndent;
+                // Check if this line is a block-opening statement
+                // Comments after these should be indented inside the block
+                String lineLower = line.toLowerCase();
+                previousLineWasBlockOpener =
+                    lineLower.startsWith("if ") || lineLower.equals("if") ||
+                    lineLower.startsWith("else") || lineLower.equals("else") ||
+                    lineLower.startsWith("elseif ") ||
+                    lineLower.startsWith("for ") ||
+                    lineLower.startsWith("while ") ||
+                    lineLower.startsWith("do while ") || lineLower.startsWith("do case") ||
+                    lineLower.startsWith("switch ") ||
+                    lineLower.startsWith("case ") || lineLower.equals("otherwise") ||
+                    lineLower.startsWith("begin ") ||
+                    lineLower.startsWith("try") || lineLower.startsWith("catch") ||
+                    lineLower.startsWith("recover") || lineLower.startsWith("finally");
             }
 
             // Check if this is part of a manual continuation block
