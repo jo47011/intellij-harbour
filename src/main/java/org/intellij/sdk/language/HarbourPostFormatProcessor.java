@@ -196,13 +196,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         log("Error applying text changes: " + e.getMessage());
                     }
                 });
-                // Expire start notification and show completion balloon
-                HarbourFormatActionListener.expireStartNotification();
+                // Show completion balloon (let start notification auto-expire)
                 showBalloon(project, "Formatting applied to " + file.getName(), NotificationType.INFORMATION);
             } else {
                 log("No text changes needed after formatting");
-                // Expire start notification and show completion balloon
-                HarbourFormatActionListener.expireStartNotification();
+                // Show completion balloon (let start notification auto-expire)
                 showBalloon(project, "No formatting changes needed", NotificationType.INFORMATION);
             }
         } catch (Exception e) {
