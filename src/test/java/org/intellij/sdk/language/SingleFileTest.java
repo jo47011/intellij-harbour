@@ -465,6 +465,60 @@ public class SingleFileTest {
     }
 
     @Test
+    public void testGetCommandBreaksBeforeWhenNotString() throws Exception {
+        // Test from FEEDBACK fakt.prg#5195: GET commands should break BEFORE when clause
+        // NOT inside the string in the Message() call
+        // Input line is 106 chars - exceeds 99
+        String input =
+            "FUNCTION test()\n" +
+            "  @ 20,1 get AUFAUS->Ansprech when Message(\"Ansprechpartner eingeben   @F12@=Kundendaten übernehmen\")\n" +
+            "RETURN\n";
+
+        System.out.println("=== INPUT (GET with long when clause) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [len=%d]: '%s'%n", i+1, inputLines[i].length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT (maxLen=99) ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [len=%d]: '%s'%n", i+1, outputLines[i].length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Verify string is NOT split (no lines with "+; at end followed by continued string)
+        boolean hasStringSplit = false;
+        for (int i = 0; i < outputLines.length - 1; i++) {
+            String line = outputLines[i].trim();
+            String nextLine = outputLines[i + 1].trim();
+            if (line.endsWith("\"+;") && nextLine.startsWith("\"")) {
+                hasStringSplit = true;
+                System.out.println("FOUND BAD STRING SPLIT: " + line + " -> " + nextLine);
+                break;
+            }
+        }
+        assertFalse("String should NOT be split - break before 'when' instead", hasStringSplit);
+
+        // Verify we have proper break: line ending with ; followed by line starting with when
+        boolean hasProperBreak = false;
+        for (int i = 0; i < outputLines.length - 1; i++) {
+            String line = outputLines[i].trim();
+            String nextLine = outputLines[i + 1].trim();
+            if (line.endsWith(";") && nextLine.toLowerCase().startsWith("when ")) {
+                hasProperBreak = true;
+                System.out.println("GOOD: Found proper break before 'when': " + line);
+                break;
+            }
+        }
+        assertTrue("Should break BEFORE 'when' clause", hasProperBreak);
+    }
+
+    @Test
     public void testCommentAfterIfBlock() throws Exception {
         // Test from FEEDBACK: comments after if/else should be indented inside the block
         // This is the case from fakt.prg#527ff
@@ -529,6 +583,57 @@ public class SingleFileTest {
     }
 
     @Test
+    public void testReturnInsideControlStructure() throws Exception {
+        // Test from FEEDBACK fakt.prg#940: RETURN inside if block should have normal indent
+        // Only RETURN at actual end of function should use returnIndent setting
+        // WITH continuation lines (like the actual fakt.prg)
+        String input =
+            "static FUNCTION BestKtoNach(oGet)\n" +
+            "  if condition .and.;\n" +  // if with continuation
+            "    more_condition\n" +     // continuation line
+            "return .f.\n" +             // Intentionally wrong indent - should become 4 spaces
+            "endif\n" +                  // Intentionally wrong indent - should become 2 spaces
+            "return .t.\n";              // End of function - should stay 0 spaces
+
+        System.out.println("=== INPUT (RETURN in control structure) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Check each line's indentation
+        for (int i = 0; i < outputLines.length; i++) {
+            String line = outputLines[i];
+            String trimmed = line.trim().toLowerCase();
+            int indent = line.length() - line.stripLeading().length();
+
+            if (trimmed.equals("return .f.")) {
+                // RETURN inside if block should be at level 2 (4 spaces)
+                assertEquals("RETURN inside if block should have 4 spaces indent", 4, indent);
+            } else if (trimmed.equals("endif")) {
+                // endif should be at level 1 (2 spaces)
+                assertEquals("endif should have 2 spaces indent", 2, indent);
+            } else if (trimmed.equals("return .t.")) {
+                // RETURN at end of function should use returnIndent (0 spaces by default)
+                assertEquals("RETURN at end of function should have 0 spaces indent", 0, indent);
+            }
+        }
+    }
+
+    @Test
     public void testReturnIndentAtEndOfFunction() throws Exception {
         // Test from FEEDBACK fakt.prg#873: RETURN at end of function should have no indent (0 spaces)
         // when configured with returnIndent=0 (which is the default)
@@ -565,6 +670,52 @@ public class SingleFileTest {
             if (trimmed.startsWith("return")) {
                 int indent = line.length() - line.stripLeading().length();
                 assertEquals("RETURN at end of function should have 0 indent (default setting)", 0, indent);
+                break;
+            }
+        }
+    }
+
+    @Test
+    public void testCommentInsideFunctionBody() throws Exception {
+        // Test from FEEDBACK fakt.prg#940: // comment at start of function body should be indented
+        String input =
+            "static FUNCTION BestKtoNach(oGet)\n" +
+            "\n" +
+            "// Bei Abrufauftrag und KV ist Eingabe Pflicht\n" +  // No indent - should become 2 spaces
+            "  if condition\n" +
+            "    return .f.\n" +
+            "  endif\n" +
+            "\n" +
+            "return .t.\n";
+
+        System.out.println("=== INPUT (comment in function body) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Find the comment line and check its indentation
+        for (int i = 0; i < outputLines.length; i++) {
+            String line = outputLines[i];
+            String trimmed = line.trim();
+            int indent = line.length() - line.stripLeading().length();
+
+            if (trimmed.startsWith("// Bei Abruf")) {
+                // Comment inside function body should be at level 1 (2 spaces)
+                assertEquals("Comment inside function body should have 2 spaces indent", 2, indent);
                 break;
             }
         }

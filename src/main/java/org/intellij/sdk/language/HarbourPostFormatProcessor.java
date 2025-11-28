@@ -1366,7 +1366,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                                 nextLineTrimmed.startsWith("+") ||
                                 (nextLineTrimmed.startsWith("-") && !nextLineTrimmed.startsWith("->?")) ||
                                 nextLineTrimmed.startsWith("*") ||
-                                nextLineTrimmed.startsWith("/")) {
+                                // Division continuation but NOT comments (// or /*)
+                                (nextLineTrimmed.startsWith("/") && !nextLineTrimmed.startsWith("//") && !nextLineTrimmed.startsWith("/*"))) {
                                 // This is a continuation, add semicolon
                                 if (!processedLine.trim().isEmpty() && !processedLine.trim().endsWith(";")) {
                                     processedLine = processedLine + ";";
