@@ -4,6 +4,7 @@ import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationGroup;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
+import com.intellij.notification.Notifications;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
@@ -55,22 +56,39 @@ public class HarbourFormatActionListener implements AnActionListener {
             // Get unique ID for message to help prevent coalescing
             long id = notificationCounter.incrementAndGet();
 
-            // Use the registered notification group from plugin.xml
-            NotificationGroup notificationGroup = NotificationGroupManager.getInstance()
-                .getNotificationGroup("Harbour Application");
+            Notification notification = null;
 
-            if (notificationGroup != null) {
-                // Create notification using the registered group (ensures BALLOON type)
-                Notification notification = notificationGroup.createNotification(
+            // Try using the registered notification group from plugin.xml
+            try {
+                NotificationGroup notificationGroup = NotificationGroupManager.getInstance()
+                    .getNotificationGroup("Harbour Application");
+
+                if (notificationGroup != null) {
+                    // Create notification using the registered group (ensures BALLOON type)
+                    notification = notificationGroup.createNotification(
+                        "Harbour",
+                        "Formatting " + file.getName() + "...",
+                        NotificationType.INFORMATION
+                    );
+                }
+            } catch (Exception e) {
+                // Fallback if group lookup fails
+            }
+
+            // Fallback: create notification directly if group lookup failed
+            if (notification == null) {
+                notification = new Notification(
+                    "Harbour Formatter",
                     "Harbour",
-                    "Formatting " + file.getName() + "... (#" + id + ")",
+                    "Formatting " + file.getName() + "...",
                     NotificationType.INFORMATION
                 );
-                // Store reference for later expiration
-                currentStartNotification = notification;
-                // Show the notification - balloon will appear
-                notification.notify(project);
             }
+
+            // Store reference for later expiration
+            currentStartNotification = notification;
+            // Show the notification - balloon will appear
+            Notifications.Bus.notify(notification, project);
         }
     }
 
