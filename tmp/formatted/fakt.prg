@@ -2615,7 +2615,7 @@ LOCAL s01
       // skip 1
       // Orgartnr:=AUFTRAG->ArtNr
       // replace AUFTRAG->ArtNr with "*"
-      // replace AUFTRAG->Preis WITH 0;
+      // replace AUFTRAG->Preis WITH 0
       // replace AUFTRAG->Komm1 WITH space(TAB_SPACES)+;
       // "(Art.Nr.: "+orgArtNr+" "+alltrim(str(AUFTRAG->Menge,12,0))+" "+alltrim(EINHEIT->Text)+")"
       // // FIXME: replace AUFTRAG->Rabattgr WITH ARTIKEL->RabattGr
@@ -3375,10 +3375,10 @@ LOCAL M_AufNr:=AUFAUS->AufNr
   // go top
   // do while ! AUFTRAG->(eof())
   // if AUFTRAG->ArtNr==M_ArtNr .and. aktAuftragsSatz<>AUFTRAG->(recno())
-  // bestellt+=(AUFTRAG->Menge);
-  // endif;
-  // skip;
-  // enddo;
+  // bestellt+=(AUFTRAG->Menge)
+  // endif
+  // skip
+  // enddo
   // go (aktAuftragsSatz)
 
 return bestellt
@@ -3769,7 +3769,7 @@ static function konsistenzLoesch()
   // restscreen(,,,,s01)
   // return .f.
   // endif
-  // restscreen(,,,,s01);
+  // restscreen(,,,,s01)
   // endif
 
   // endif
@@ -4712,8 +4712,8 @@ LOCAL isPhoenixAB, oneTime:=.t.
         // topLine:=if(len(HB_ATokens( text ,MY_CR+MY_LF)) > 8,5,15)
         // setcolor(COLWIN)
         // Fenster(topLine - 1,1,23,77,"Versand als")
-        // Message(ARROW_UP+ARROW_DOWN+"      @ESC@=Ende");
-        // MemoEdit(text,topLine,2,22,76, .f.,,100);
+        // Message(ARROW_UP+ARROW_DOWN+"      @ESC@=Ende")
+        // MemoEdit(text,topLine,2,22,76, .f.,,100)
         // setcolor(COLNOR)
 
       endif
@@ -4765,8 +4765,8 @@ LOCAL isPhoenixAB, oneTime:=.t.
       // addPauschale( getProperty("Miki.zoll.aufschlag.klein","") , Datei , .f.) // am Ende
       // changed:=.t.
       // // bei <= 1000 Euro mit Preis 0
-      // if gesamtWert <= val( getProperty("Miki.zoll.aufschlag.limit","1000") );
-      // REPLACE AUFTRAG->Preis WITH 0;
+      // if gesamtWert <= val( getProperty("Miki.zoll.aufschlag.limit","1000") )
+      // REPLACE AUFTRAG->Preis WITH 0
       // endif
     endif
 

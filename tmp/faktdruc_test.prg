@@ -232,8 +232,11 @@ LOCAL pdfInfo, objErr, paletten, frachtKosten:=0
             PS_Schmal(left(getTransField("AUFTRAG->komm2"),30))
         endif
         IF AUFTRAG->rabatt<>0.0 .and. wert <> 0
-          ? space(38)+if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein. "+;
-            "rabatt.sonder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
+          ?;
+            space(38)+if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein. "+;
+            "rabatt.sonder",LAND->Sprache,18),;
+            getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)),;
+            transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
           wert=wert-ROUND(wert*AUFTRAG->rabatt/100,2)
         endif
 
@@ -332,9 +335,8 @@ LOCAL pdfInfo, objErr, paletten, frachtKosten:=0
 
         /** Mengenrabatt */
         IF AUFTRAG->rabatt<>0.0
-          ?;
-            space(37)+;
-            if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.sonder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
+          ? space(37)+ if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.sond"+;
+            "er",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
 
           wert=wert-ROUND(wert*ROUND(AUFTRAG->rabatt,2)/100,2)
         endif
@@ -581,7 +583,7 @@ RETURN dateiName
 /* EOP Auftrag */
 
 function printGBSBefreiung(tempBefr)
-LOCAL Zeile:=0,line;
+LOCAL Zeile:=0,line
   // Hinweis Befreiung und GelangensBescheinigung
   if ! getUser():getCurrentPrintJob():lastLineEmpty
     ?
@@ -594,7 +596,7 @@ return zeile
 /** eof */
 
 static function printGBSWarning(tempWarns,tempGelangs)
-LOCAL Zeile:=0,line;
+LOCAL Zeile:=0,line
   /** Am Ende Hinweis, falls GelangensBescheinigung fehlt */
   if len(tempGelangs)>0
     ?
@@ -898,7 +900,7 @@ LOCAL pdfInfo, paletten, count:=1
       // endif
 
       // // Platz f�r GBS Warnung text?
-      // if ! gbsWarnDruck .and. len(tempGelangs)>0 .and. 
+      // if ! gbsWarnDruck .and. len(tempGelangs)>0 .and.
       // zeile < Laenge - UNT_RAND-len(tempGelangs)-len(tempWarns)-4
       // zeile += printGBSWarning(tempWarns,tempGelangs)
       // gbsWarnDruck:=.t.
@@ -946,8 +948,8 @@ if Ausgabe $ "DP/PDF_QUIET" .and. ! empty( dateiName )
   sendEmails( EMAIL_LIEFERSCHEIN , dateiName )
 endif
 
-// LS per Email an Herrn Weiland (23.12.2010);
-// if left(RECHAUS->KundNr,5) $ "10167|10363" .and. Ausgabe=="D";
+// LS per Email an Herrn Weiland (23.12.2010)
+// if left(RECHAUS->KundNr,5) $ "10167|10363" .and. Ausgabe=="D"
 // email(MAIN_EMAIL,;
 // "Lieferschein: "+alltrim(RECHAUS->RechNr)+" Kunde: "+KdOut(RECHAUS->KundNr),;
 // "Nicht K-Lager Lieferung an Honsel/VVG zur Pr�fung anbei" ,dateiName)
@@ -1124,8 +1126,11 @@ LOCAL zugferd, merke_basis:={"RABATT" => 0, "AUFSCHLAG" => 0}
         // Mengenrabatt
         IF RECHPOST->rabatt<>0.0
           rab=ROUND(wert*ROUND(RECHPOST->Rabatt,2)/100,2)
-          ? space(38)+if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.sond"+;
-            "er",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
+          ?;
+            space(38)+;
+            if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.sond"+;
+            "er",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)),;
+            transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
           wert=wert-rab
           summerab=summerab+rab
         endif
@@ -1168,8 +1173,12 @@ LOCAL zugferd, merke_basis:={"RABATT" => 0, "AUFSCHLAG" => 0}
           // Mengenrabatt
           IF RECHPOST->rabatt<>0.0
             rab=ROUND(wert*ROUND(RECHPOST->Rabatt,2)/100,2)
-            ? space(38)+if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.so"+;
-              "nder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
+            ?;
+              space(38)+;
+              if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.so"+;
+              "nder",LAND->Sprache,18),;
+              getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)),;
+              transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
             wert=wert-rab
             summerab=summerab+rab
           endif
@@ -2385,8 +2394,12 @@ LOCAL zugferd, merke_basis:={"RABATT" => 0, "AUFSCHLAG" => 0}
           // Mengenrabatt
           IF RECHPOST->rabatt<>0.0
             rab=ROUND(wert*ROUND(RECHPOST->Rabatt,2)/100,2)
-            ? space(38)+if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.so"+;
-              "nder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
+            ?;
+              space(38)+;
+              if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.so"+;
+              "nder",LAND->Sprache,18),;
+              getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)),;
+              transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
             wert=wert-rab
             summerab=summerab+rab
           else
@@ -2448,7 +2461,7 @@ LOCAL zugferd, merke_basis:={"RABATT" => 0, "AUFSCHLAG" => 0}
                   REPLACE KOSTENST->Menge WITH RECHPOST->Gelief*(-1)*AVPOST->Menge
                   if ARTIKEL->Schluessel="H"
                     REPLACE KOSTENST->Wert WITH RECHPOST->Gelief*ARTIKEL->KaPr/100;
-                      *(-1) *AVPOST->Menge
+                    *(-1) *AVPOST->Menge
                   else
                     REPLACE KOSTENST->Wert WITH RECHPOST->Gelief*ARTIKEL->KaPr *(-1) *AVPOST->Menge
                   endif
@@ -2519,8 +2532,12 @@ LOCAL zugferd, merke_basis:={"RABATT" => 0, "AUFSCHLAG" => 0}
           /** Mengenrabatt */
           IF RECHPOST->rabatt<>0.0
             rab=ROUND(wert*ROUND(RECHPOST->Rabatt,2)/100,2)
-            ? space(38)+if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.so"+;
-              "nder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
+            ?;
+              space(38)+;
+              if(RECHPOST->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.so"+;
+              "nder",LAND->Sprache,18),;
+              getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)),;
+              transStr(RECHPOST->rabatt,5,2)+"% -",transStr(rab,10,2)
             wert=wert-rab
             summerab=summerab+rab
           endif
@@ -4489,8 +4506,11 @@ LOCAL pdfInfo, i, frachtKosten:=0
 
         // Mengenrabatt
         IF AUFTRAG->rabatt<>0.0 .and. wert <> 0
-          ? space(38)+if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein. "+;
-            "rabatt.sonder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
+          ?;
+            space(38)+if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein. "+;
+            "rabatt.sonder",LAND->Sprache,18),;
+            getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)),;
+            transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
           wert=wert-ROUND(wert*AUFTRAG->rabatt/100,2)
         endif
 
@@ -4586,9 +4606,8 @@ LOCAL pdfInfo, i, frachtKosten:=0
 
         /** Mengenrabatt */
         IF AUFTRAG->rabatt<>0.0
-          ?;
-            space(38)+;
-            if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.sonder",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
+          ? space(38)+ if(AUFTRAG->RabattGr==SONDER_RABATT, getTranslation("allgemein.rabatt.sond"+;
+            "er",LAND->Sprache,18), getTranslation("allgemein.rabatt.menge",LAND->Sprache,18)), transStr(AUFTRAG->rabatt,5,2)+"% -",transStr(wert*AUFTRAG->Rabatt/100,10,2)
 
           wert=wert-ROUND(wert*ROUND(AUFTRAG->rabatt,2)/100,2)
         endif
@@ -5248,7 +5267,7 @@ return {} // disabled 25.5.2012
 
   // select Rechaus
   // aktRec:=recno()
-  // loca for RECHAUS->KundNr==KundNr .and. ! empty(RECHAUS->GelNr) .and. 
+  // loca for RECHAUS->KundNr==KundNr .and. ! empty(RECHAUS->GelNr) .and.
   // empty(RECHAUS->GelEing) .and. empty(RECHAUS->GelReNr)
   // if ! RECHAUS->(eof())
   // MWST_KZ->(dbseek("1")) // default mwst satz hardcoded :(
@@ -5272,7 +5291,7 @@ return {} // disabled 25.5.2012
 
 /* Liefert GelangensBescheinigungsText je nach Empf�nger und Mwst */
 function getGBSText(gWert)
-LOCAL tempText:=NIL;
+LOCAL tempText:=NIL
   // Berechne Gr��e GelangensBescheinigung Hinweise
   do case
   case upper(RECHAUS->EG)=="D"
@@ -5300,4 +5319,5 @@ LOCAL tempText:=NIL;
 
 return tempText
 /** eof */
+
 

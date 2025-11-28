@@ -417,7 +417,7 @@ LOCAL oColumn,i,sz_chr,sz_asci , text, tempVal, aktRec
     // // AB-Posten vorbereiten f�r Auswahl
     // select liefpost
     // set rela to LIEFPOST->LSNr into LIEFAUS
-    // index on LIEFPOST->ArtNr+LIEFPOST->LSNr tag TEMP_INDEX TEMPORARY ADDITIVE for 
+    // index on LIEFPOST->ArtNr+LIEFPOST->LSNr tag TEMP_INDEX TEMPORARY ADDITIVE for
     // len(alltrim(LIEFPOST->Artnr))>FRACHT_LAENGE .and. LIEFAUS->Erledigt<>"J"
 
     // // raus am 17.4.2013, da Umgebung jetzt auch relas speichert
@@ -731,8 +731,8 @@ LOCAL oColumn,i,sz_chr,sz_asci , text, tempVal, aktRec
     /*** Stunden, Zeit AV ***/
   CASE "STDNR" $ upper(oGet:Name) .or. upper(oGet:Name)=="M->NACH";
     .or.;
-      upper(oGet:Name)=="M->MASCH";
-      .or. upper(oGet:Name)=="MASCHNR" .or. upper(oGet:Name)=="NKPOST->MASCHNR"
+    upper(oGet:Name)=="M->MASCH";
+    .or. upper(oGet:Name)=="MASCHNR" .or. upper(oGet:Name)=="NKPOST->MASCHNR"
     open("Maschine")
     oBrowse:nLeft:=0
     oBrowse:nRight:=maxcol()
@@ -3491,8 +3491,10 @@ return
 
   // Toggle inline display of missing numbers (generic for any database/field)
   // Parameters: oBrowse, cDbAlias, cNrField, cField1, cField2, aFilterPrefixes, oGet, cProg
-// NEW APPROACH: Simplified without STATIC caching issues
-static function toggleMissingNumbers(oBrowse, cDbAlias, cNrField, cField1, cField2, aFilterPrefixes, oGet, cProg);
+  // NEW APPROACH: Simplified without STATIC caching issues
+  static;
+    function;
+    toggleMissingNumbers(oBrowse, cDbAlias, cNrField, cField1, cField2, aFilterPrefixes, oGet, cProg)
   // Only keep session cache for performance
   STATIC cachedMissingNumbers:=NIL
   STATIC cachedDbAlias:=""

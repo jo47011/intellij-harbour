@@ -15,7 +15,7 @@
 PROCEDURE KStornoRechnung
 LOCAL M_Rechnr:=".",StRechnr
 LOCAL Titel:="K-Lager Rechnung stornieren"
-LOCAL GetList:={},okay,gedruckt:=.f.;
+LOCAL GetList:={},okay,gedruckt:=.f.
   // LOCAL Temp_Datei:=TEMP + "\temp"+getUser():getLongID()+".dbf"
 LOCAL Temp_Datei:=getTempDateiName( db_info("RechAus") ) + ".dbf"
 LOCAL stornoMenge,teilLieferung
@@ -194,7 +194,7 @@ LOCAL stornoMenge,teilLieferung
       endif
 
     else // RECHPOST->gelief > 0
-      // pos. Menge in Storno Rechnung kann nur bei Inv.Rechnung passieren (KLager-Inventurauftrag);
+      // pos. Menge in Storno Rechnung kann nur bei Inv.Rechnung passieren (KLager-Inventurauftrag)
       // -> Alle Konsig.db Eintr�ge der Inv.AB l�schen
       rec_lock(0)
       delete
@@ -244,7 +244,7 @@ LOCAL stornoMenge,teilLieferung
   REPLACE KOPIE->Storno_Nr with KOPIE->RechNr
   REPLACE KOPIE->RechNr WITH StRechNr
   REPLACE KOPIE->ReaDat WITH getUser():date
-  replace KOPIE->Aufart WITH "S";
+  replace KOPIE->Aufart WITH "S"
   // replace KOPIE->gedruckt WITH " "
   replace KOPIE->SumNr WITH ""
   replace KOPIE->Netto WITH RECHAUS->Netto * (-1)
@@ -2325,7 +2325,7 @@ LOCAL DateiName, merkRecno
   // // altd()
   // // endif
 
-  // skip;
+  // skip
   // enddo
 
   replace AUFAUS->erledigt with "J"
@@ -2874,5 +2874,6 @@ static function konsistenzLoesch()
 
 return .t.
 /** eof */
+
 
 

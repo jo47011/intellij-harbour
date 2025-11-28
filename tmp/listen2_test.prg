@@ -224,7 +224,7 @@ LOCAL text
 
         if upper(DATA->PE)="H"
           betr:=round((DATA->Menge-DATA->GeliefGes)*DATA->Preis/100,2);
-            * ROUND(1-DATA->Rabatt/100,2)
+          * ROUND(1-DATA->Rabatt/100,2)
         else
           betr:=round((DATA->Menge-DATA->GeliefGes)*DATA->Preis,2) * ROUND(1-DATA->Rabatt/100,2)
         endif
@@ -1031,7 +1031,7 @@ LOCAL wasLocked
 
         // seit 12.3.2014 ohne Fertig.Meldung
         // Gutschrift bei extern kann ignoriert werden, laut H. Weiland
-        // elseif WARAUS_MATAUSG2 $ WARAUS->Programm .or. WARAUS_INNERNR $ WARAUS->Programm 
+        // elseif WARAUS_MATAUSG2 $ WARAUS->Programm .or. WARAUS_INNERNR $ WARAUS->Programm
         // .or. WARAUS_FERTIGMELD_ALT $ WARAUS->Programm .or. WARAUS_AUSGANG_ALT $ WARAUS->Programm
 
         // extern verkauft
@@ -4427,7 +4427,7 @@ LOCAL Bed:={ || left(ARTIKEL->KonsigKdNr,5) == "10167" .and. getArtikelArt()=="B
 
     // seit 12.3.2014 ohne Fertig.Meldung
     // Gutschrift bei extern kann ignoriert werden, laut H. Weiland
-    // elseif WARAUS_MATAUSG2 $ WARAUS->Programm .or. WARAUS_INNERNR $ WARAUS->Programm 
+    // elseif WARAUS_MATAUSG2 $ WARAUS->Programm .or. WARAUS_INNERNR $ WARAUS->Programm
     // .or. WARAUS_FERTIGMELD_ALT $ WARAUS->Programm .or. WARAUS_AUSGANG_ALT $ WARAUS->Programm
 
     // extern verkauft
@@ -4782,4 +4782,5 @@ LOCAL date
   endif
 return left(result+space(12),12)
 /** eof */
+
 

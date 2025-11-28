@@ -1537,7 +1537,7 @@ return .t.
 
 /** Rechnet Menge und Preis anhand des ME_Faktors des Artikels um */
 static function toggleValues()
-LOCAL aktRec:=BESTTEMP->(recno());
+LOCAL aktRec:=BESTTEMP->(recno())
   // nur wenn 2 MEs im Artikel hinterlegt
   if ! empty( ARTIKEL->Me2 )
 
@@ -1636,4 +1636,5 @@ LOCAL objErr
   replace BESTTEMP->Historie with "J"
 return .t.
 /**eof */
+
 
