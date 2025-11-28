@@ -17,3 +17,5 @@ native
 wrapper
 .tmp
 /log/
+/tmp/
+*.c

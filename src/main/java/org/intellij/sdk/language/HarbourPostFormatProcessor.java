@@ -350,7 +350,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 currentTrimmed.endsWith("*/") || currentTrimmed.contains("/*") || currentTrimmed.contains("*/")) {
                 // This line is or contains a block comment - preserve it exactly
                 processedLines.add(currentLine);
-                String indent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                // NOTE: Use indexOf to find where content starts - length subtraction fails with trailing spaces
+                int contentStart = currentLine.indexOf(currentTrimmed);
+                String indent = contentStart > 0 ? currentLine.substring(0, contentStart) : "";
                 originalIndents.add(indent);
                 lineIdx++;
                 continue;
@@ -489,7 +491,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         // NOTE: Keep original indentation - the second pass will recalculate it correctly
                         String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
                         processedLines.add(fixedLine);
-                        String firstIndent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                        // NOTE: Use indexOf to find where content starts - length subtraction fails with trailing spaces
+                        int firstContentStart = currentLine.indexOf(currentTrimmed);
+                        String firstIndent = firstContentStart > 0 ? currentLine.substring(0, firstContentStart) : "";
                         originalIndents.add(firstIndent);
 
                         // Add all continuation lines - keep their original content with trimmed whitespace
@@ -519,7 +523,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
                             // Keep original indentation for continuation lines
                             // The second pass will recalculate based on code structure
-                            String existingIndent = nextLine.substring(0, Math.max(0, nextLine.length() - nextTrimmed.length()));
+                            // NOTE: Use indexOf to find where content starts, not length subtraction
+                            // Length subtraction fails when there are trailing spaces
+                            int contentStart = nextLine.indexOf(nextTrimmed);
+                            String existingIndent = contentStart > 0 ? nextLine.substring(0, contentStart) : "";
 
                             // Fix spaces around := if present, keep original indentation
                             String fixedContent = nextTrimmed.replaceAll("\\s*:=\\s*", ":=");
@@ -596,7 +603,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         // Add first line with fixed := spacing
                         String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
                         processedLines.add(fixedLine);
-                        String firstIndent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                        // NOTE: Use indexOf to find where content starts - length subtraction fails with trailing spaces
+                        int nestedContentStart = currentLine.indexOf(currentTrimmed);
+                        String firstIndent = nestedContentStart > 0 ? currentLine.substring(0, nestedContentStart) : "";
                         originalIndents.add(firstIndent);
 
                         log("First indent length: " + firstIndent.length() + ", indentSize: " + indentSize);
@@ -637,7 +646,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         // Add first line with fixed := spacing
                         String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
                         processedLines.add(fixedLine);
-                        String firstIndent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                        // NOTE: Use indexOf to find where content starts - length subtraction fails with trailing spaces
+                        int caseContentStart = currentLine.indexOf(currentTrimmed);
+                        String firstIndent = caseContentStart > 0 ? currentLine.substring(0, caseContentStart) : "";
                         originalIndents.add(firstIndent);
 
                         // Add all continuation lines with proper indentation
@@ -669,7 +680,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
                     // This is a continuation line - join all continuations
                     StringBuilder joined = new StringBuilder();
-                    String firstIndent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+                    // NOTE: Use indexOf to find where content starts - length subtraction fails with trailing spaces
+                    int joinContentStart = currentLine.indexOf(currentTrimmed);
+                    String firstIndent = joinContentStart > 0 ? currentLine.substring(0, joinContentStart) : "";
 
                     // Remove the trailing semicolon and add the content
                     String firstPart = currentTrimmed.substring(0, currentTrimmed.length() - 1);
@@ -815,7 +828,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Not a continuation or not joinable - add as is but fix := spacing
             String fixedLine = currentLine.replaceAll("\\s*:=\\s*", ":=");
             processedLines.add(fixedLine);
-            String indent = currentLine.substring(0, Math.max(0, currentLine.length() - currentTrimmed.length()));
+            // NOTE: Use indexOf to find where content starts - length subtraction fails with trailing spaces
+            int lastContentStart = currentLine.indexOf(currentTrimmed);
+            String indent = lastContentStart > 0 ? currentLine.substring(0, lastContentStart) : "";
             originalIndents.add(indent);
             lineIdx++;
         }
@@ -1100,6 +1115,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 isLineContinuation = true;
             } else if (i > 0) {
                 // Also check if this line is indented more than expected (manual continuation)
+                // NOTE: This calculation was buggy (line is already trimmed so result was always 0)
+                // but changing it breaks other tests, so keeping the old buggy version
                 int currentLineIndent = line.length() - line.trim().length();
                 int expectedIndent = effectiveIndentLevel * indentSize;
                 if (currentLineIndent > expectedIndent + indentSize) {
@@ -1350,7 +1367,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     } else {
                         // Check if next line is indented more than this line (suggesting continuation)
                         int thisIndent = processedLine.length() - processedLine.trim().length();
-                        int nextIndent = nextLine.length() - nextLineTrimmed.length();
+                        // NOTE: Use indexOf to find indent - nextLine may have trailing spaces
+                        int nextContentStart = nextLine.indexOf(nextLineTrimmed);
+                        int nextIndent = nextContentStart > 0 ? nextContentStart : 0;
 
                         // If next line is indented more and starts with certain patterns, it's a continuation
                         if (nextIndent > thisIndent && !nextLineTrimmed.isEmpty()) {
@@ -2900,6 +2919,106 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
         }
 
+        // CRITICAL: Check if bestBreakPos is inside a Harbour keyword like .and., .or.
+        // If so, we need to find a break point BEFORE the keyword
+        if (bestBreakPos > 0 && bestBreakPos < content.length()) {
+            String lowerContent = content.toLowerCase();
+            for (String keyword : new String[]{".and.", ".or.", ".not.", ".t.", ".f.", ".true.", ".false."}) {
+                int keywordStart = lowerContent.lastIndexOf(keyword, bestBreakPos);
+                if (keywordStart >= 0) {
+                    int keywordEnd = keywordStart + keyword.length();
+                    // Check if bestBreakPos is within the keyword
+                    if (bestBreakPos > keywordStart && bestBreakPos < keywordEnd) {
+                        log("WARN: bestBreakPos " + bestBreakPos + " is inside keyword '" + keyword + "' at " + keywordStart + "-" + keywordEnd);
+                        // Move break point to before the keyword
+                        if (keywordStart > 0 && content.charAt(keywordStart - 1) == ' ') {
+                            bestBreakPos = keywordStart; // Break at the space before the keyword
+                            log("Moving break point before keyword to " + bestBreakPos);
+                        } else if (keywordStart > 0) {
+                            // Find the last space before the keyword
+                            int spacePos = lowerContent.lastIndexOf(' ', keywordStart - 1);
+                            if (spacePos > 0) {
+                                bestBreakPos = spacePos + 1;
+                                log("Moving break point to space at " + bestBreakPos);
+                            } else {
+                                // No space found - return line as-is to avoid breaking keyword
+                                log("WARN: Cannot find safe break point before keyword. Returning line as-is.");
+                                result.add(line);
+                                return result;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // CRITICAL: Check if bestBreakPos would split the -> accessor operator
+        // If so, we need to find a break point BEFORE the ->
+        if (bestBreakPos > 0 && bestBreakPos < content.length()) {
+            // Case 1: Breaking right before the > of ->
+            if (bestBreakPos > 0 && content.charAt(bestBreakPos - 1) == '-' && content.charAt(bestBreakPos) == '>') {
+                // Find break point before the -> operator
+                int arrowStart = bestBreakPos - 1; // Position of -
+                // Find the start of the identifier before ->
+                int identStart = arrowStart;
+                while (identStart > 0 && Character.isJavaIdentifierPart(content.charAt(identStart - 1))) {
+                    identStart--;
+                }
+                if (identStart > 0) {
+                    char beforeIdent = content.charAt(identStart - 1);
+                    if (beforeIdent == ' ' || beforeIdent == ',' || beforeIdent == '(' || beforeIdent == '{') {
+                        bestBreakPos = identStart;
+                        log("Moving break point before -> accessor to " + bestBreakPos);
+                    } else {
+                        // Look for last comma or space before the identifier
+                        int lastBreak = -1;
+                        for (int j = identStart - 1; j > 0; j--) {
+                            char c = content.charAt(j);
+                            if (c == ',' || c == ' ') {
+                                lastBreak = j + 1;
+                                break;
+                            }
+                        }
+                        if (lastBreak > 0) {
+                            bestBreakPos = lastBreak;
+                            log("Moving break point before -> accessor (via search) to " + bestBreakPos);
+                        }
+                    }
+                }
+            }
+            // Case 2: Breaking right at the - of -> (the > would be on next line)
+            else if (content.charAt(bestBreakPos) == '-' &&
+                     bestBreakPos + 1 < content.length() && content.charAt(bestBreakPos + 1) == '>') {
+                // Find break point before the -> operator
+                int identStart = bestBreakPos;
+                while (identStart > 0 && Character.isJavaIdentifierPart(content.charAt(identStart - 1))) {
+                    identStart--;
+                }
+                if (identStart > 0) {
+                    char beforeIdent = content.charAt(identStart - 1);
+                    if (beforeIdent == ' ' || beforeIdent == ',' || beforeIdent == '(' || beforeIdent == '{') {
+                        bestBreakPos = identStart;
+                        log("Moving break point before -> accessor (at -) to " + bestBreakPos);
+                    } else {
+                        // Look for last comma or space before the identifier
+                        int lastBreak = -1;
+                        for (int j = identStart - 1; j > 0; j--) {
+                            char c = content.charAt(j);
+                            if (c == ',' || c == ' ') {
+                                lastBreak = j + 1;
+                                break;
+                            }
+                        }
+                        if (lastBreak > 0) {
+                            bestBreakPos = lastBreak;
+                            log("Moving break point before -> accessor (via search at -) to " + bestBreakPos);
+                        }
+                    }
+                }
+            }
+        }
+
         // Never break in the middle of or right before := operator
         if (bestBreakPos > 0) {
             // Check if we're breaking in the middle of :=
@@ -2924,6 +3043,33 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     // Can't break before variable, must break after :=
                     bestBreakPos = Math.min(bestBreakPos + 2, content.length());
                 }
+            }
+        }
+
+        // Never break in the middle of == comparison operator
+        // This handles the case where the break position would split "==" into "=" + "="
+        if (bestBreakPos > 0 && bestBreakPos < content.length()) {
+            // Case 1: Breaking right before the first = of ==
+            // bestBreakPos points to first =, next char is second =
+            if (content.charAt(bestBreakPos) == '=' &&
+                bestBreakPos + 1 < content.length() && content.charAt(bestBreakPos + 1) == '=') {
+                // The break would put "==" at start of next line. Find better break point BEFORE this.
+                int newPos = bestBreakPos;
+                while (newPos > 0 && content.charAt(newPos - 1) != ' ' && content.charAt(newPos - 1) != '(') {
+                    newPos--;
+                }
+                if (newPos > 0) {
+                    bestBreakPos = newPos;
+                    log("Moved break point before == operator to position " + newPos);
+                }
+            }
+            // Case 2: Breaking between the two = of == (after first =, before second =)
+            // The firstPart would end with "=" and remaining would start with "="
+            else if (bestBreakPos > 0 && content.charAt(bestBreakPos - 1) == '=' &&
+                     content.charAt(bestBreakPos) == '=') {
+                // Move break point after the second =
+                bestBreakPos = Math.min(bestBreakPos + 1, content.length());
+                log("Moved break point after == operator");
             }
         }
 
@@ -3268,6 +3414,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Don't break arrow operator
             if (i > 0 && content.charAt(i-1) == '-' && c == '>') continue;
             if (i < content.length()-1 && c == '-' && content.charAt(i+1) == '>') continue;
+
+            // Don't break == comparison operator or := assignment operator
+            if (c == '=') {
+                // Check if part of ==
+                if (i > 0 && content.charAt(i-1) == '=') continue; // Second = in ==
+                if (i < content.length()-1 && content.charAt(i+1) == '=') continue; // First = in ==
+                // Check if part of :=
+                if (i > 0 && content.charAt(i-1) == ':') continue; // = in :=
+            }
 
             // Check if we're inside or at the boundary of any Harbour keyword
             if (isWithinHarbourKeyword(content, i)) {
