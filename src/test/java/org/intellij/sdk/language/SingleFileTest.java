@@ -529,6 +529,48 @@ public class SingleFileTest {
     }
 
     @Test
+    public void testReturnIndentAtEndOfFunction() throws Exception {
+        // Test from FEEDBACK fakt.prg#873: RETURN at end of function should have no indent (0 spaces)
+        // when configured with returnIndent=0 (which is the default)
+        String input =
+            "FUNCTION SoRabatt_nach(oGet)\n" +
+            "  if oGet:changed\n" +
+            "    Auf_Kopf_Disp()\n" +
+            "  endif\n" +
+            "\n" +
+            "  RETURN(.t.)\n";
+
+        System.out.println("=== INPUT (RETURN indent test) ===");
+        String[] inputLines = input.split("\n", -1);
+        for (int i = 0; i < inputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                inputLines[i].length() - inputLines[i].stripLeading().length(), inputLines[i]);
+        }
+        System.out.println("=============");
+
+        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
+        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
+
+        System.out.println("=== OUTPUT ===");
+        String[] outputLines = formatted.split("\n", -1);
+        for (int i = 0; i < outputLines.length; i++) {
+            System.out.printf("Line %d [%d spaces]: '%s'%n", i+1,
+                outputLines[i].length() - outputLines[i].stripLeading().length(), outputLines[i]);
+        }
+        System.out.println("==============");
+
+        // Find the RETURN line and check its indentation
+        for (String line : outputLines) {
+            String trimmed = line.trim().toLowerCase();
+            if (trimmed.startsWith("return")) {
+                int indent = line.length() - line.stripLeading().length();
+                assertEquals("RETURN at end of function should have 0 indent (default setting)", 0, indent);
+                break;
+            }
+        }
+    }
+
+    @Test
     public void testCommaSemicolonContinuation() throws Exception {
         // Test from FEEDBACK: continuation after ,; should have same indent as other continuation lines
         // This is the case from fakt.prg#80

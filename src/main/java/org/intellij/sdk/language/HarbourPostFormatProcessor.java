@@ -28,7 +28,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     private static final Pattern FUNCTION_START_PATTERN =
             Pattern.compile("^\\s*((?:STATIC\\s+)?(?:FUNCTION|PROCEDURE)\\s+\\w+\\s*\\(?.*)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern FUNCTION_END_PATTERN =
-            Pattern.compile("^\\s*RETURN(?:\\s+.*)?$", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("^\\s*RETURN(?:\\s*\\(.*\\)|\\s+.*)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern LOCAL_DECLARATION_PATTERN =
             Pattern.compile("^\\s*LOCAL\\s+.*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern DATA_DECLARATION_PATTERN =
