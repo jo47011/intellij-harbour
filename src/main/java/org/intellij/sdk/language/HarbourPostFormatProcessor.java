@@ -1,5 +1,9 @@
 package org.intellij.sdk.language;
 
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationGroup;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
@@ -140,6 +144,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         log("Post-processing text in Harbour file: " + file.getName());
+
+        // Note: Cannot show balloon at START because PostFormatProcessor runs in write action
+        // and UI updates are queued until write action completes. Only show at END.
+
         HarbourTokenTypeExtension.setFormattingInProgress(true);
 
         try {
@@ -188,8 +196,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         log("Error applying text changes: " + e.getMessage());
                     }
                 });
+                // Expire start notification and show completion balloon
+                HarbourFormatActionListener.expireStartNotification();
+                showBalloon(project, "Formatting applied to " + file.getName(), NotificationType.INFORMATION);
             } else {
                 log("No text changes needed after formatting");
+                // Expire start notification and show completion balloon
+                HarbourFormatActionListener.expireStartNotification();
+                showBalloon(project, "No formatting changes needed", NotificationType.INFORMATION);
             }
         } catch (Exception e) {
             log("Exception during formatting: " + e.getMessage());
@@ -203,6 +217,33 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         return textRange;
+    }
+
+    /**
+     * Show a balloon notification in the lower right corner for user feedback.
+     */
+    private void showBalloon(Project project, String message, NotificationType type) {
+        if (project == null) return;
+        try {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                // Use the registered notification group from plugin.xml
+                NotificationGroup notificationGroup = NotificationGroupManager.getInstance()
+                    .getNotificationGroup("Harbour Application");
+
+                if (notificationGroup != null) {
+                    // Create notification using the registered group (ensures BALLOON type)
+                    Notification notification = notificationGroup.createNotification(
+                        "Harbour",
+                        message,
+                        type
+                    );
+                    // Show the notification - balloon will appear
+                    notification.notify(project);
+                }
+            });
+        } catch (Exception e) {
+            // Silently ignore - balloon feedback is optional
+        }
     }
 
     /**
@@ -373,6 +414,66 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     if (!needsJoining && currentTrimmed.matches("@\\s*\\d+,;")) {
                         log("Detected @ row,col split that needs joining: " + currentTrimmed);
                         needsJoining = true;
+                    }
+
+                    // SPECIAL CASE: Lines that break inside a function call (unbalanced parentheses)
+                    // should be joined and re-broken at a better position (like a + operator)
+                    // Check if the continuation marker is inside parentheses
+                    if (!needsJoining) {
+                        int parenDepth = 0;
+                        boolean inString = false;
+                        char stringChar = 0;
+                        for (int k = 0; k < currentTrimmed.length() - 1; k++) { // -1 to exclude the ;
+                            char c = currentTrimmed.charAt(k);
+                            // Track string state to ignore parens inside strings
+                            if ((c == '"' || c == '\'') && (k == 0 || currentTrimmed.charAt(k-1) != '\\')) {
+                                if (!inString) {
+                                    inString = true;
+                                    stringChar = c;
+                                } else if (c == stringChar) {
+                                    inString = false;
+                                }
+                            }
+                            if (!inString) {
+                                if (c == '(') parenDepth++;
+                                else if (c == ')') parenDepth--;
+                            }
+                        }
+                        // If we're inside parentheses when we hit the ;, check if it's a problematic break
+                        // A problematic break is when the continuation line starts with a bare value
+                        // like "2),.f.)" - indicating the comma-value pair was split
+                        // But breaking after a complete parameter like ,"Artikel",; is fine
+                        if (parenDepth > 0) {
+                            // Check what character is before the ; (excluding whitespace)
+                            String beforeSemi = currentTrimmed.substring(0, currentTrimmed.length() - 1).trim();
+                            char lastChar = beforeSemi.isEmpty() ? ' ' : beforeSemi.charAt(beforeSemi.length() - 1);
+
+                            // Check if the NEXT line (continuation) starts with a bare value after optional whitespace
+                            // This indicates a split function argument like: str(a,9,; followed by 2)
+                            // Look ahead to the next line
+                            boolean nextLineStartsWithBareValue = false;
+                            if (lineIdx + 1 < lines.length) {
+                                String nextLineTrimmed = lines[lineIdx + 1].trim();
+                                // A bare value continuation typically starts with a digit, letter, or closing paren
+                                // NOT with a comma, string quote, or opening paren
+                                if (!nextLineTrimmed.isEmpty()) {
+                                    char nextFirst = nextLineTrimmed.charAt(0);
+                                    // If next line starts with a digit (like "2)") this is a split argument
+                                    if (Character.isDigit(nextFirst) ||
+                                        (Character.isLetter(nextFirst) && !nextLineTrimmed.startsWith("\"") && !nextLineTrimmed.startsWith("'"))) {
+                                        nextLineStartsWithBareValue = true;
+                                    }
+                                }
+                            }
+
+                            // Only mark as needing joining if:
+                            // 1. Last char before ; is a comma (split at comma), AND
+                            // 2. Next line starts with a bare value (not a new complete parameter)
+                            if (lastChar == ',' && nextLineStartsWithBareValue) {
+                                log("Detected split function argument (parenDepth=" + parenDepth + ", lastChar='" + lastChar + "'): " + currentTrimmed);
+                                needsJoining = true;
+                            }
+                        }
                     }
 
                     // If no lines are too long, don't join - keep as is
@@ -1029,6 +1130,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     // Comment after block opener (if, else, for, etc.) should be indented inside the block
                     newIndent = previousLineActualIndent + " ".repeat(indentSize);
                     log("Comment after block opener - adding indent: '" + newIndent + "'");
+                } else if (inFunctionBody) {
+                    // Comments inside function body should use current indent level
+                    // This ensures comments at start of function get proper indentation
+                    newIndent = " ".repeat(indentLevel * indentSize);
                 } else {
                     // Other comments should use previous line's indentation
                     newIndent = previousLineActualIndent;
@@ -1112,6 +1217,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             */
 
             // Check if this line ends with manual continuation
+            // BUT only preserve if the line fits within the limit
             if (checkTrimmed.endsWith(";")) {
                 String checkLower = checkTrimmed.toLowerCase();
                 if (checkLower.endsWith(".or.;") || checkLower.endsWith(".and.;") ||
@@ -1119,15 +1225,27 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     checkLower.endsWith("*;") || checkLower.endsWith("/;") ||
                     checkLower.endsWith(",;") || checkLower.endsWith("$;") ||
                     checkLower.endsWith("{;")) {  // array/block start continuation
-                    shouldPreserveCompletely = true;
-                    // log("PRESERVING manual continuation line ending with: " + checkTrimmed.substring(Math.max(0, checkTrimmed.length() - 20)));
+                    // Only preserve if line fits within limit, otherwise we'll re-wrap
+                    if (lineBreakPosition <= 0 || processedLine.length() <= lineBreakPosition) {
+                        shouldPreserveCompletely = true;
+                    }
                 }
             }
 
             // Also preserve if this is part of a continuation block
+            // BUT only if the line is not too long - if too long, we need to re-wrap it
             if (prevLineHasContinuation || isLineContinuation) {
-                shouldPreserveCompletely = true;
-                log("Preserving continuation block line");
+                // Check if the continuation line is too long and needs re-wrapping
+                // BUT only override shouldPreserveCompletely if it wasn't already set
+                if (!shouldPreserveCompletely) {
+                    if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition) {
+                        // Line is too long - don't preserve, let it be re-wrapped
+                        log("Continuation line too long (" + processedLine.length() + " > " + lineBreakPosition + "), will re-wrap");
+                    } else {
+                        shouldPreserveCompletely = true;
+                        log("Preserving continuation block line");
+                    }
+                }
             }
 
             if (shouldPreserveCompletely) {
@@ -1154,6 +1272,20 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         lineLower.startsWith("begin ") ||
                         lineLower.startsWith("try") || lineLower.startsWith("catch") ||
                         lineLower.startsWith("recover") || lineLower.startsWith("finally");
+
+                    // CRITICAL: Also increment indentLevel for block-opening statements
+                    // even when preserving the line (e.g., "if condition .and.;" with continuation)
+                    // This ensures RETURN/endif inside the block get correct indentation
+                    if (lineLower.startsWith("if ") ||
+                        lineLower.startsWith("while ") ||
+                        lineLower.startsWith("for ") ||
+                        (lineLower.startsWith("do ") && !lineLower.startsWith("do case"))) {
+                        indentLevel++;
+                    } else if (lineLower.startsWith("do case")) {
+                        indentLevel++;
+                    } else if (lineLower.startsWith("switch ")) {
+                        indentLevel++;
+                    }
                 }
                 continue;  // Skip all further processing for this line
             }
@@ -1171,22 +1303,35 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (!processedLine.trim().endsWith(";") && i < lines.length - 1) {
                 String trimmed = processedLine.trim().toLowerCase();
 
-                // Never add semicolon after control structure keywords
+                // Never add semicolon after control structure keywords (start OR end)
+                // Also include loop control statements (cont, continue, exit, loop)
                 if (trimmed.startsWith("if ") || trimmed.equals("if") ||
                     trimmed.startsWith("else") || trimmed.equals("else") ||
                     trimmed.startsWith("elseif ") ||
+                    trimmed.startsWith("endif") ||    // block end
                     trimmed.startsWith("for ") ||
+                    trimmed.startsWith("next") ||     // block end
                     trimmed.startsWith("while ") ||
+                    trimmed.startsWith("enddo") ||    // block end
                     trimmed.startsWith("do ") ||
                     trimmed.startsWith("case ") ||
+                    trimmed.startsWith("endcase") ||  // block end
                     trimmed.equals("otherwise") ||
                     trimmed.startsWith("switch ") ||
+                    trimmed.startsWith("endswitch") || // block end
                     trimmed.startsWith("class ") ||
+                    trimmed.startsWith("endclass") || // block end
                     trimmed.startsWith("method ") ||
                     trimmed.startsWith("function ") ||
                     trimmed.startsWith("procedure ") ||
                     trimmed.startsWith("begin ") ||
-                    trimmed.startsWith("recover ")) {
+                    trimmed.startsWith("end ") ||     // generic end
+                    trimmed.startsWith("recover ") ||
+                    trimmed.startsWith("return") ||   // return shouldn't need semicolon
+                    trimmed.equals("cont") ||         // loop continue
+                    trimmed.equals("continue") ||     // loop continue (full form)
+                    trimmed.equals("exit") ||         // loop exit
+                    trimmed.equals("loop")) {         // loop restart
                     // These keywords should never have semicolons
                     // Skip semicolon addition
                 } else {
@@ -1232,15 +1377,34 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
             }
 
-            // Remove unnecessary trailing semicolon ONLY if next line is empty
-            else if (processedLine.trim().endsWith(";") && i < lines.length - 1) {
-                String nextLineTrimmed = lines[i + 1].trim();
-                // Only remove semicolon if next line is empty (no continuation needed)
-                if (nextLineTrimmed.isEmpty()) {
-                    // Next line is empty, semicolon is not needed
-                    String trimmed = processedLine.trim();
-                    if (trimmed.endsWith(";")) {
+            // Remove unnecessary trailing semicolon
+            else if (processedLine.trim().endsWith(";")) {
+                String trimmed = processedLine.trim();
+                String trimmedLower = trimmed.toLowerCase();
+
+                // Always remove semicolons from block-ending keywords (they never need continuation)
+                if (trimmedLower.startsWith("endif") ||
+                    trimmedLower.startsWith("next") ||
+                    trimmedLower.startsWith("enddo") ||
+                    trimmedLower.startsWith("endcase") ||
+                    trimmedLower.startsWith("endswitch") ||
+                    trimmedLower.startsWith("endclass") ||
+                    trimmedLower.startsWith("return")) {
+                    // Remove the semicolon from block-ending keywords
+                    processedLine = newIndent + trimmed.substring(0, trimmed.length() - 1);
+                    log("Removed unnecessary semicolon from: " + trimmedLower);
+                }
+                // Also remove if next line is empty or a comment (no continuation needed)
+                else if (i < lines.length - 1) {
+                    String nextLineTrimmed = lines[i + 1].trim();
+                    if (nextLineTrimmed.isEmpty()) {
                         processedLine = newIndent + trimmed.substring(0, trimmed.length() - 1);
+                        log("Removed unnecessary semicolon - next line is empty");
+                    }
+                    // Remove semicolon if next line is a comment (comments don't continue statements)
+                    else if (nextLineTrimmed.startsWith("//") || nextLineTrimmed.startsWith("/*")) {
+                        processedLine = newIndent + trimmed.substring(0, trimmed.length() - 1);
+                        log("Removed unnecessary semicolon - next line is a comment: " + trimmed);
                     }
                 }
             }
@@ -1314,9 +1478,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
                 // Additional check: if this is a continuation line (prevLineHasContinuation or isLineContinuation)
                 // we should keep it as part of the manual formatting
+                // BUT only if the line is not too long
                 if (prevLineHasContinuation || isLineContinuation) {
-                    shouldKeepManualContinuation = true;
-                    log("Keeping manual continuation - part of continuation block");
+                    if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition) {
+                        // Line is too long - don't keep, let it be re-wrapped
+                        log("NOT keeping manual continuation - line too long for continuation block");
+                    } else {
+                        shouldKeepManualContinuation = true;
+                        log("Keeping manual continuation - part of continuation block");
+                    }
                 }
             }
 
@@ -1330,14 +1500,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
 
             // Now check if we should break the line
+            // Note: isLineContinuation and prevLineHasContinuation checks removed here
+            // because they're handled earlier - if line is too long, shouldPreserveCompletely
+            // and shouldKeepManualContinuation are NOT set, allowing breaking
             if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition && lines.length < 10000 &&
-                       !isLineContinuation && !prevLineHasContinuation && !isCommentOnlyLine && !shouldKeepManualContinuation &&
+                       !isCommentOnlyLine && !shouldKeepManualContinuation &&
                        shouldBreakLine(processedLine)) {
                 // Line needs breaking (skip for very large files to improve performance)
-                // Never break continuation lines - they're already part of a multi-line statement
-                // Don't break lines if previous line has continuation (part of manual formatting)
                 // Never break comment-only lines - they should be preserved as-is
-                // Never break lines that have manual continuation markers
+                // Never break lines that have manual continuation markers (if within limit)
                 // shouldBreakLine checks for CASE and other patterns that shouldn't be broken
 
                 // Debug logging for lines being broken
@@ -2274,6 +2445,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         int lastOperator = -1;
         int lastLogical = -1;
         boolean preferLogicalBreak = false;
+        int parenDepth = 0;  // Track parenthesis nesting depth - don't break inside func()
 
         // SPECIAL HANDLING: For GET commands, prefer breaking BEFORE valid/when clauses
         // This keeps as much of the GET clause as possible on the first line
@@ -2316,6 +2488,14 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Only look for break points outside strings
             if (!inString) {
+                // Track parenthesis depth - don't break inside function calls like str(a,b,c)
+                if (c == '(') {
+                    parenDepth++;
+                } else if (c == ')') {
+                    parenDepth--;
+                    if (parenDepth < 0) parenDepth = 0;  // Safety: don't go negative
+                }
+
                 // Check for assignment operator - NEVER break between variable and :=
                 if (c == ':' && i + 1 < content.length() && content.charAt(i + 1) == '=') {
                     // Skip past the assignment operator
@@ -2352,7 +2532,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
 
                 // Track other break points (but don't immediately use them if we have a preferred logical break)
-                if (c == ',' && i < maxPos) {
+                // Only use commas as break points when NOT inside function calls (parenDepth == 0)
+                if (c == ',' && i < maxPos && parenDepth == 0) {
                     // Skip commas in @ row,col commands - they separate screen coordinates
                     String beforeComma = content.substring(0, i + 1).trim();
                     if (beforeComma.matches("@\\s*\\d+,")) {
@@ -2365,6 +2546,26 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
                     }
                 } else if (c == ' ' && i > 0 && i < maxPos) {
+                    // Don't break inside function calls at arbitrary spaces (like after commas)
+                    // But DO allow breaking after + operators even inside function calls
+                    // This prevents breaking at ", 2)" while allowing "string"+ to break
+                    if (parenDepth > 0 && i > 0) {
+                        char prevChar = content.charAt(i - 1);
+                        // Skip whitespace to find the actual previous non-space char
+                        int prevIdx = i - 1;
+                        while (prevIdx > 0 && content.charAt(prevIdx) == ' ') {
+                            prevIdx--;
+                        }
+                        if (prevIdx >= 0) {
+                            prevChar = content.charAt(prevIdx);
+                        }
+                        // Only skip if previous char is NOT a valid break operator (+ or -)
+                        // Allow breaking after + and - even inside function calls
+                        if (prevChar != '+' && prevChar != '-') {
+                            continue;
+                        }
+                    }
+
                     // Don't break right after := or ( or :
                     if (i >= 2 && content.substring(i-2, i).equals(":=")) {
                         continue;
@@ -2443,6 +2644,42 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                             String contentBefore = content.substring(0, Math.max(0, i-6)).trim();
                             if (contentBefore.isEmpty()) {
                                 continue; // Don't break right after "elseif" at line start
+                            }
+                        }
+                    }
+
+                    // Don't break right after "replace" - must keep field name with replace
+                    if (i >= 7) {
+                        String beforeSpace = content.substring(Math.max(0, i-7), i).toLowerCase();
+                        if (beforeSpace.equals("replace")) {
+                            String contentBefore = content.substring(0, Math.max(0, i-7)).trim();
+                            if (contentBefore.isEmpty()) {
+                                continue; // Don't break right after "replace" at line start
+                            }
+                        }
+                    }
+
+                    // Don't break right after field name before "with" in replace command
+                    // Check if this space precedes "with"
+                    if (i + 4 <= content.length()) {
+                        String afterSpace = content.substring(i+1, Math.min(i+5, content.length())).toLowerCase();
+                        if (afterSpace.equals("with") || afterSpace.startsWith("with ")) {
+                            // Check if this is part of a replace statement
+                            String beforeText = content.substring(0, i).toLowerCase();
+                            if (beforeText.contains("replace ")) {
+                                continue; // Don't break before "with" in replace statement
+                            }
+                        }
+                    }
+
+                    // Don't break right after "with" in replace command
+                    if (i >= 4) {
+                        String beforeSpace = content.substring(Math.max(0, i-4), i).toLowerCase();
+                        if (beforeSpace.equals("with")) {
+                            // Check if this is part of a replace statement
+                            String beforeText = content.substring(0, i-4).toLowerCase();
+                            if (beforeText.contains("replace ")) {
+                                continue; // Don't break right after "with" in replace statement
                             }
                         }
                     }
@@ -2550,11 +2787,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // we must NOT break inside the string. Check if bestBreakPos would land inside a string.
         if (inString && bestBreakPos <= 0) {
             // We have no break point and we're inside a string
-            // This means the line is mostly a string - don't break it with semicolon
-            // as that would corrupt the string content
-            log("WARN: Cannot break line - would break inside string. Returning as-is.");
-            result.add(line);
-            return result;
+            // BUT if we have a valid operator break point, use it instead of giving up
+            if (lastOperator > 0 && lastOperator <= maxPos) {
+                // We can break at the operator which is outside the string
+                bestBreakPos = lastOperator;
+                log("Using lastOperator " + lastOperator + " as break point (inString but have valid operator)");
+            } else {
+                // This means the line is mostly a string - don't break it with semicolon
+                // as that would corrupt the string content
+                log("WARN: Cannot break line - would break inside string. Returning as-is.");
+                result.add(line);
+                return result;
+            }
         }
 
         // Also check if our best break position is inside a string
@@ -2611,7 +2855,49 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     result.add(line);
                     return result;
                 }
-                bestBreakPos = maxPos;
+
+                // CRITICAL: Check if maxPos would break in the middle of an identifier
+                // If so, find a better break point or don't break at all
+                if (maxPos > 0 && maxPos < content.length()) {
+                    char charAtBreak = content.charAt(maxPos);
+                    char charBeforeBreak = content.charAt(maxPos - 1);
+
+                    // If both chars are part of an identifier, we're splitting a word
+                    if (Character.isJavaIdentifierPart(charAtBreak) && Character.isJavaIdentifierPart(charBeforeBreak)) {
+                        log("WARN: maxPos " + maxPos + " would split an identifier. Searching for better break point.");
+
+                        // Find the start of this identifier and try to break before it
+                        int identStart = maxPos;
+                        while (identStart > 0 && Character.isJavaIdentifierPart(content.charAt(identStart - 1))) {
+                            identStart--;
+                        }
+
+                        // If we can break before the identifier (there's a space, comma, or operator)
+                        if (identStart > 0) {
+                            // Check what's before the identifier
+                            char beforeIdent = content.charAt(identStart - 1);
+                            if (beforeIdent == ' ' || beforeIdent == ',' || beforeIdent == '(' ||
+                                beforeIdent == '+' || beforeIdent == '-' || beforeIdent == '*' || beforeIdent == '/') {
+                                bestBreakPos = identStart;
+                                log("Found better break point before identifier at " + identStart);
+                            } else {
+                                // Can't find a good break point - don't break the line
+                                log("WARN: Cannot find safe break point. Returning line as-is.");
+                                result.add(line);
+                                return result;
+                            }
+                        } else {
+                            // Identifier starts at the beginning - can't break
+                            log("WARN: Would break identifier at start of content. Returning as-is.");
+                            result.add(line);
+                            return result;
+                        }
+                    } else {
+                        bestBreakPos = maxPos;
+                    }
+                } else {
+                    bestBreakPos = maxPos;
+                }
             }
         }
 
@@ -2955,6 +3241,28 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         // Second pass: Look for good break points, starting from the end and working backwards
+        // First calculate parenthesis depth at each position to avoid breaking inside func()
+        int[] parenDepthAt = new int[content.length() + 1];
+        int depth = 0;
+        boolean inStr = false;
+        char strDelim = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char ch = content.charAt(i);
+            if ((ch == '"' || ch == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
+                if (!inStr) {
+                    inStr = true;
+                    strDelim = ch;
+                } else if (ch == strDelim) {
+                    inStr = false;
+                }
+            }
+            if (!inStr) {
+                if (ch == '(') depth++;
+                else if (ch == ')') depth = Math.max(0, depth - 1);
+            }
+            parenDepthAt[i] = depth;
+        }
+
         for (int i = endPos; i > startPos; i--) {
             char c = content.charAt(i);
 
@@ -2969,8 +3277,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Good break points (in order of preference)
             if (c == ' ') return i + 1;        // Prefer spaces
-            // Skip commas in @ row,col commands - don't break there
-            if (c == ',') {
+            // Skip commas inside function calls (parenDepth > 0) and @ row,col commands
+            if (c == ',' && parenDepthAt[i] == 0) {
                 // Check if this comma is part of @ row,col pattern
                 String beforeComma = content.substring(0, i + 1).trim();
                 if (!beforeComma.matches(".*@\\s*\\d+,$")) {

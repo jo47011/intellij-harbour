@@ -211,4 +211,10 @@
             <keyboard-shortcut keymap="$default" first-keystroke="alt D"/>
         </action>
     </actions>
+
+    <!-- Action Listeners -->
+    <applicationListeners>
+        <listener class="org.intellij.sdk.language.HarbourFormatActionListener"
+                  topic="com.intellij.openapi.actionSystem.ex.AnActionListener"/>
+    </applicationListeners>
 </idea-plugin>
