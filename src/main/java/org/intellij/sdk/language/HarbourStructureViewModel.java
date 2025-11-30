@@ -82,29 +82,34 @@ public class HarbourStructureViewModel extends TextEditorBasedStructureViewModel
     @Override
     public Object getCurrentEditorElement() {
         if (isDisposed || getEditor() == null) {
+            HarbourLogger.log("StructureViewModel", "getCurrentEditorElement: disposed or no editor");
             return null;
         }
 
         try {
             int offset = getEditor().getCaretModel().getOffset();
             if (offset < 0 || offset >= psiFile.getTextLength()) {
+                HarbourLogger.log("StructureViewModel", "getCurrentEditorElement: invalid offset " + offset);
                 return null;
             }
 
             PsiElement elementAtCursor = psiFile.findElementAt(offset);
             if (elementAtCursor == null) {
+                HarbourLogger.log("StructureViewModel", "getCurrentEditorElement: no element at offset " + offset);
                 return null;
             }
 
             // Find the containing function/procedure/method/class
             PsiElement result = findContainingStructureElement(offset);
             if (result != null) {
-                LOG.info("getCurrentEditorElement: Found element at offset " + offset +
+                HarbourLogger.log("StructureViewModel", "getCurrentEditorElement: Found at offset " + offset +
                     ": " + result.getText().substring(0, Math.min(20, result.getText().length())));
+            } else {
+                HarbourLogger.log("StructureViewModel", "getCurrentEditorElement: no structure element at offset " + offset);
             }
             return result;
         } catch (Exception e) {
-            LOG.warn("Error in getCurrentEditorElement: " + e.getMessage());
+            HarbourLogger.log("StructureViewModel", "Error in getCurrentEditorElement: " + e.getMessage());
             return null;
         }
     }
