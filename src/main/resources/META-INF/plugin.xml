@@ -30,9 +30,17 @@
         <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
                   fieldName="INSTANCE" language="Harbour" extensions="prg;ch"/>
 
+        <!-- Harbour Config File Type (for .hbp, .hbc, .cfg files that use # comments) -->
+        <fileType name="Harbour Config File" implementationClass="org.intellij.sdk.language.HarbourConfigFileType"
+                  fieldName="INSTANCE" language="HarbourConfig" extensions="hbp;hbc;cfg"/>
+
         <!-- Language -->
         <lang.parserDefinition language="Harbour"
                                implementationClass="org.intellij.sdk.language.HarbourParserDefinition"/>
+
+        <!-- Harbour Config Language Parser -->
+        <lang.parserDefinition language="HarbourConfig"
+                               implementationClass="org.intellij.sdk.language.HarbourConfigParserDefinition"/>
 
         <!-- Syntax Highlighter -->
         <lang.syntaxHighlighterFactory language="Harbour"
@@ -47,6 +55,9 @@
 
         <!-- Commenter -->
         <lang.commenter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourCommenter"/>
+
+        <!-- Commenter for Config files (uses # for line comments) -->
+        <lang.commenter language="HarbourConfig" implementationClass="org.intellij.sdk.language.HarbourConfigCommenter"/>
 
         <!-- Quote Handler -->
         <lang.quoteHandler language="Harbour" implementationClass="org.intellij.sdk.language.HarbourQuoteHandler"/>
