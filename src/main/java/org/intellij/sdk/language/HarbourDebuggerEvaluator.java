@@ -64,30 +64,41 @@ public class HarbourDebuggerEvaluator extends XDebuggerEvaluator {
     private String evaluateVariable(String expression) {
         // Clean the expression (remove spaces, etc.)
         String cleanExpression = expression.trim();
-        
+
         // Get current variables from debug process
         var variables = debugProcess.getVariables();
-        
-        // Look for exact variable match
+
+        HarbourLogger.log("HarbourDebuggerEvaluator",
+            "Looking for variable '" + cleanExpression + "' in " + variables.size() + " variables");
+
+        // Look for exact variable match in all scopes (LOCALS, STATICS, PRIVATES, PUBLICS)
         for (var entry : variables.entrySet()) {
             HarbourDebuggerValue value = entry.getValue();
-            if (cleanExpression.equals(value.getName())) {
-                HarbourLogger.log("HarbourDebuggerEvaluator", 
-                    "Found variable: " + cleanExpression + " = " + value.getValue());
+            String varName = value.getName();
+            if (cleanExpression.equals(varName)) {
+                HarbourLogger.log("HarbourDebuggerEvaluator",
+                    "Found variable (exact match): " + cleanExpression + " = " + value.getValue() +
+                    " (key: " + entry.getKey() + ")");
                 return value.getValue();
             }
         }
-        
+
         // Look for case-insensitive match (Harbour is case-insensitive)
         for (var entry : variables.entrySet()) {
             HarbourDebuggerValue value = entry.getValue();
-            if (cleanExpression.equalsIgnoreCase(value.getName())) {
-                HarbourLogger.log("HarbourDebuggerEvaluator", 
-                    "Found variable (case-insensitive): " + cleanExpression + " = " + value.getValue());
+            String varName = value.getName();
+            if (cleanExpression.equalsIgnoreCase(varName)) {
+                HarbourLogger.log("HarbourDebuggerEvaluator",
+                    "Found variable (case-insensitive): " + cleanExpression + " = " + value.getValue() +
+                    " (key: " + entry.getKey() + ")");
                 return value.getValue();
             }
         }
-        
+
+        // Log available variables for debugging
+        HarbourLogger.log("HarbourDebuggerEvaluator",
+            "Variable '" + cleanExpression + "' not found. Available: " + variables.keySet());
+
         return null; // Not found as simple variable
     }
 
