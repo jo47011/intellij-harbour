@@ -36,35 +36,38 @@ public class HarbourFormattingTest {
     private static final String[] COMPILABLE_FILES = null;
 
     private static String getHarbourCompiler() {
+        // 1. Check system property
         String prop = System.getProperty("harbourCompiler");
         if (prop != null && !prop.isEmpty()) {
             return prop;
         }
-        // Try common locations
-        String[] locations = {
-            "/home/developer/workspace/harbour/bin/linux/gcc/harbour",
-            "/usr/local/bin/harbour",
-            "/usr/bin/harbour"
-        };
-        for (String loc : locations) {
-            if (new File(loc).exists()) {
-                return loc;
+        // 2. Check HARBOUR_HOME env var
+        String harbourHome = System.getenv("HARBOUR_HOME");
+        if (harbourHome != null && !harbourHome.isEmpty()) {
+            String os = System.getProperty("os.name", "").toLowerCase();
+            if (os.contains("win")) {
+                return harbourHome + "\\bin\\harbour.exe";
+            } else {
+                return harbourHome + "/bin/linux/gcc/harbour";
             }
         }
-        return "harbour"; // Hope it's in PATH
+        // 3. Return null - will be checked in test
+        return null;
     }
 
     private static String getHarbourInclude() {
+        // 1. Check system property
         String prop = System.getProperty("harbourInclude");
         if (prop != null && !prop.isEmpty()) {
             return prop;
         }
-        // Derive from compiler path
-        if (HARBOUR_COMPILER != null && HARBOUR_COMPILER.contains("/bin/")) {
-            String base = HARBOUR_COMPILER.substring(0, HARBOUR_COMPILER.indexOf("/bin/"));
-            return base + "/include";
+        // 2. Check HARBOUR_HOME env var
+        String harbourHome = System.getenv("HARBOUR_HOME");
+        if (harbourHome != null && !harbourHome.isEmpty()) {
+            return harbourHome + "/include";
         }
-        return "/usr/local/include/harbour";
+        // 3. Return null - will be checked in test
+        return null;
     }
 
     @Test
@@ -75,6 +78,14 @@ public class HarbourFormattingTest {
             "Usage: ./gradlew test --tests \"*HarbourFormattingTest*\" -DtestDir=/path/to/prg/files",
             TEST_DIR != null && !TEST_DIR.isEmpty()
         );
+
+        // Check HARBOUR_HOME or harbourCompiler system property
+        if (HARBOUR_COMPILER == null || HARBOUR_INCLUDE == null) {
+            fail("HARBOUR_HOME environment variable not set. " +
+                 "Please set HARBOUR_HOME to your Harbour installation directory.\n" +
+                 "Example: export HARBOUR_HOME=/opt/harbour\n" +
+                 "Or use: -DharbourCompiler=/path/to/harbour -DharbourInclude=/path/to/include");
+        }
 
         System.out.println("=== Harbour Formatting Test ===");
         System.out.println("Testing directory: " + TEST_DIR);

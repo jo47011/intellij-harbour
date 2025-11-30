@@ -483,6 +483,23 @@ For plugin development, you can also run a development instance:
 
 This launches PyCharm with the plugin pre-installed for testing.
 
+### Environment Variables
+
+For tests and command-line formatting that require the Harbour compiler, set `HARBOUR_HOME`:
+
+```bash
+# Linux/macOS
+export HARBOUR_HOME=/path/to/harbour
+
+# Windows
+set HARBOUR_HOME=C:\harbour
+```
+
+The plugin expects the following structure:
+- `$HARBOUR_HOME/bin/linux/gcc/harbour` (Linux)
+- `$HARBOUR_HOME/bin/harbour.exe` (Windows)
+- `$HARBOUR_HOME/include/` (header files)
+
 ## Development
 
 ### Test Files

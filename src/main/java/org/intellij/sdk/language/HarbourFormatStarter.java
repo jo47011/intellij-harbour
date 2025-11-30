@@ -35,7 +35,26 @@ import java.util.*;
  */
 public class HarbourFormatStarter implements ApplicationStarter {
 
-    private static final String HARBOUR_COMPILER = "/home/developer/workspace/harbour/bin/linux/gcc/harbour";
+    private static String getHarbourCompiler() {
+        String harbourHome = System.getenv("HARBOUR_HOME");
+        if (harbourHome == null || harbourHome.isEmpty()) {
+            return null;
+        }
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) {
+            return harbourHome + "\\bin\\harbour.exe";
+        } else {
+            return harbourHome + "/bin/linux/gcc/harbour";
+        }
+    }
+
+    private static String getHarbourInclude() {
+        String harbourHome = System.getenv("HARBOUR_HOME");
+        if (harbourHome == null || harbourHome.isEmpty()) {
+            return null;
+        }
+        return harbourHome + "/include";
+    }
 
     private boolean dryRun = false;
     private boolean verbose = false;
@@ -240,12 +259,22 @@ public class HarbourFormatStarter implements ApplicationStarter {
     }
 
     private boolean compileFile(String filePath) throws Exception {
+        String compiler = getHarbourCompiler();
+        String includePath = getHarbourInclude();
+
+        if (compiler == null || includePath == null) {
+            System.err.println("Error: HARBOUR_HOME environment variable not set.");
+            System.err.println("Please set HARBOUR_HOME to your Harbour installation directory.");
+            System.err.println("Example: export HARBOUR_HOME=/opt/harbour");
+            return false;
+        }
+
         ProcessBuilder pb = new ProcessBuilder(
-                HARBOUR_COMPILER,
+                compiler,
                 filePath,
                 "-n",
                 "-w1",
-                "-i/home/developer/workspace/harbour/include"
+                "-i" + includePath
         );
         pb.redirectErrorStream(true);
         Process process = pb.start();
