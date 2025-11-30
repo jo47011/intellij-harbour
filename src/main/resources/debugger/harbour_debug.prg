@@ -1765,7 +1765,10 @@ STATIC PROCEDURE SendWorkAreas()
    
    // Send workarea enumeration
    hb_inetSend(oDebugInfo["socket"], "WORKAREAS" + CRLF)
-   
+
+   // Send currently selected workarea in the program
+   hb_inetSend(oDebugInfo["socket"], "CURRENT_AREA:" + AllTrim(Str(nOldArea)) + CRLF)
+
    IF Len(aAreas) > 0
       FOR i := 1 TO Len(aAreas)
          aArea := aAreas[i]
@@ -1963,10 +1966,16 @@ STATIC PROCEDURE SendAreaRecords(nArea, aParams)
       nCount := Val(aParams[4])
       LogDebugInfo("SendAreaRecords: Parsed nCount=" + AllTrim(Str(nCount)))
    ENDIF
-   
-   // Limit count to reasonable number
-   IF nCount > 100
-      nCount := 100
+
+   // Handle nCount=0 as "all records" (but limit to a reasonable max)
+   IF nCount == 0
+      nCount := LastRec()
+      LogDebugInfo("SendAreaRecords: nCount=0 means all, using LastRec()=" + AllTrim(Str(nCount)))
+   ENDIF
+
+   // Limit count to reasonable number (10000 max for performance)
+   IF nCount > 10000
+      nCount := 10000
    ENDIF
    
    // Check if table is open
