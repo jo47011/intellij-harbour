@@ -2335,7 +2335,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }
         
-        // Windows specific: Try the config working directory (C:\myprog\hbmiki)
+        // Windows specific: Try the config working directory
         if (runConfig != null && runConfig.getWorkingDirectory() != null) {
             file = new File(runConfig.getWorkingDirectory(), fileName);
             HarbourLogger.log(project, "HarbourDebugger", "STACKTRACE: Trying config workingDir: " + file.getAbsolutePath() + ", exists=" + file.exists());

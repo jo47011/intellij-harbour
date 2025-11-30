@@ -48,7 +48,6 @@ clean: clean-log  ## Clean all generated files and logs
 	rm -rf $(PRJ)/src/main/gen/*
 	@$(RM) *~ *.*~ .#* .??*~
 	@$(RM) -rf build/*
-	@$(RM) -f ../hbmiki-test/log/*
 	@echo cleaned.
 
 build:  ## Build plugin with gradle

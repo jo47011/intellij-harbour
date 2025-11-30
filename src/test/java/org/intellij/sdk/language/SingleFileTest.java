@@ -181,56 +181,6 @@ public class SingleFileTest {
     }
 
     @Test
-    public void testFaktPrgElseIndentation() throws Exception {
-        // Test the actual fakt.prg around line 229
-        Path origPath = Paths.get("/home/developer/workspace/hbmiki-test-windows/fakt.prg");
-        if (!Files.exists(origPath)) {
-            System.out.println("fakt.prg not found, skipping test");
-            return;
-        }
-
-        String input = new String(Files.readAllBytes(origPath));
-
-        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
-        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
-
-        String[] outputLines = formatted.split("\n", -1);
-
-        // Find the "else // alter Auftrag" line around line 229
-        int elseLineIdx = -1;
-        for (int i = 220; i < Math.min(240, outputLines.length); i++) {
-            if (outputLines[i].trim().startsWith("else") && outputLines[i].contains("alter Auftrag")) {
-                elseLineIdx = i;
-                break;
-            }
-        }
-
-        if (elseLineIdx > 0) {
-            System.out.println("=== Lines around else ===");
-            for (int i = Math.max(0, elseLineIdx - 3); i < Math.min(outputLines.length, elseLineIdx + 3); i++) {
-                int indent = outputLines[i].length() - outputLines[i].stripLeading().length();
-                System.out.printf("Line %d [%d spaces]: '%s'%n", i+1, indent, outputLines[i]);
-            }
-
-            // Find the matching if (line 181: "if AUFAUS->AufNr == TEMP_NUMMER")
-            int ifLineIdx = -1;
-            for (int i = 175; i < Math.min(190, outputLines.length); i++) {
-                if (outputLines[i].trim().startsWith("if AUFAUS->AufNr")) {
-                    ifLineIdx = i;
-                    break;
-                }
-            }
-
-            if (ifLineIdx > 0) {
-                int ifIndent = outputLines[ifLineIdx].length() - outputLines[ifLineIdx].stripLeading().length();
-                int elseIndent = outputLines[elseLineIdx].length() - outputLines[elseLineIdx].stripLeading().length();
-                System.out.printf("\nif indent: %d, else indent: %d%n", ifIndent, elseIndent);
-                assertEquals("else should have same indent as its matching if", ifIndent, elseIndent);
-            }
-        }
-    }
-
-    @Test
     public void testAtRowColNoBreak() throws Exception {
         // Test from FEEDBACK: @ row,col commands should NOT be split at the comma
         // This is the case from fakt.prg#377
@@ -757,52 +707,6 @@ public class SingleFileTest {
         assertEquals("Error line should have 4 spaces indent", 4, errorIndent);
         assertEquals("Continuation line 1 should have 6 spaces (4+2)", 6, cont1Indent);
         assertEquals("Continuation line 2 should have 6 spaces (4+2)", 6, cont2Indent);
-    }
-
-    @Test
-    public void testFaktPrgContinuationLine() throws Exception {
-        // Test the exact case from fakt.prg line 151
-        Path origPath = Paths.get("/home/developer/workspace/hbmiki-test-windows/fakt.prg");
-        if (!Files.exists(origPath)) {
-            System.out.println("fakt.prg not found, skipping test");
-            return;
-        }
-
-        String input = new String(Files.readAllBytes(origPath));
-
-        HarbourPostFormatProcessor processor = new HarbourPostFormatProcessor();
-        String formatted = processor.formatHarbourCodeWithDefaults(input, 99);
-
-        String[] outputLines = formatted.split("\n", -1);
-
-        // Find the Error line around line 151
-        int errorLineIdx = -1;
-        for (int i = 145; i < Math.min(160, outputLines.length); i++) {
-            if (outputLines[i].contains("Error(ACHTUNG+\"Eingabe Ansprechpartner")) {
-                errorLineIdx = i;
-                break;
-            }
-        }
-
-        if (errorLineIdx > 0) {
-            System.out.println("=== Lines around Error call ===");
-            for (int i = Math.max(0, errorLineIdx - 2); i < Math.min(outputLines.length, errorLineIdx + 4); i++) {
-                int indent = outputLines[i].length() - outputLines[i].stripLeading().length();
-                System.out.printf("Line %d [%d spaces]: '%s'%n", i+1, indent, outputLines[i]);
-            }
-
-            String errorLine = outputLines[errorLineIdx];
-            int errorIndent = errorLine.length() - errorLine.stripLeading().length();
-
-            // Continuation lines should be errorIndent + 2
-            if (errorLineIdx + 1 < outputLines.length) {
-                String cont1 = outputLines[errorLineIdx + 1];
-                int cont1Indent = cont1.length() - cont1.stripLeading().length();
-                System.out.printf("\nError line indent: %d, Continuation indent: %d, Expected: %d%n",
-                    errorIndent, cont1Indent, errorIndent + 2);
-                assertEquals("Continuation should be Error indent + 2", errorIndent + 2, cont1Indent);
-            }
-        }
     }
 
 }

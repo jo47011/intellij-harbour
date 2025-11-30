@@ -10,7 +10,7 @@ CLAUDE.md
 FEEDBACK.txt
 SUMMARY.md
 VERSION_HISTORY.md
-/.claude/settings.local.json
+/.claude/
 caches
 daemon
 native
