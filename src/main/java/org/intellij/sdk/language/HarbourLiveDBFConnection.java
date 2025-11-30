@@ -29,6 +29,7 @@ public class HarbourLiveDBFConnection implements Disposable {
     private final List<WorkareaUpdateListener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean isActive = false;
     private volatile CountDownLatch workareaUpdateLatch = null;
+    private volatile int currentSelectedArea = 0;  // Currently selected workarea in the program
     
     public HarbourLiveDBFConnection(@NotNull Project project, 
                                    @NotNull HarbourDebuggerConnection debuggerConnection) {
@@ -158,6 +159,14 @@ public class HarbourLiveDBFConnection implements Disposable {
         try {
             if (message.startsWith("AREA:")) {
                 parseWorkareaInfo(message);
+            } else if (message.startsWith("CURRENT_AREA:")) {
+                // Parse currently selected workarea in the program
+                String[] parts = message.split(":");
+                if (parts.length >= 2) {
+                    currentSelectedArea = Integer.parseInt(parts[1].trim());
+                    HarbourLogger.log("HarbourLiveDBFConnection",
+                        "Program's current selected area: " + currentSelectedArea);
+                }
             } else if (message.equals("END_WORKAREAS")) {
                 // Workarea enumeration complete, notify listeners
                 HarbourLogger.log("HarbourLiveDBFConnection", "Workarea enumeration complete, found " + workareas.size() + " workareas");
@@ -171,6 +180,7 @@ public class HarbourLiveDBFConnection implements Disposable {
             } else if (message.equals("WORKAREAS")) {
                 // Clear existing workareas for fresh enumeration
                 workareas.clear();
+                currentSelectedArea = 0;  // Reset on new enumeration
                 HarbourLogger.log("HarbourLiveDBFConnection", "Starting workarea enumeration");
             }
         } catch (Exception e) {
@@ -227,7 +237,28 @@ public class HarbourLiveDBFConnection implements Disposable {
     public WorkareaInfo getWorkarea(@NotNull String alias) {
         return workareas.get(alias);
     }
-    
+
+    /**
+     * Get the currently selected workarea area number in the program
+     */
+    public int getCurrentSelectedArea() {
+        return currentSelectedArea;
+    }
+
+    /**
+     * Get the currently selected workarea info in the program (or null if none)
+     */
+    @Nullable
+    public WorkareaInfo getCurrentSelectedWorkarea() {
+        if (currentSelectedArea <= 0) return null;
+        for (WorkareaInfo wa : workareas.values()) {
+            if (wa.getAreaNumber() == currentSelectedArea) {
+                return wa;
+            }
+        }
+        return null;
+    }
+
     /**
      * Add listener for workarea updates
      */

@@ -83,7 +83,7 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     private int maxNavigationResults = 20; // Maximum results to preload initially for navigation (with "load all" button for more)
     
     // Grid view settings
-    private int maxGridPreloadResults = 100; // Maximum results to preload in grid view
+    private int maxGridPreloadResults = 10; // Maximum results to preload in grid view (reduced for performance)
     
     // Index cache settings
     private boolean indexCacheEnabled = true; // Enable persistent index cache for performance

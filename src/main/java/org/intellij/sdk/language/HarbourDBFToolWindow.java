@@ -4,6 +4,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
+import com.intellij.ui.SearchTextField;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTabbedPane;
 import com.intellij.ui.content.Content;
@@ -32,9 +33,12 @@ import java.awt.event.KeyEvent;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 
 /**
  * Tool window for displaying live DBF workarea information during debugging.
@@ -100,18 +104,35 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         private final DetailsTableModel tableModel;
         private final JLabel statusLabel;
         private JLabel totalRecordsLabel;
-        
+        private JLabel currentInfoLabel;  // Shows current alias and recno
+
+        // Filter components
+        private SearchTextField filterNameField;
+        private SearchTextField filterValueField;
+        private JPanel filterPanel;  // Panel containing filter fields
+        private List<String[]> unfilteredData;  // Original data before filtering
+
         // Grid view components
         private JBTable gridTable;
         private JBScrollPane tableScrollPane;
-        
+
+        // Grid load controls
+        private JSpinner gridRecordCountSpinner;  // Number of records to load for grid view
+        private JLabel gridRecordLabel;
+        private JLabel gridEnterLabel;  // "(Enter)" label for grid spinner
+        private JLabel gridLoadingLabel; // Loading indicator (spinner character)
+
         // Navigation controls
         private JButton prevButton;
         private JButton nextButton;
         // Removed gotoButton and loadAllButton - using Enter key in spinner instead
         private JSpinner recordSpinner;
+        private JLabel gotoLabel;        // "Go to:" label
+        private JLabel enterLabel;       // "(Enter)" label for record spinner
+        private JLabel separatorLabel;   // separator between record navigation and grid controls
         private String currentWorkarea = null;
-        
+        private String currentViewType = null;  // Tracks current view: "Fields", "Record", "Schema", "Indexes", "Grid"
+
         private HarbourLiveDBFConnection liveConnection;
         
         // Cache for storing received data per workarea
@@ -157,10 +178,21 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         // Track all pending requests so we can display them when they arrive
         // Key: workarea:datatype, Value: timestamp
         private final java.util.Map<String, Long> pendingRequests = new java.util.HashMap<>();
-        
+
+        // Track the current grid loading request ID - used to ensure only the active request hides indicator
+        private long currentGridLoadingRequestId = 0;
+
         // Flag to prevent selection events during tree updates
         private boolean updatingTree = false;
-        
+
+        // Flag to track if we should auto-select first workarea on initial load
+        private boolean autoSelectOnFirstLoad = true;
+
+        // Sorting options (controlled via clickable column headers)
+        private boolean sortWorkareasByName = false;  // false = by order, true = alphabetically
+        private boolean sortColumnsByName = false;    // Property column: false = original order, true = sorted
+        private boolean sortColumnsByValue = false;   // Value column: false = original order, true = sorted
+
         public HarbourDBFToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
             this.project = project;
             this.toolWindow = toolWindow;
@@ -168,8 +200,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             // Version indicator - CRITICAL: Table Grid View and Indexes nodes MUST appear
             HarbourLogger.log("HarbourDBFToolWindow", "");
             HarbourLogger.log("HarbourDBFToolWindow", "==========================================");
-            HarbourLogger.log("HarbourDBFToolWindow", "*** PLUGIN VERSION 1.2.24 LOADED ***");
-            HarbourLogger.log("HarbourDBFToolWindow", "*** Table Grid View and Indexes ENABLED ***");
+            HarbourLogger.log("HarbourDBFToolWindow", "*** PLUGIN VERSION 1.2.104 LOADED ***");
+            HarbourLogger.log("HarbourDBFToolWindow", "*** Loading indicator added ***");
             HarbourLogger.log("HarbourDBFToolWindow", "==========================================");
             HarbourLogger.log("HarbourDBFToolWindow", "");
             
@@ -186,11 +218,37 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             workareaTree.setRootVisible(true);
             workareaTree.addTreeSelectionListener(e -> onWorkareaSelected());
             
-            // Create details table
+            // Create details table with sortable column headers
             tableModel = new DetailsTableModel();
             detailsTable = new JBTable(tableModel);
             detailsTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-            
+
+            // Make table header clickable for sorting
+            detailsTable.getTableHeader().setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            detailsTable.getTableHeader().setToolTipText("Click column header to sort (cycles: none → ascending → descending)");
+            detailsTable.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    // Only allow sorting if not in Schema Info or Index view
+                    if (!isSortingAllowedForCurrentView()) {
+                        return;
+                    }
+                    int col = detailsTable.columnAtPoint(e.getPoint());
+                    if (col == 0 || col == 1) {  // Property or Value column
+                        int newState = tableModel.toggleSortState(col);
+                        // Store sort state for applyFilters
+                        if (col == 0) {
+                            sortColumnsByName = (newState > 0);
+                            sortColumnsByValue = false;
+                        } else {
+                            sortColumnsByValue = (newState > 0);
+                            sortColumnsByName = false;
+                        }
+                        applyFilters();
+                    }
+                }
+            });
+
             // Create status label
             statusLabel = new JLabel("No debugging session active");
             statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
@@ -222,34 +280,118 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             
             // Create total records label
             totalRecordsLabel = new JLabel("");
-            
+
+            // Create current info label for alias and recno
+            currentInfoLabel = new JLabel("");
+            currentInfoLabel.setFont(currentInfoLabel.getFont().deriveFont(Font.BOLD));
+
             // Create navigation panel
             JPanel navigationPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-            navigationPanel.add(new JLabel("Record Navigation:"));
+            navigationPanel.add(currentInfoLabel);
+            navigationPanel.add(new JLabel("  |  "));
             navigationPanel.add(prevButton);
             navigationPanel.add(nextButton);
-            navigationPanel.add(new JLabel("  Go to:"));
+            gotoLabel = new JLabel("  Go to:");
+            navigationPanel.add(gotoLabel);
             navigationPanel.add(recordSpinner);
-            navigationPanel.add(new JLabel(" (Enter)"));
+            enterLabel = new JLabel(" (Enter)");
+            navigationPanel.add(enterLabel);
             navigationPanel.add(new JLabel("  "));
             navigationPanel.add(totalRecordsLabel);
-            
+
+            // Grid view controls (initially hidden, shown when Table Grid View is selected)
+            separatorLabel = new JLabel("   |  ");
+            navigationPanel.add(separatorLabel);
+            gridRecordLabel = new JLabel("Load:");
+            navigationPanel.add(gridRecordLabel);
+            // Min value 0 means "all records"
+            SpinnerNumberModel gridRecordModel = new SpinnerNumberModel(10, 0, 10000, 10);
+            gridRecordCountSpinner = new JSpinner(gridRecordModel);
+            gridRecordCountSpinner.setToolTipText("Number of records to load (0 = all). Press Enter to load.");
+            gridRecordCountSpinner.setPreferredSize(new Dimension(70, 25));
+            navigationPanel.add(gridRecordCountSpinner);
+            gridEnterLabel = new JLabel(" (Enter)");
+            navigationPanel.add(gridEnterLabel);
+            gridLoadingLabel = new JLabel(" ⏳");  // Loading indicator
+            gridLoadingLabel.setVisible(false);  // Initially hidden
+            navigationPanel.add(gridLoadingLabel);
+
+            // Setup Enter key handling for grid record spinner
+            setupGridSpinnerEnterKeyHandling();
+
+            // Initially hide grid controls
+            setGridControlsVisible(false);
+
             // Create button panel for right side of toolbar
             JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
             buttonPanel.add(refreshButton);
-            
+
             // Create toolbar
             JPanel toolbar = new JPanel(new BorderLayout());
             toolbar.add(navigationPanel, BorderLayout.CENTER);
             toolbar.add(buttonPanel, BorderLayout.EAST);
-            
+
+            // Create filter panel with labeled filter fields
+            filterPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+
+            // Name filter
+            filterPanel.add(new JLabel("Name:"));
+            filterNameField = new SearchTextField(false);
+            filterNameField.setToolTipText("Filter by property name (case-insensitive)");
+            filterNameField.getTextEditor().setColumns(12);
+            filterPanel.add(filterNameField);
+
+            // Value filter
+            filterPanel.add(new JLabel("  Value:"));
+            filterValueField = new SearchTextField(false);
+            filterValueField.setToolTipText("Filter by value (case-insensitive)");
+            filterValueField.getTextEditor().setColumns(15);
+            filterPanel.add(filterValueField);
+
+            // Add filter change listeners to SearchTextField
+            DocumentListener filterListener = new DocumentListener() {
+                @Override
+                public void insertUpdate(DocumentEvent e) { applyFilters(); }
+                @Override
+                public void removeUpdate(DocumentEvent e) { applyFilters(); }
+                @Override
+                public void changedUpdate(DocumentEvent e) { applyFilters(); }
+            };
+            filterNameField.addDocumentListener(filterListener);
+            filterValueField.addDocumentListener(filterListener);
+
+            // Create right panel with filter and table
+            JPanel rightPanel = new JPanel(new BorderLayout());
+            rightPanel.add(filterPanel, BorderLayout.NORTH);
+            tableScrollPane = new JBScrollPane(detailsTable);
+            rightPanel.add(tableScrollPane, BorderLayout.CENTER);
+
+            // Create left panel with tree (click header "Workareas" to toggle sort)
+            JPanel leftPanel = new JPanel(new BorderLayout());
+            JPanel treeHeaderPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+            JLabel workareasLabel = new JLabel("Workareas (click to sort)");
+            workareasLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            workareasLabel.setToolTipText("Click to toggle alphabetical sorting");
+            workareasLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    sortWorkareasByName = !sortWorkareasByName;
+                    workareasLabel.setText(sortWorkareasByName ? "Workareas (A-Z)" : "Workareas (click to sort)");
+                    if (liveConnection != null) {
+                        liveConnection.requestWorkareaUpdate();
+                    }
+                }
+            });
+            treeHeaderPanel.add(workareasLabel);
+            leftPanel.add(treeHeaderPanel, BorderLayout.NORTH);
+            leftPanel.add(new JBScrollPane(workareaTree), BorderLayout.CENTER);
+
             // Create split pane with tree on left, details on right
             JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-            splitPane.setLeftComponent(new JBScrollPane(workareaTree));
-            tableScrollPane = new JBScrollPane(detailsTable);
-            splitPane.setRightComponent(tableScrollPane);
+            splitPane.setLeftComponent(leftPanel);
+            splitPane.setRightComponent(rightPanel);
             splitPane.setDividerLocation(250);
-            
+
             mainPanel.add(toolbar, BorderLayout.NORTH);
             mainPanel.add(splitPane, BorderLayout.CENTER);
             mainPanel.add(statusLabel, BorderLayout.SOUTH);
@@ -293,10 +435,22 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             
             this.liveConnection = connection;
             connection.addWorkareaUpdateListener(this);
-            
+
+            // Ensure monitoring is started (safe to call multiple times)
+            connection.startMonitoring();
+
             updateStatus("Connected to debugging session");
-            
+
             HarbourLogger.log("HarbourDBFToolWindow", "Connected to live debugging session, cache cleared");
+
+            // Auto-refresh workareas on connect and reset auto-select flag
+            autoSelectOnFirstLoad = true;
+            SwingUtilities.invokeLater(() -> {
+                if (liveConnection != null) {
+                    liveConnection.requestWorkareaUpdate();
+                    HarbourLogger.log("HarbourDBFToolWindow", "Auto-refreshed workareas on connection");
+                }
+            });
         }
         
         /**
@@ -379,8 +533,45 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     updateStatus(String.format("Connected - %d workarea(s) open", workareas.size()));
                     HarbourLogger.log("HarbourDBFToolWindow", "*** Updated status to show " + workareas.size() + " workarea(s)");
 
-                    // If no selection will be restored, clear the "No database files open" message
-                    if (!currentRecordWasSelected) {
+                    // Auto-select first workarea's Current Record on first load
+                    if (!currentRecordWasSelected && autoSelectOnFirstLoad) {
+                        autoSelectOnFirstLoad = false;  // Only auto-select once
+                        // Auto-select the first workarea's Current Record
+                        HarbourLiveDBFConnection.WorkareaInfo firstWorkarea = workareas.iterator().next();
+                        final String firstAlias = firstWorkarea.getAlias();
+                        HarbourLogger.log("HarbourDBFToolWindow",
+                            "Auto-selecting first workarea's Current Record: " + firstAlias);
+
+                        SwingUtilities.invokeLater(() -> {
+                            DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) treeModel.getRoot();
+                            for (int i = 0; i < rootNode.getChildCount(); i++) {
+                                DefaultMutableTreeNode child = (DefaultMutableTreeNode) rootNode.getChildAt(i);
+                                if (child.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
+                                    HarbourLiveDBFConnection.WorkareaInfo info =
+                                        (HarbourLiveDBFConnection.WorkareaInfo) child.getUserObject();
+                                    if (info.getAlias().equals(firstAlias)) {
+                                        // Expand the workarea node
+                                        TreePath workareaPath = new TreePath(child.getPath());
+                                        workareaTree.expandPath(workareaPath);
+
+                                        // Find and select "Current Record" child node
+                                        for (int j = 0; j < child.getChildCount(); j++) {
+                                            DefaultMutableTreeNode childNode =
+                                                (DefaultMutableTreeNode) child.getChildAt(j);
+                                            if (childNode.getUserObject().toString().equals("Current Record")) {
+                                                TreePath recordPath = new TreePath(childNode.getPath());
+                                                workareaTree.setSelectionPath(recordPath);
+                                                HarbourLogger.log("HarbourDBFToolWindow",
+                                                    "Auto-selected Current Record for " + firstAlias);
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+                    } else if (!currentRecordWasSelected) {
                         List<String[]> selectData = new ArrayList<>();
                         selectData.add(new String[]{"Select a workarea to view details", ""});
                         tableModel.setData(selectData);
@@ -501,21 +692,29 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             }
             
             rootNode.removeAllChildren();
-            
-            for (HarbourLiveDBFConnection.WorkareaInfo workarea : workareas) {
+
+            // Sort workareas if sorting is enabled
+            List<HarbourLiveDBFConnection.WorkareaInfo> sortedWorkareas = new ArrayList<>(workareas);
+            if (sortWorkareasByName) {
+                sortedWorkareas.sort(Comparator.comparing(
+                    HarbourLiveDBFConnection.WorkareaInfo::getAlias,
+                    String.CASE_INSENSITIVE_ORDER));
+            }
+
+            for (HarbourLiveDBFConnection.WorkareaInfo workarea : sortedWorkareas) {
                 DefaultMutableTreeNode workareaNode = new DefaultMutableTreeNode(workarea);
                 rootNode.add(workareaNode);
-                
+
                 // Add child nodes for different information types
                 workareaNode.add(new DefaultMutableTreeNode("Fields (" + workarea.getFieldCount() + ")"));
                 workareaNode.add(new DefaultMutableTreeNode("Current Record"));
                 workareaNode.add(new DefaultMutableTreeNode("Table Grid View"));
                 workareaNode.add(new DefaultMutableTreeNode("Indexes"));
                 workareaNode.add(new DefaultMutableTreeNode("Schema Info"));
-                
-                HarbourLogger.log("HarbourDBFToolWindow", "Added tree nodes for " + workarea.getAlias() + 
+
+                HarbourLogger.log("HarbourDBFToolWindow", "Added tree nodes for " + workarea.getAlias() +
                     " including Table Grid View and Indexes");
-                
+
                 // Log all child nodes to verify they exist
                 for (int i = 0; i < workareaNode.getChildCount(); i++) {
                     DefaultMutableTreeNode child = (DefaultMutableTreeNode) workareaNode.getChildAt(i);
@@ -641,21 +840,20 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         HarbourLogger.log("HarbourDBFToolWindow", "*** TABLE GRID VIEW SELECTED for " + alias);
                         currentWorkarea = alias;
                         updateNavigationButtons();
-                        // Request multiple records for grid view
-                        showLoadingMessage("Table Grid View");
+                        setCurrentViewType("Grid");
+                        // Track loading request ID and show indicator
+                        currentGridLoadingRequestId = System.currentTimeMillis();
+                        showGridLoadingIndicator(true);
+                        // Load records when user clicks Grid View
                         waitingForWorkarea = alias;
                         waitingForDataType = "Records";
-                        pendingRequests.put(alias + ":Records", System.currentTimeMillis());
-                        HarbourLogger.log("HarbourDBFToolWindow", "Setting up request for table grid - alias: " + alias + 
-                            ", waitingForDataType: Records, pendingRequest key: " + alias + ":Records");
-                        // Get current record position from workarea
+                        pendingRequests.put(alias + ":Records", currentGridLoadingRequestId);
                         int currentRec = workarea != null ? workarea.getCurrentRecord() : 1;
-                        // Start at current record, get records from settings
-                        HarbourSettings settings = HarbourSettings.getInstance(project);
-                        int recordCount = settings.getMaxGridPreloadResults();
-                        HarbourLogger.log("HarbourDBFToolWindow", "Using grid preload setting: " + recordCount + " records");
+                        int recordCount = (Integer) gridRecordCountSpinner.getValue();
+                        // Show loading message
+                        showLoadingMessage(recordCount + " records... Please wait.");
+                        HarbourLogger.log("HarbourDBFToolWindow", "Loading " + recordCount + " records for grid view");
                         liveConnection.requestRecords(alias, currentRec, recordCount);
-                        HarbourLogger.log("HarbourDBFToolWindow", "Called liveConnection.requestRecords(" + alias + ", " + currentRec + ", " + recordCount + ")");
                     } else if (nodeText.equals("Indexes")) {
                         HarbourLogger.log("HarbourDBFToolWindow", "*** INDEXES SELECTED for " + alias);
                         currentWorkarea = alias;
@@ -759,17 +957,21 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             // Refresh grid view with new position
                             HarbourSettings settings = HarbourSettings.getInstance(project);
                             int recordCount = settings.getMaxGridPreloadResults();
-                            
+
                             // Clear any pending request for this workarea to avoid duplicates
                             String requestKey = currentWorkarea + ":Records";
                             if (pendingRequests.containsKey(requestKey)) {
                                 pendingRequests.remove(requestKey);
                             }
-                            
+
+                            // Track loading request ID and show indicator
+                            currentGridLoadingRequestId = System.currentTimeMillis();
+                            showGridLoadingIndicator(true);
+
                             // Request records starting from new position
                             waitingForWorkarea = currentWorkarea;
                             waitingForDataType = "Records";
-                            pendingRequests.put(requestKey, System.currentTimeMillis());
+                            pendingRequests.put(requestKey, currentGridLoadingRequestId);
                             liveConnection.requestRecords(currentWorkarea, recordNumber, recordCount);
                         }
                     }
@@ -823,7 +1025,34 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 });
             }
         }
-        
+
+        /**
+         * Setup Enter key handling for the grid record count spinner
+         */
+        private void setupGridSpinnerEnterKeyHandling() {
+            JComponent editor = gridRecordCountSpinner.getEditor();
+
+            if (editor instanceof JSpinner.DefaultEditor) {
+                JFormattedTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+
+                // Use InputMap/ActionMap for reliable Enter key handling
+                textField.getInputMap(JComponent.WHEN_FOCUSED).put(
+                    KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "loadGridRecords");
+                textField.getActionMap().put("loadGridRecords", new AbstractAction() {
+                    @Override
+                    public void actionPerformed(java.awt.event.ActionEvent e) {
+                        try {
+                            gridRecordCountSpinner.commitEdit();
+                            HarbourLogger.log("HarbourDBFToolWindow", "Grid spinner Enter key pressed, loading records");
+                            loadGridRecords();
+                        } catch (ParseException ex) {
+                            HarbourLogger.log("HarbourDBFToolWindow", "Invalid record count input: " + ex.getMessage());
+                        }
+                    }
+                });
+            }
+        }
+
         /**
          * Reload current data manually
          */
@@ -858,11 +1087,13 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     cache.recordData = null;
                     liveConnection.requestRecordData(currentWorkarea);
                 } else if (nodeText.equals("Table Grid View")) {
-                    // Request records again
+                    // Request records again - track loading request ID
+                    currentGridLoadingRequestId = System.currentTimeMillis();
+                    showGridLoadingIndicator(true);
                     showLoadingMessage("Table Grid View");
                     waitingForWorkarea = currentWorkarea;
                     waitingForDataType = "Records";
-                    pendingRequests.put(currentWorkarea + ":Records", System.currentTimeMillis());
+                    pendingRequests.put(currentWorkarea + ":Records", currentGridLoadingRequestId);
                     // Get current record position for reload
                     HarbourLiveDBFConnection.WorkareaInfo workarea = liveConnection.getWorkarea(currentWorkarea);
                     int currentRec = workarea != null ? workarea.getCurrentRecord() : 1;
@@ -897,14 +1128,19 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 // Removed gotoButton and loadAllButton
                 recordSpinner.setEnabled(false);
                 totalRecordsLabel.setText("");
+                // Update header with program's currently selected workarea (not tree selection)
+                updateProgramSelectedInfo();
                 return;
             }
-            
+
+            // Update header with program's currently selected workarea (not tree selection)
+            updateProgramSelectedInfo();
+
             HarbourLiveDBFConnection.WorkareaInfo workarea = liveConnection.getWorkarea(currentWorkarea);
             if (workarea != null) {
                 int currentRecord = workarea.getCurrentRecord();
                 int totalRecords = workarea.getTotalRecords();
-                
+
                 // Check what view is selected - only enable navigation for Current Record and Table Grid View
                 boolean navigationEnabled = false;
                 TreePath selectionPath = workareaTree.getSelectionPath();
@@ -913,7 +1149,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     if (selectedNode != null && selectedNode.getUserObject() != null) {
                         // Check if it's a workarea node (defaults to Current Record view)
                         if (selectedNode.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
-                            HarbourLiveDBFConnection.WorkareaInfo selectedWorkarea = 
+                            HarbourLiveDBFConnection.WorkareaInfo selectedWorkarea =
                                 (HarbourLiveDBFConnection.WorkareaInfo) selectedNode.getUserObject();
                             // Enable navigation if this is the current workarea
                             navigationEnabled = selectedWorkarea.getAlias().equals(currentWorkarea);
@@ -924,12 +1160,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         }
                     }
                 }
-                
+
                 // Enable/disable navigation based on view and record position
                 prevButton.setEnabled(navigationEnabled && currentRecord > 1);
                 nextButton.setEnabled(navigationEnabled && currentRecord < totalRecords);
                 recordSpinner.setEnabled(navigationEnabled && totalRecords > 0);
-                
+
                 // Update spinner model
                 if (totalRecords > 0) {
                     // Ensure currentRecord is within valid range [1, totalRecords]
@@ -946,7 +1182,241 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 }
             }
         }
-        
+
+        /**
+         * Update the header info label with the program's currently selected workarea
+         * This shows what SELECT() returns in the Harbour program, not what's selected in tree
+         */
+        private void updateProgramSelectedInfo() {
+            if (liveConnection == null) {
+                currentInfoLabel.setText("");
+                return;
+            }
+
+            HarbourLiveDBFConnection.WorkareaInfo programSelected = liveConnection.getCurrentSelectedWorkarea();
+            if (programSelected != null) {
+                String formattedRecno = String.format("%,d", programSelected.getCurrentRecord());
+                currentInfoLabel.setText("Selected: " + programSelected.getAlias() + " [" + formattedRecno + "]");
+            } else {
+                int areaNum = liveConnection.getCurrentSelectedArea();
+                if (areaNum > 0) {
+                    currentInfoLabel.setText("Selected: Area " + areaNum);
+                } else {
+                    currentInfoLabel.setText("");
+                }
+            }
+        }
+
+        /**
+         * Apply filters and sorting to the displayed data
+         */
+        private void applyFilters() {
+            if (unfilteredData == null || unfilteredData.isEmpty()) {
+                return;
+            }
+
+            String nameFilter = filterNameField.getText().toLowerCase().trim();
+            String valueFilter = filterValueField.getText().toLowerCase().trim();
+
+            List<String[]> resultData = new ArrayList<>();
+
+            // Apply filters
+            for (String[] row : unfilteredData) {
+                boolean matchesName = nameFilter.isEmpty() ||
+                    (row.length > 0 && row[0] != null && row[0].toLowerCase().contains(nameFilter));
+                boolean matchesValue = valueFilter.isEmpty() ||
+                    (row.length > 1 && row[1] != null && row[1].toLowerCase().contains(valueFilter));
+
+                if (matchesName && matchesValue) {
+                    resultData.add(row);
+                }
+            }
+
+            // Apply sorting based on column sort state (0=none, 1=asc, 2=desc)
+            int propSortState = tableModel.getPropertySortState();
+            int valueSortState = tableModel.getValueSortState();
+
+            if (propSortState > 0 && !resultData.isEmpty()) {
+                final boolean ascending = (propSortState == 1);
+                resultData.sort((a, b) -> {
+                    String nameA = (a.length > 0 && a[0] != null) ? a[0] : "";
+                    String nameB = (b.length > 0 && b[0] != null) ? b[0] : "";
+                    int cmp = nameA.compareToIgnoreCase(nameB);
+                    return ascending ? cmp : -cmp;
+                });
+            } else if (valueSortState > 0 && !resultData.isEmpty()) {
+                final boolean ascending = (valueSortState == 1);
+                resultData.sort((a, b) -> {
+                    String valA = (a.length > 1 && a[1] != null) ? a[1] : "";
+                    String valB = (b.length > 1 && b[1] != null) ? b[1] : "";
+                    int cmp = valA.compareToIgnoreCase(valB);
+                    return ascending ? cmp : -cmp;
+                });
+            }
+
+            tableModel.setData(resultData);
+        }
+
+        /**
+         * Clear all filters and show full data
+         */
+        private void clearFilters() {
+            filterNameField.setText("");
+            filterValueField.setText("");
+            if (unfilteredData != null) {
+                tableModel.setData(unfilteredData);
+            }
+        }
+
+        /**
+         * Store unfiltered data and apply current filters
+         */
+        private void setDataWithFiltering(List<String[]> data) {
+            unfilteredData = new ArrayList<>(data);
+            applyFilters();
+        }
+
+        /**
+         * Check if sorting is allowed for the current view (not Schema Info or Indexes)
+         */
+        private boolean isSortingAllowedForCurrentView() {
+            return currentViewType != null &&
+                !currentViewType.equals("Schema") &&
+                !currentViewType.equals("Indexes");
+        }
+
+        /**
+         * Show/hide the grid view record count controls
+         */
+        private void setGridControlsVisible(boolean visible) {
+            if (separatorLabel != null) separatorLabel.setVisible(visible);
+            if (gridRecordLabel != null) gridRecordLabel.setVisible(visible);
+            if (gridRecordCountSpinner != null) gridRecordCountSpinner.setVisible(visible);
+            if (gridEnterLabel != null) gridEnterLabel.setVisible(visible);
+        }
+
+        /**
+         * Show/hide navigation controls (Previous, Next, Go to, etc.)
+         */
+        private void setNavigationControlsVisible(boolean visible) {
+            if (prevButton != null) prevButton.setVisible(visible);
+            if (nextButton != null) nextButton.setVisible(visible);
+            if (gotoLabel != null) gotoLabel.setVisible(visible);
+            if (recordSpinner != null) recordSpinner.setVisible(visible);
+            if (enterLabel != null) enterLabel.setVisible(visible);
+            if (totalRecordsLabel != null) totalRecordsLabel.setVisible(visible);
+        }
+
+        /**
+         * Show/hide the filter panel (hidden for Grid view since it has many columns)
+         */
+        private void setFilterPanelVisible(boolean visible) {
+            if (filterPanel != null) {
+                filterPanel.setVisible(visible);
+            }
+        }
+
+        /**
+         * Load grid records with user-specified count
+         */
+        private void loadGridRecords() {
+            if (currentWorkarea == null || liveConnection == null) return;
+
+            HarbourLiveDBFConnection.WorkareaInfo workarea = liveConnection.getWorkarea(currentWorkarea);
+            if (workarea == null) return;
+
+            int currentRec = workarea.getCurrentRecord();
+            int recordCount = (Integer) gridRecordCountSpinner.getValue();
+            int totalRecords = workarea.getTotalRecords();
+
+            // Show loading indicator and track request ID
+            currentGridLoadingRequestId = System.currentTimeMillis();
+            showGridLoadingIndicator(true);
+
+            // Show appropriate loading message (don't include "Loading" - showLoadingMessage adds it)
+            String loadingMsg;
+            if (recordCount == 0) {
+                loadingMsg = "all " + String.format("%,d", totalRecords) + " records... Please wait.";
+            } else {
+                loadingMsg = recordCount + " records... Please wait.";
+            }
+            showLoadingMessage(loadingMsg);
+
+            waitingForWorkarea = currentWorkarea;
+            waitingForDataType = "Records";
+            pendingRequests.put(currentWorkarea + ":Records", currentGridLoadingRequestId);
+            liveConnection.requestRecords(currentWorkarea, currentRec, recordCount);
+
+            HarbourLogger.log("HarbourDBFToolWindow",
+                "User requested grid load: " + currentWorkarea + " from " + currentRec + ", count " + recordCount);
+        }
+
+        /**
+         * Show/hide the grid loading indicator
+         */
+        private void showGridLoadingIndicator(boolean show) {
+            HarbourLogger.log("HarbourDBFToolWindow", ">>> showGridLoadingIndicator(" + show +
+                ") - currentRequestId=" + currentGridLoadingRequestId +
+                ", stacktrace=" + Thread.currentThread().getStackTrace()[2]);
+            if (gridLoadingLabel != null) {
+                gridLoadingLabel.setVisible(show);
+            }
+        }
+
+        /**
+         * Hide loading indicator only if the given request ID matches the current active request.
+         * Uses Timer with 200ms delay to ensure Swing has completed all painting.
+         */
+        private void hideLoadingIndicatorIfActive(long requestId) {
+            HarbourLogger.log("HarbourDBFToolWindow", ">>> hideLoadingIndicatorIfActive(requestId=" + requestId +
+                ") - currentRequestId=" + currentGridLoadingRequestId);
+            if (requestId != 0 && requestId == currentGridLoadingRequestId) {
+                HarbourLogger.log("HarbourDBFToolWindow", ">>> hideLoadingIndicatorIfActive - IDs match, scheduling hide with 200ms delay");
+                // Use Timer with delay to ensure painting is complete
+                Timer hideTimer = new Timer(200, e -> {
+                    HarbourLogger.log("HarbourDBFToolWindow", ">>> hideLoadingIndicatorIfActive - Timer fired, checking IDs: requestId=" +
+                        requestId + ", currentRequestId=" + currentGridLoadingRequestId);
+                    if (requestId == currentGridLoadingRequestId) {
+                        showGridLoadingIndicator(false);
+                    } else {
+                        HarbourLogger.log("HarbourDBFToolWindow", ">>> hideLoadingIndicatorIfActive - IDs no longer match, NOT hiding");
+                    }
+                });
+                hideTimer.setRepeats(false);
+                hideTimer.start();
+            } else {
+                HarbourLogger.log("HarbourDBFToolWindow", ">>> hideLoadingIndicatorIfActive - IDs don't match or requestId=0, NOT hiding");
+            }
+        }
+
+        /**
+         * Update the view type and table model sort indicator visibility
+         */
+        private void setCurrentViewType(String viewType) {
+            this.currentViewType = viewType;
+
+            boolean isGridView = "Grid".equals(viewType);
+
+            // Show/hide grid controls based on view type
+            setGridControlsVisible(isGridView);
+
+            // Show/hide filter panel based on view type (hide for Grid view)
+            setFilterPanelVisible(!isGridView);
+
+            // Hide record navigation in Grid view (not really needed there)
+            setNavigationControlsVisible(!isGridView);
+
+            boolean sortingAllowed = isSortingAllowedForCurrentView();
+            if (sortingAllowed) {
+                tableModel.setSortingEnabled(true);
+            } else {
+                tableModel.setSortingEnabled(false);
+                // Reset sort state when entering non-sortable view
+                sortColumnsByName = false;
+                sortColumnsByValue = false;
+            }
+        }
+
         /**
          * Show basic workarea details in the details table - DEFAULT: show current record data
          */
@@ -972,6 +1442,23 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             }
         }
         
+        /**
+         * Show instructions for Grid View (before loading)
+         */
+        private void showGridViewInstructions() {
+            setCurrentViewType("Grid");
+            int recordCount = (Integer) gridRecordCountSpinner.getValue();
+            List<String[]> data = new ArrayList<>();
+            data.add(new String[]{"Table Grid View", ""});
+            data.add(new String[]{"", ""});
+            data.add(new String[]{"Enter number of records to load", "in the 'Load:' field above"});
+            data.add(new String[]{"(0 = load all records)", ""});
+            data.add(new String[]{"", ""});
+            data.add(new String[]{"Press Enter to load", recordCount + " records"});
+            tableModel.setData(data);
+            unfilteredData = new ArrayList<>(data);
+        }
+
         /**
          * Show loading message in the details table
          */
@@ -1023,7 +1510,20 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                             HarbourLogger.log("HarbourDBFToolWindow", "Auto-connected to Harbour debugging session");
 
                             // Add session listener to refresh DBF view on each step/pause
-                            setupStepListener(debugProcess.getSession());
+                            XDebugSession session = debugProcess.getSession();
+                            setupStepListener(session);
+
+                            // If already suspended (first breakpoint already hit), trigger immediate refresh
+                            // This handles the case where processStarted fires after first breakpoint
+                            if (session.isSuspended()) {
+                                HarbourLogger.log("HarbourDBFToolWindow",
+                                    "Session already suspended on processStarted - triggering DBF refresh");
+                                SwingUtilities.invokeLater(() -> {
+                                    if (liveConnection != null) {
+                                        liveConnection.requestWorkareaUpdate();
+                                    }
+                                });
+                            }
                         }
                     }
                 }
@@ -1049,16 +1549,11 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     // Only refresh if session is actually paused (not running)
                     // This prevents refreshing during rapid stepping or continuous execution
                     if (session.isSuspended()) {
-                        // IMPORTANT: Only refresh if the tool window is visible
-                        // When the window is closed, stepping should be faster
-                        if (!toolWindow.isVisible()) {
-                            HarbourLogger.log("HarbourDBFToolWindow",
-                                "Session paused but DBF tool window not visible - skipping refresh for better performance");
-                            return;
-                        }
-
+                        // Always request workarea update - the visibility check was causing
+                        // issues with first-time loading. The workareas request is lightweight.
+                        String visibility = toolWindow.isVisible() ? "visible" : "hidden";
                         HarbourLogger.log("HarbourDBFToolWindow",
-                            "Session paused - triggering ASYNC DBF refresh");
+                            "Session paused - triggering ASYNC DBF refresh (window " + visibility + ")");
 
                         // Request fresh workarea list asynchronously
                         // This will call onWorkareasUpdated() when complete
@@ -1148,6 +1643,16 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
 
                         // Add session listener to refresh DBF view on each step/pause
                         setupStepListener(currentSession);
+
+                        // If session is already paused/suspended, trigger immediate refresh
+                        // (the sessionPaused listener won't fire for already-paused sessions)
+                        if (currentSession.isSuspended()) {
+                            HarbourLogger.log("HarbourDBFToolWindow",
+                                "Session already suspended - triggering immediate DBF refresh");
+                            if (liveConnection != null) {
+                                liveConnection.requestWorkareaUpdate();
+                            }
+                        }
                     }
                 }
             }
@@ -1197,10 +1702,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 SwingUtilities.invokeLater(() -> displayFieldData(workarea, fieldData));
                 return;
             }
-            
+
+            setCurrentViewType("Fields");
+
             // Switch back to details table
             switchToDetailsTable();
-            
+
             List<String[]> data = new ArrayList<>();
             
             int fieldCount = 0;
@@ -1215,22 +1722,22 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         String fieldLength = parts[3];
                         String fieldDecimals = parts[4];
                         
-                        data.add(new String[]{fieldName, fieldType + "(" + fieldLength + 
+                        data.add(new String[]{fieldName, fieldType + "(" + fieldLength +
                             (Integer.parseInt(fieldDecimals) > 0 ? "," + fieldDecimals : "") + ")"});
                         fieldCount++;
                     }
                 }
             }
-            
-            tableModel.setData(data);
-            
+
+            setDataWithFiltering(data);
+
             // Force table to repaint
             detailsTable.repaint();
             detailsTable.revalidate();
-            
+
         }
-        
-        @Override 
+
+        @Override
         public void onRecordDataReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordData) {
             
             // Cache the data
@@ -1274,10 +1781,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 SwingUtilities.invokeLater(() -> displayRecordData(workarea, recordData));
                 return;
             }
-            
+
+            setCurrentViewType("Record");
+
             // Switch back to details table
             switchToDetailsTable();
-            
+
             List<String[]> data = new ArrayList<>();
             
             int valueCount = 0;
@@ -1311,21 +1820,21 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         
                         // 3. Trim the value
                         fieldValue = fieldValue.trim();
-                        
+
                         data.add(new String[]{fieldName, fieldValue});
                         valueCount++;
                     }
                 }
             }
-            
-            tableModel.setData(data);
-            
+
+            setDataWithFiltering(data);
+
             // Force table to repaint
             detailsTable.repaint();
             detailsTable.revalidate();
-            
+
         }
-        
+
         @Override
         public void onSchemaInfoReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] schemaData) {
             // Cache the data
@@ -1415,10 +1924,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 SwingUtilities.invokeLater(() -> displaySchemaData(workarea, schemaData));
                 return;
             }
-            
+
+            setCurrentViewType("Schema");
+
             // Switch back to details table
             switchToDetailsTable();
-            
+
             List<String[]> data = new ArrayList<>();
             
             int itemCount = 0;
@@ -1451,22 +1962,22 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         String fieldLength = parts[3];
                         String fieldDecimals = parts[4];
                         
-                        data.add(new String[]{"Field: " + fieldName, 
-                            fieldType + "(" + fieldLength + 
+                        data.add(new String[]{"Field: " + fieldName,
+                            fieldType + "(" + fieldLength +
                             (Integer.parseInt(fieldDecimals) > 0 ? "," + fieldDecimals : "") + ")"});
                         itemCount++;
                     }
                 }
             }
-            
-            tableModel.setData(data);
-            
+
+            setDataWithFiltering(data);
+
             // Force table to repaint
             detailsTable.repaint();
             detailsTable.revalidate();
-            
+
         }
-        
+
         @Override
         public void onRecordsReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordsData) {
             // Check if we should display this data
@@ -1490,11 +2001,17 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             }
             
             // Process if we have a pending request OR if this is the current grid view
+            long requestIdForHide = 0;  // 0 means don't hide
             if (pendingRequests.containsKey(requestKey)) {
+                Long requestTimestamp = pendingRequests.get(requestKey);
                 shouldDisplay = true;
                 pendingRequests.remove(requestKey);
-                // Process pending request
-                
+
+                // Pass the request ID so we can verify it's still the active request when hiding
+                if (requestTimestamp != null && requestTimestamp == currentGridLoadingRequestId) {
+                    requestIdForHide = requestTimestamp;
+                }
+
                 if (waitingForWorkarea != null && waitingForWorkarea.equals(alias) && "Records".equals(waitingForDataType)) {
                     waitingForWorkarea = null;
                     waitingForDataType = null;
@@ -1502,16 +2019,17 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             } else if (isCurrentGridView) {
                 // Accept duplicate for current grid view to ensure UI updates
                 shouldDisplay = true;
-                // Accept duplicate for current grid view to ensure UI updates
+                // But don't hide loading indicator for duplicates - only for actual pending requests
             } else {
                 // Ignore unexpected records
             }
-            
+
             if (shouldDisplay) {
-                displayRecordsGrid(workarea, recordsData);
+                // Pass the request ID - displayRecordsGrid will use it to verify before hiding
+                displayRecordsGrid(workarea, recordsData, requestIdForHide);
             }
         }
-        
+
         @Override
         public void onIndexesReceived(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] indexesData) {
             // Check if we should display this data
@@ -1538,17 +2056,21 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
         
         /**
          * Display multiple records in a grid view
+         * @param requestId Request ID for this load operation. If non-zero and matches currentGridLoadingRequestId,
+         *                  the loading indicator will be hidden after rendering. 0 means don't hide.
          */
-        private void displayRecordsGrid(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordsData) {
+        private void displayRecordsGrid(@NotNull HarbourLiveDBFConnection.WorkareaInfo workarea, @NotNull String[] recordsData, long requestId) {
             if (!SwingUtilities.isEventDispatchThread()) {
-                SwingUtilities.invokeLater(() -> displayRecordsGrid(workarea, recordsData));
+                SwingUtilities.invokeLater(() -> displayRecordsGrid(workarea, recordsData, requestId));
                 return;
             }
-            
+
+            setCurrentViewType("Grid");
+
             List<String> columnNames = new ArrayList<>();
             List<Map<String, String>> rows = new ArrayList<>();
             Map<String, String> currentRow = null;
-            
+
             // Parse the records data
             for (String line : recordsData) {
                 if (line.startsWith("ERROR:")) {
@@ -1557,6 +2079,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     errorData.add(new String[]{"Error:", line.substring(6)});
                     tableModel.setData(errorData);
                     switchToDetailsTable();
+                    hideLoadingIndicatorIfActive(requestId);
                     return;
                 } else if (line.startsWith("COLUMN:")) {
                     // Parse column definition - format: COLUMN:name:type:length:decimals
@@ -1588,37 +2111,39 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     }
                 }
             }
-            
+
             // Add last row
             if (currentRow != null) {
                 rows.add(currentRow);
             }
-            
+
             // If no columns found, show error
             if (columnNames.isEmpty() || rows.isEmpty()) {
                 List<String[]> data = new ArrayList<>();
                 data.add(new String[]{"No data available", ""});
                 tableModel.setData(data);
                 switchToDetailsTable();
+                hideLoadingIndicatorIfActive(requestId);
                 return;
             }
-            
-            // Create proper grid table
-            createAndSwitchToGridTable(columnNames, rows);
+
+            // Create proper grid table - pass request ID for hiding indicator
+            createAndSwitchToGridTable(columnNames, rows, requestId);
         }
         
         /**
          * Create a new JTable for grid view and switch to it
+         * @param requestId The request ID - if non-zero and matches current, hide indicator after render
          */
-        private void createAndSwitchToGridTable(List<String> columnNames, List<Map<String, String>> rows) {
+        private void createAndSwitchToGridTable(List<String> columnNames, List<Map<String, String>> rows, long requestId) {
             // Add RecNo as first column
             List<String> allColumns = new ArrayList<>();
             allColumns.add("RecNo");
             allColumns.addAll(columnNames);
-            
+
             // Create column names array
             String[] columnArray = allColumns.toArray(new String[0]);
-            
+
             // Create data array
             Object[][] dataArray = new Object[rows.size()][allColumns.size()];
             for (int i = 0; i < rows.size(); i++) {
@@ -1629,7 +2154,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     dataArray[i][j] = value != null ? value : "";
                 }
             }
-            
+
             // Create new table model for grid
             DefaultTableModel gridModel = new DefaultTableModel(dataArray, columnArray) {
                 @Override
@@ -1637,17 +2162,17 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     return false; // Make table read-only
                 }
             };
-            
+
             // Create new grid table
             gridTable = new JBTable(gridModel);
             gridTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
             gridTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-            
+
             // Set column widths based on content
             for (int i = 0; i < gridTable.getColumnCount(); i++) {
                 TableColumn column = gridTable.getColumnModel().getColumn(i);
                 String columnName = columnArray[i];
-                
+
                 // Set preferred width based on column name and content
                 int width;
                 if ("RecNo".equals(columnName)) {
@@ -1659,11 +2184,16 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 }
                 column.setPreferredWidth(width);
             }
-            
+
             // Replace the table in the scroll pane
             tableScrollPane.setViewportView(gridTable);
             tableScrollPane.revalidate();
             tableScrollPane.repaint();
+
+            // Hide loading indicator AFTER the grid is fully rendered
+            // Use double invokeLater to ensure Swing has painted the table first
+            // Only hide if this request is still the active one
+            hideLoadingIndicatorIfActive(requestId);
         }
         
         /**
@@ -1685,10 +2215,12 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 SwingUtilities.invokeLater(() -> displayIndexes(workarea, indexesData));
                 return;
             }
-            
+
+            setCurrentViewType("Indexes");
+
             // Switch back to details table
             switchToDetailsTable();
-            
+
             List<String[]> data = new ArrayList<>();
             
             String currentIndex = null;
@@ -1794,8 +2326,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             } else {
                 data.add(new String[]{"No indexes defined for this workarea", ""});
             }
-            
-            tableModel.setData(data);
+
+            setDataWithFiltering(data);
             detailsTable.repaint();
             detailsTable.revalidate();
         }
@@ -1805,23 +2337,103 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
      * Table model for displaying workarea details
      */
     private static class DetailsTableModel extends AbstractTableModel {
-        
-        private final String[] columnNames = {"Property", "Value"};
+
+        private String[] columnNames = {"Property", "Value"};
         private List<String[]> data = new ArrayList<>();
-        
+        private boolean sortingEnabled = false;  // Whether sorting is allowed
+        // 0 = no sort, 1 = ascending, 2 = descending
+        private int propertySortState = 0;
+        private int valueSortState = 0;
+
+        // Sort indicator characters (subtle arrows)
+        private static final String SORT_NONE = "";
+        private static final String SORT_ASC = " \u25B5";  // Small up triangle
+        private static final String SORT_DESC = " \u25BF"; // Small down triangle
+
         @Override
         public int getRowCount() {
             return data.size();
         }
-        
+
         @Override
         public int getColumnCount() {
             return columnNames.length;
         }
-        
+
         @Override
         public String getColumnName(int column) {
+            if (!sortingEnabled) {
+                return columnNames[column];
+            }
+            if (column == 0) {
+                return columnNames[column] + getSortIndicator(propertySortState);
+            } else if (column == 1) {
+                return columnNames[column] + getSortIndicator(valueSortState);
+            }
             return columnNames[column];
+        }
+
+        private String getSortIndicator(int state) {
+            switch (state) {
+                case 1: return SORT_ASC;
+                case 2: return SORT_DESC;
+                default: return SORT_NONE;
+            }
+        }
+
+        /**
+         * Toggle sort state for a column (cycles: none -> asc -> desc -> none)
+         * @param column 0 for Property, 1 for Value
+         * @return the new sort state (0=none, 1=asc, 2=desc)
+         */
+        public int toggleSortState(int column) {
+            if (column == 0) {
+                propertySortState = (propertySortState + 1) % 3;
+                valueSortState = 0;  // Reset other column
+                fireTableStructureChanged();
+                return propertySortState;
+            } else if (column == 1) {
+                valueSortState = (valueSortState + 1) % 3;
+                propertySortState = 0;  // Reset other column
+                fireTableStructureChanged();
+                return valueSortState;
+            }
+            return 0;
+        }
+
+        public int getPropertySortState() { return propertySortState; }
+        public int getValueSortState() { return valueSortState; }
+
+        public void setSortingEnabled(boolean enabled) {
+            this.sortingEnabled = enabled;
+            if (!enabled) {
+                propertySortState = 0;
+                valueSortState = 0;
+            }
+            fireTableStructureChanged();
+        }
+
+        public void resetSortState() {
+            propertySortState = 0;
+            valueSortState = 0;
+            fireTableStructureChanged();
+        }
+
+        // Legacy methods for compatibility
+        public void setSortIndicator(boolean visible, boolean ascending) {
+            // Convert old API to new
+            this.sortingEnabled = visible;
+            if (visible) {
+                propertySortState = ascending ? 1 : 2;
+            } else {
+                propertySortState = 0;
+            }
+            valueSortState = 0;
+            fireTableStructureChanged();
+        }
+
+        public void hideSortIndicator() {
+            setSortingEnabled(false);
         }
         
         @Override
