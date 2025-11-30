@@ -65,6 +65,16 @@ public class HarbourStructureViewModel extends TextEditorBasedStructureViewModel
     }
 
     /**
+     * Returns the classes that are suitable for the structure view.
+     * This tells the framework which PSI elements can be highlighted.
+     */
+    @NotNull
+    @Override
+    protected Class<?> @NotNull [] getSuitableClasses() {
+        return new Class[]{LeafPsiElement.class, HarbourFile.class};
+    }
+
+    /**
      * Returns the element at the current cursor position.
      * This enables automatic highlighting of the current method/function in the structure view.
      */
