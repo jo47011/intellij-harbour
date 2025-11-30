@@ -30,9 +30,17 @@
         <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
                   fieldName="INSTANCE" language="Harbour" extensions="prg;ch"/>
 
+        <!-- Harbour Config File Type (for .hbp, .hbc, .cfg files that use # comments) -->
+        <fileType name="Harbour Config File" implementationClass="org.intellij.sdk.language.HarbourConfigFileType"
+                  fieldName="INSTANCE" language="HarbourConfig" extensions="hbp;hbc;cfg"/>
+
         <!-- Language -->
         <lang.parserDefinition language="Harbour"
                                implementationClass="org.intellij.sdk.language.HarbourParserDefinition"/>
+
+        <!-- Harbour Config Language Parser -->
+        <lang.parserDefinition language="HarbourConfig"
+                               implementationClass="org.intellij.sdk.language.HarbourConfigParserDefinition"/>
 
         <!-- Syntax Highlighter -->
         <lang.syntaxHighlighterFactory language="Harbour"
@@ -47,6 +55,9 @@
 
         <!-- Commenter -->
         <lang.commenter language="Harbour" implementationClass="org.intellij.sdk.language.HarbourCommenter"/>
+
+        <!-- Commenter for Config files (uses # for line comments) -->
+        <lang.commenter language="HarbourConfig" implementationClass="org.intellij.sdk.language.HarbourConfigCommenter"/>
 
         <!-- Quote Handler -->
         <lang.quoteHandler language="Harbour" implementationClass="org.intellij.sdk.language.HarbourQuoteHandler"/>
@@ -155,17 +166,20 @@
         <!-- Line Indent Provider for fast auto-indentation - TEMPORARILY DISABLED -->
         <!-- <codeInsight.lineIndentProvider language="Harbour" implementationClass="org.intellij.sdk.language.HarbourLineIndentProvider"/> -->
         
-        <!-- Notification Group -->
-        <notificationGroup id="Harbour Application" displayType="BALLOON" isLogByDefault="true"/>
+        <!-- Notification Group - displayType NONE_LOG to avoid popups -->
+        <notificationGroup id="Harbour Application" displayType="NONE_LOG" isLogByDefault="true"/>
         
         <!-- Database Support - Custom implementation for Community Edition -->
         <!-- <com.intellij.database.dialect implementation="org.intellij.sdk.language.HarbourDBFDialect"/>
         <com.intellij.database.dataSourceProvider implementation="org.intellij.sdk.language.HarbourDBFDataSourceProvider"/> -->
         
         <!-- Tool Window -->
-        <toolWindow id="Harbour DBF" secondary="true" anchor="bottom" 
+        <toolWindow id="Harbour DBF" secondary="true" anchor="bottom"
                     factoryClass="org.intellij.sdk.language.HarbourDBFToolWindow"
                     icon="/icons/harbour.png"/>
+
+        <!-- Command Line Formatter -->
+        <appStarter implementation="org.intellij.sdk.language.HarbourFormatStarter"/>
     </extensions>
 
     <actions>
@@ -208,4 +222,10 @@
             <keyboard-shortcut keymap="$default" first-keystroke="alt D"/>
         </action>
     </actions>
+
+    <!-- Action Listeners -->
+    <applicationListeners>
+        <listener class="org.intellij.sdk.language.HarbourFormatActionListener"
+                  topic="com.intellij.openapi.actionSystem.ex.AnActionListener"/>
+    </applicationListeners>
 </idea-plugin>

@@ -12,9 +12,11 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.codeStyle.CodeStyleManager;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.jetbrains.annotations.NotNull;
 
@@ -88,34 +90,33 @@ public class HarbourFormatAction extends AnAction {
         // Commit any pending document changes
         PsiDocumentManager.getInstance(project).commitDocument(document);
 
+        // Get original text for comparison
+        String originalText = document.getText();
+
         // Perform the formatting in a write action to ensure changes are applied
         WriteCommandAction.runWriteCommandAction(project, "Format Harbour Code", null, () -> {
             try {
-                // Prevent standard formatter and reference resolution during our formatting
-                HarbourTokenTypeExtension.setFormattingInProgress(true);
+                HarbourLogger.log("FormatAction", "Starting CodeStyleManager.reformatText");
 
-                try {
-                    // Create a formatter instance and apply our custom formatting
-                    HarbourCodeFormatter formatter = new HarbourCodeFormatter(project);
+                // Use CodeStyleManager to trigger full formatting pipeline
+                // This will invoke HarbourFormattingModelBuilder and HarbourPostFormatProcessor
+                TextRange range = new TextRange(0, psiFile.getTextLength());
+                CodeStyleManager.getInstance(project).reformatText(psiFile, range.getStartOffset(), range.getEndOffset());
 
-                    // Apply formatting - this should now work with proper indentation
-                    boolean changed = formatter.format(psiFile);
+                // Commit changes to PSI
+                PsiDocumentManager.getInstance(project).commitDocument(document);
 
-                    // Commit changes to PSI
-                    PsiDocumentManager.getInstance(project).commitDocument(document);
+                HarbourLogger.log("FormatAction", "CodeStyleManager.reformatText completed");
 
-                    // Show notification about what happened
-                    String message = changed ? "Formatting applied successfully" : "No changes needed";
-                    showNotification(project, "Harbour Code Formatted",
-                            message + " for " + virtualFile.getName(),
-                            NotificationType.INFORMATION);
+                // Check if changes were made
+                boolean changed = !originalText.equals(document.getText());
+                String message = changed ? "Formatting applied successfully" : "No changes needed";
+                showNotification(project, "Harbour Code Formatted",
+                        message + " for " + virtualFile.getName(),
+                        NotificationType.INFORMATION);
 
-                    // Force editor to redraw
-                    editor.getComponent().repaint();
-                } finally {
-                    // Reset the formatting flag
-                    HarbourTokenTypeExtension.setFormattingInProgress(false);
-                }
+                // Force editor to redraw
+                editor.getComponent().repaint();
             } catch (Exception ex) {
                 LOG.warn("Error during formatting", ex);
                 HarbourLogger.log("FormatAction", "Error during formatting: " + ex.getMessage());

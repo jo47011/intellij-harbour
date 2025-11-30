@@ -50,14 +50,29 @@ public class HarbourDebuggerStackFrame extends XStackFrame {
     public void computeChildren(@NotNull XCompositeNode node) {
         // Execute on the proper thread to ensure UI safety
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            // Capture step generation at start - if it changes, a new step was requested
+            long myStepGeneration = 0;
+
             // Wait for variables to arrive if they're not ready yet
             // This runs on a background thread, so it won't block the UI
             if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
                 HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                myStepGeneration = remoteProcess.getStepGeneration();
+
                 if (!remoteProcess.areVariablesReady()) {
                     HarbourLogger.log("HarbourDebuggerStackFrame",
-                        "Variables not ready yet, waiting up to 500ms...");
+                        "Variables not ready yet, waiting up to 500ms (gen=" + myStepGeneration + ")...");
                     remoteProcess.waitForVariables(500);  // Wait max 500ms
+
+                    // Check if a new step was issued while waiting
+                    if (remoteProcess.getStepGeneration() != myStepGeneration) {
+                        HarbourLogger.log("HarbourDebuggerStackFrame",
+                            "Step generation changed during wait, skipping UI update");
+                        // Mark as complete but empty - a new frame will be created for the new position
+                        node.addChildren(new XValueChildrenList(), true);
+                        return;
+                    }
+
                     if (remoteProcess.areVariablesReady()) {
                         HarbourLogger.log("HarbourDebuggerStackFrame", "Variables ready after wait");
                     } else {

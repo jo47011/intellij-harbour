@@ -30,8 +30,8 @@ public class HarbourStructureViewFactory implements PsiStructureViewFactory {
         return new TreeBasedStructureViewBuilder() {
             @Override
             public @NotNull StructureViewModel createStructureViewModel(@Nullable Editor editor) {
-                // Create the model
-                HarbourStructureViewModel model = new HarbourStructureViewModel(harbourFile);
+                // Create the model with editor for cursor tracking
+                HarbourStructureViewModel model = new HarbourStructureViewModel(harbourFile, editor);
 
                 // Register for disposal when project closes
                 if (project != null && !project.isDisposed()) {

@@ -1,8 +1,5 @@
 package org.intellij.sdk.language;
 
-import com.intellij.notification.Notification;
-import com.intellij.notification.NotificationType;
-import com.intellij.notification.Notifications;
 import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -26,22 +23,6 @@ public class HarbourPluginComponent implements ProjectComponent {
         // Register structure view listeners for proper disposal
         HarbourStructureViewFactory.registerDisposableListeners(project);
 
-        showPluginLoadedNotification();
-    }
-
-    private void showPluginLoadedNotification() {
-        try {
-            Notification notification = new Notification(
-                    "Harbour Plugin",
-                    "Harbour Plugin Loaded",
-                    "Harbour/Clipper language support is now active",
-                    NotificationType.INFORMATION);
-
-            Notifications.Bus.notify(notification);
-            HarbourLogger.log("HarbourPluginComponent", "Notification sent: Harbour Plugin Loaded");
-        } catch (Exception e) {
-            LOG.error("Failed to show notification: " + e.getMessage(), e);
-            HarbourLogger.log("HarbourPluginComponent", "Failed to show notification: " + e.getMessage());
-        }
+        // Notification removed - user doesn't want popup on every project open
     }
 }

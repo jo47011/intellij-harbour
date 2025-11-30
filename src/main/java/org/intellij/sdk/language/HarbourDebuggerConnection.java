@@ -103,37 +103,44 @@ public class HarbourDebuggerConnection {
                 waitingForConnection = false;
                 throw e; // Re-throw to be handled by outer catch block
             }
-            
+
             // Setup streams
             reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
-            
+
+            // Enable TCP keep-alive to prevent connection drop during long pauses
+            clientSocket.setKeepAlive(true);
+            // Set socket timeout for read operations - allows periodic connection health checks
+            // 30 seconds allows detecting dead connections faster while still supporting pauses
+            clientSocket.setSoTimeout(30000);
+            HarbourLogger.log("HarbourDebuggerConnection", "TCP keep-alive enabled, read timeout set to 30s");
+
             connected = true;
             HarbourLogger.log("HarbourDebuggerConnection", "Debug client connected from " + clientSocket.getInetAddress());
-            
+
             // Start message reading thread
             startMessageThread();
-            
+
             // Read handshake directly (executable name and PID)
             // We need to read two lines: executable name and PID
             String executableName = reader.readLine();
             String pid = reader.readLine();
-            
+
             if (executableName != null && pid != null) {
                 HarbourLogger.log("HarbourDebuggerConnection", "Received handshake - Executable: " + executableName + ", PID: " + pid);
-                
+
                 // Send HELLO response to complete handshake
                 sendCommand("HELLO");
                 HarbourLogger.log("HarbourDebuggerConnection", "Sent HELLO response");
-                
+
                 // Store handshake info if needed
                 if (messageHandler != null) {
                     messageHandler.accept(executableName + CRLF + pid);
                 }
-                
+
                 return true;
             }
-            
+
         } catch (SocketTimeoutException e) {
             HarbourLogger.log("HarbourDebuggerConnection", "Timeout waiting for debug client connection");
             close();
@@ -150,10 +157,10 @@ public class HarbourDebuggerConnection {
             // Don't rethrow the exception - just return false to indicate failure
             return false;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Start the debug server and wait for client connection (DEPRECATED - use startListening + acceptConnection)
      */
@@ -211,33 +218,40 @@ public class HarbourDebuggerConnection {
             // Setup streams
             reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
-            
+
+            // Enable TCP keep-alive to prevent connection drop during long pauses
+            clientSocket.setKeepAlive(true);
+            // Set socket timeout for read operations - allows periodic connection health checks
+            // 30 seconds allows detecting dead connections faster while still supporting pauses
+            clientSocket.setSoTimeout(30000);
+            HarbourLogger.log("HarbourDebuggerConnection", "TCP keep-alive enabled, read timeout set to 30s");
+
             connected = true;
             HarbourLogger.log("HarbourDebuggerConnection", "Debug client connected from " + clientSocket.getInetAddress());
-            
+
             // Start message reading thread
             startMessageThread();
-            
+
             // Read handshake directly (executable name and PID)
             // We need to read two lines: executable name and PID
             String executableName = reader.readLine();
             String pid = reader.readLine();
-            
+
             if (executableName != null && pid != null) {
                 HarbourLogger.log("HarbourDebuggerConnection", "Received handshake - Executable: " + executableName + ", PID: " + pid);
-                
+
                 // Send HELLO response to complete handshake
                 sendCommand("HELLO");
                 HarbourLogger.log("HarbourDebuggerConnection", "Sent HELLO response");
-                
+
                 // Store handshake info if needed
                 if (messageHandler != null) {
                     messageHandler.accept(executableName + CRLF + pid);
                 }
-                
+
                 return true;
             }
-            
+
         } catch (SocketTimeoutException e) {
             HarbourLogger.log("HarbourDebuggerConnection", "Timeout waiting for debug client connection");
             close();
@@ -254,34 +268,49 @@ public class HarbourDebuggerConnection {
             // Don't rethrow the exception - just return false to indicate failure
             return false;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Send a command to the debug client
      */
     public void sendCommand(String command) {
         HarbourLogger.log("HarbourDebuggerConnection", "sendCommand() called with: " + command);
-        
+
         if (!connected || writer == null) {
             HarbourLogger.log("HarbourDebuggerConnection", "Cannot send command - not connected (connected=" + connected + ", writer=" + (writer != null ? "not null" : "null") + ")");
             return;
         }
-        
+
+        // Check socket health before sending
+        if (clientSocket == null || clientSocket.isClosed() || !clientSocket.isConnected()) {
+            HarbourLogger.log("HarbourDebuggerConnection", "Cannot send command - socket is closed or disconnected");
+            connected = false;
+            return;
+        }
+
         HarbourLogger.log("HarbourDebuggerConnection", "About to send command: " + command);
-        
+
         try {
             HarbourLogger.log("HarbourDebuggerConnection", "Calling writer.print()...");
             writer.print(command + CRLF);
-            
+
             HarbourLogger.log("HarbourDebuggerConnection", "Calling writer.flush()...");
             writer.flush();
-            
+
+            // Check for write errors (broken pipe, connection reset, etc.)
+            if (writer.checkError()) {
+                HarbourLogger.log("HarbourDebuggerConnection", "Write error detected after sending command - connection may be broken");
+                connected = false;
+                return;
+            }
+
             HarbourLogger.log("HarbourDebuggerConnection", "Command sent successfully: " + command);
         } catch (Exception e) {
             HarbourLogger.log("HarbourDebuggerConnection", "Error sending command '" + command + "': " + e.getMessage());
             HarbourLogger.logStackTrace("HarbourDebuggerConnection", e);
+            connected = false;
         }
     }
     
@@ -313,12 +342,39 @@ public class HarbourDebuggerConnection {
         messageThread = new Thread(() -> {
             HarbourLogger.log("HarbourDebuggerConnection", "Message thread started");
             StringBuilder messageBuilder = new StringBuilder();
-            
+            int consecutiveTimeouts = 0;
+            final int MAX_CONSECUTIVE_TIMEOUTS = 10; // 5 minutes (10 * 30s)
+
             try {
-                String line;
-                while (connected && (line = reader.readLine()) != null) {
+                while (connected) {
+                    String line;
+                    try {
+                        line = reader.readLine();
+                        consecutiveTimeouts = 0; // Reset counter on successful read
+                    } catch (SocketTimeoutException e) {
+                        // Read timeout - this is expected during idle periods
+                        consecutiveTimeouts++;
+                        if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+                            HarbourLogger.log("HarbourDebuggerConnection",
+                                "Connection idle for " + (consecutiveTimeouts * 30) + "s, checking health...");
+                            // Check if socket is still connected
+                            if (clientSocket == null || clientSocket.isClosed() || !clientSocket.isConnected()) {
+                                HarbourLogger.log("HarbourDebuggerConnection", "Socket appears disconnected");
+                                break;
+                            }
+                            // Reset after logging
+                            consecutiveTimeouts = 0;
+                        }
+                        continue; // Continue waiting for data
+                    }
+
+                    if (line == null) {
+                        HarbourLogger.log("HarbourDebuggerConnection", "Connection closed by remote end (null received)");
+                        break;
+                    }
+
                     HarbourLogger.log("HarbourDebuggerConnection", "Received line: " + line);
-                    
+
                     // Check if this is a command start
                     if (isCommand(line)) {
                         // If we have a pending message, process it
@@ -326,7 +382,7 @@ public class HarbourDebuggerConnection {
                             processMessage(messageBuilder.toString());
                             messageBuilder.setLength(0);
                         }
-                        
+
                         // For single-line commands like "STOP:file:line", process immediately
                         if (line.contains(":")) {
                             processMessage(line);
@@ -340,19 +396,19 @@ public class HarbourDebuggerConnection {
                             messageBuilder.append(CRLF);
                         }
                         messageBuilder.append(line);
-                        
+
                         // Check if this is the end of an ARRAY message
                         if (line.equals("END_ARRAY") && messageBuilder.toString().startsWith("ARRAY")) {
                             processMessage(messageBuilder.toString());
                             messageBuilder.setLength(0);
                         }
-                        
+
                         // Check if this is the end of a HASH message
                         if (line.equals("END_HASH") && messageBuilder.toString().startsWith("HASH")) {
                             processMessage(messageBuilder.toString());
                             messageBuilder.setLength(0);
                         }
-                        
+
                         // Check if this is the end of an OBJECT message
                         if (line.equals("END_OBJECT") && messageBuilder.toString().startsWith("OBJECT")) {
                             processMessage(messageBuilder.toString());
