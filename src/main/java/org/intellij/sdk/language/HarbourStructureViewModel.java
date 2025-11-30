@@ -85,67 +85,72 @@ public class HarbourStructureViewModel extends TextEditorBasedStructureViewModel
             return null;
         }
 
-        int offset = getEditor().getCaretModel().getOffset();
-        PsiElement elementAtCursor = psiFile.findElementAt(offset);
+        try {
+            int offset = getEditor().getCaretModel().getOffset();
+            if (offset < 0 || offset >= psiFile.getTextLength()) {
+                return null;
+            }
 
-        if (elementAtCursor == null) {
+            PsiElement elementAtCursor = psiFile.findElementAt(offset);
+            if (elementAtCursor == null) {
+                return null;
+            }
+
+            // Find the containing function/procedure/method/class
+            PsiElement result = findContainingStructureElement(offset);
+            if (result != null) {
+                LOG.info("getCurrentEditorElement: Found element at offset " + offset +
+                    ": " + result.getText().substring(0, Math.min(20, result.getText().length())));
+            }
+            return result;
+        } catch (Exception e) {
+            LOG.warn("Error in getCurrentEditorElement: " + e.getMessage());
             return null;
         }
-
-        // Walk up the tree to find the containing function/procedure/method/class
-        return findContainingStructureElement(elementAtCursor);
     }
 
     /**
      * Find the containing structure element (function, procedure, method, or class)
-     * for the given PSI element by walking backwards through siblings.
+     * for the given cursor offset.
      */
     @Nullable
-    private PsiElement findContainingStructureElement(PsiElement element) {
-        if (element == null) {
-            return null;
-        }
-
-        // Get the offset of the cursor
-        int cursorOffset = element.getTextOffset();
-
-        // Find the structure element that contains this offset
-        // We need to find the last FUNCTION/PROCEDURE/METHOD/CLASS keyword that appears before the cursor
+    private PsiElement findContainingStructureElement(int cursorOffset) {
+        // Find the last FUNCTION/PROCEDURE/METHOD/CLASS keyword that appears before the cursor
         PsiElement bestMatch = null;
         int bestMatchOffset = -1;
 
-        // Walk through all elements in the file to find structure keywords
+        // Use PsiTreeUtil to iterate through all leaf elements
         PsiElement current = psiFile.getFirstChild();
         while (current != null) {
-            if (current instanceof LeafPsiElement) {
-                String type = ((LeafPsiElement) current).getElementType().toString();
-                int elementOffset = current.getTextOffset();
+            if (current instanceof LeafPsiElement leaf) {
+                String type = leaf.getElementType().toString();
+                int elementOffset = leaf.getTextOffset();
 
-                // Check if this is a structure keyword that appears before the cursor
+                // Check if this is a structure keyword that appears before or at the cursor
                 if (elementOffset <= cursorOffset &&
                     (type.equals(FUNCTION_TOKEN) || type.equals(PROCEDURE_TOKEN) ||
                      type.equals(METHOD_TOKEN) || type.equals(CLASS_TOKEN))) {
 
                     // Update best match if this is closer to the cursor
                     if (elementOffset > bestMatchOffset) {
-                        bestMatch = current;
+                        bestMatch = leaf;
                         bestMatchOffset = elementOffset;
                     }
                 }
             }
 
-            // Traverse all descendants
+            // Depth-first traversal
             PsiElement firstChild = current.getFirstChild();
             if (firstChild != null) {
                 current = firstChild;
             } else {
-                // No children, try next sibling or go up
                 PsiElement next = current.getNextSibling();
-                while (next == null && current != null && current != psiFile) {
+                while (next == null && current != null && current.getParent() != null && current.getParent() != psiFile) {
                     current = current.getParent();
-                    if (current != null) {
-                        next = current.getNextSibling();
-                    }
+                    next = current.getNextSibling();
+                }
+                if (next == null && current != null && current.getParent() == psiFile) {
+                    next = current.getNextSibling();
                 }
                 current = next;
             }
