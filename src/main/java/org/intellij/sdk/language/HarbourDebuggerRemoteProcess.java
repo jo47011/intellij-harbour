@@ -92,6 +92,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private final Set<String> receivedVariableScopes = Collections.synchronizedSet(new HashSet<>());
     private volatile boolean waitingForVariables = false;
 
+    // Step generation counter for aborting variable waits on rapid stepping
+    private volatile long stepGeneration = 0;
+    private volatile boolean abortVariableWait = false;
+
     // Hit count tracking for conditional breakpoints
     private final Map<String, Integer> breakpointHitCounts = new ConcurrentHashMap<>();
     
@@ -813,6 +817,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Update debugger state to SUSPENDED when we stop and clear pending step flag
         updateDebuggerState(DebuggerState.SUSPENDED, false);
 
+        // Reset abort flag so variable waiting can proceed for this stop
+        abortVariableWait = false;
+
         // Set flags to track STACK and variable scope arrivals
         expectingStackForPosition = true;
         waitingForVariables = true;
@@ -989,15 +996,36 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
 
     // Wait for variables to be ready (with timeout)
+    // Returns the step generation at the time of call for checking if aborted
     public void waitForVariables(long timeoutMs) {
+        long myGeneration = stepGeneration;
         long startTime = System.currentTimeMillis();
-        while (!areVariablesReady() && System.currentTimeMillis() - startTime < timeoutMs) {
+        while (!areVariablesReady() &&
+               System.currentTimeMillis() - startTime < timeoutMs &&
+               !abortVariableWait &&
+               myGeneration == stepGeneration) {
             try {
                 Thread.sleep(10);  // Check every 10ms
             } catch (InterruptedException e) {
                 break;
             }
         }
+        // Log if we were aborted due to rapid stepping
+        if (myGeneration != stepGeneration || abortVariableWait) {
+            HarbourLogger.log("HarbourDebuggerStackFrame",
+                "Variable wait aborted due to new step (gen:" + myGeneration + " vs " + stepGeneration + ")");
+        }
+    }
+
+    // Get current step generation (for HarbourDebuggerStackFrame to check)
+    public long getStepGeneration() {
+        return stepGeneration;
+    }
+
+    // Abort any ongoing variable waits
+    public void abortVariableWaits() {
+        abortVariableWait = true;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Aborting variable waits");
     }
 
     // Show position in UI with current stack trace and variables
@@ -2129,20 +2157,24 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring NEXT command - not connected");
             return;
         }
-        
+
         // State machine: only allow commands when SUSPENDED and no pending step command
         if (debuggerState != DebuggerState.SUSPENDED || hasPendingStepCommand) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring NEXT command - debugger state is " + debuggerState + ", hasPendingStepCommand=" + hasPendingStepCommand);
             return;
         }
-        
+
         // Clear any pending NEXT/STEP/OUT commands from the queue to prevent accumulation
         clearStepCommandsFromQueue();
-        
+
+        // Increment step generation to abort any pending variable waits
+        stepGeneration++;
+        abortVariableWait = true;
+
         // Mark that we have a pending step command to prevent rapid clicking
         updateDebuggerState(DebuggerState.STEPPING, true);
-        
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing NEXT command (state: STEPPING, pendingStep=true)");
+
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing NEXT command (state: STEPPING, pendingStep=true, gen=" + stepGeneration + ")");
         try {
             commandQueue.offer(new DebugCommand("NEXT"), 500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -2158,20 +2190,24 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring STEP command - not connected");
             return;
         }
-        
+
         // State machine: only allow commands when SUSPENDED and no pending step command
         if (debuggerState != DebuggerState.SUSPENDED || hasPendingStepCommand) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring STEP command - debugger state is " + debuggerState + ", hasPendingStepCommand=" + hasPendingStepCommand);
             return;
         }
-        
+
         // Clear any pending NEXT/STEP/OUT commands from the queue to prevent accumulation
         clearStepCommandsFromQueue();
-        
+
+        // Increment step generation to abort any pending variable waits
+        stepGeneration++;
+        abortVariableWait = true;
+
         // Mark that we have a pending step command to prevent rapid clicking
         updateDebuggerState(DebuggerState.STEPPING, true);
-        
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing STEP command (state: STEPPING, pendingStep=true)");
+
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing STEP command (state: STEPPING, pendingStep=true, gen=" + stepGeneration + ")");
         try {
             commandQueue.offer(new DebugCommand("STEP"), 500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -2187,20 +2223,24 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring OUT command - not connected");
             return;
         }
-        
+
         // State machine: only allow commands when SUSPENDED and no pending step command
         if (debuggerState != DebuggerState.SUSPENDED || hasPendingStepCommand) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess", "Ignoring OUT command - debugger state is " + debuggerState + ", hasPendingStepCommand=" + hasPendingStepCommand);
             return;
         }
-        
+
         // Clear any pending NEXT/STEP/OUT commands from the queue to prevent accumulation
         clearStepCommandsFromQueue();
-        
+
+        // Increment step generation to abort any pending variable waits
+        stepGeneration++;
+        abortVariableWait = true;
+
         // Mark that we have a pending step command to prevent rapid clicking
         updateDebuggerState(DebuggerState.STEPPING, true);
-        
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing OUT command (state: STEPPING, pendingStep=true)");
+
+        HarbourLogger.log("HarbourDebuggerRemoteProcess", "Executing OUT command (state: STEPPING, pendingStep=true, gen=" + stepGeneration + ")");
         try {
             commandQueue.offer(new DebugCommand("OUT"), 500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
