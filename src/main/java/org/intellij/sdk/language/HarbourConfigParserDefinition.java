@@ -3,19 +3,20 @@ package org.intellij.sdk.language;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.ParserDefinition;
 import com.intellij.lang.PsiParser;
-import com.intellij.lexer.EmptyLexer;
 import com.intellij.lexer.Lexer;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.IFileElementType;
 import com.intellij.psi.tree.TokenSet;
+import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Simple parser definition for Harbour configuration files.
- * Provides minimal parsing - just treats the file as plain text with comment support.
+ * Parser definition for Harbour configuration files.
+ * Uses a simple lexer that recognizes # comments and text.
  */
 public class HarbourConfigParserDefinition implements ParserDefinition {
     public static final IFileElementType FILE = new IFileElementType(HarbourConfigLanguage.INSTANCE);
@@ -23,13 +24,17 @@ public class HarbourConfigParserDefinition implements ParserDefinition {
     @NotNull
     @Override
     public Lexer createLexer(Project project) {
-        return new EmptyLexer();
+        return new HarbourConfigLexer();
     }
 
     @Override
     public @NotNull PsiParser createParser(Project project) {
         return (root, builder) -> {
-            builder.mark().done(root);
+            var marker = builder.mark();
+            while (!builder.eof()) {
+                builder.advanceLexer();
+            }
+            marker.done(root);
             return builder.getTreeBuilt();
         };
     }
@@ -43,7 +48,7 @@ public class HarbourConfigParserDefinition implements ParserDefinition {
     @NotNull
     @Override
     public TokenSet getCommentTokens() {
-        return TokenSet.EMPTY;
+        return HarbourConfigTokenTypes.COMMENTS;
     }
 
     @NotNull
@@ -55,7 +60,8 @@ public class HarbourConfigParserDefinition implements ParserDefinition {
     @NotNull
     @Override
     public PsiElement createElement(ASTNode node) {
-        throw new UnsupportedOperationException("Not supported");
+        IElementType type = node.getElementType();
+        return new LeafPsiElement(type, node.getText());
     }
 
     @NotNull
