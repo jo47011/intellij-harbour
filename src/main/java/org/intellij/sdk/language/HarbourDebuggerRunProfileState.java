@@ -1806,24 +1806,19 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             for (String ext : extensions) {
                 File execFile = new File(workingDir, executableName + ext);
                 if (execFile.exists()) {
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
                         "Attempting to delete executable: " + execFile.getAbsolutePath());
-                    
+
                     if (!execFile.delete()) {
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
                             "Failed to delete executable, attempting force cleanup: " + execFile.getAbsolutePath());
-                        
-                        // If delete fails, try to kill processes using it
+
+                        // If delete fails, try to kill processes using it (runs async)
                         forceCleanupExecutable(execFile.getAbsolutePath());
-                        
-                        // Try delete again after cleanup
-                        Thread.sleep(500);
-                        if (execFile.delete()) {
-                            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                                "Successfully deleted executable after force cleanup");
-                        }
+                        // Note: We don't wait/retry here to avoid EDT freeze.
+                        // The compiler will fail with a clear error if the file is still locked.
                     } else {
-                        HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
                             "Successfully deleted executable: " + execFile.getAbsolutePath());
                     }
                 }
@@ -1836,40 +1831,45 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     }
     
     /**
-     * Force cleanup of an executable file by killing processes using it
+     * Force cleanup of an executable file by killing processes using it.
+     * Runs asynchronously to avoid EDT freeze.
      */
     private void forceCleanupExecutable(String executablePath) {
-        try {
-            String osName = System.getProperty("os.name").toLowerCase();
-            ProcessBuilder pb;
-            
-            if (osName.contains("windows")) {
-                // Windows: Use handle.exe or wmic to find and kill processes
-                String fileName = new File(executablePath).getName();
-                pb = new ProcessBuilder("cmd", "/c", 
-                    "taskkill /f /im \"" + fileName + "\"");
-            } else {
-                // Unix/Linux: Use fuser to kill processes using the file
-                pb = new ProcessBuilder("bash", "-c", 
-                    "fuser -k \"" + executablePath + "\" 2>/dev/null || true");
+        // Run cleanup in background thread to avoid EDT freeze
+        new Thread(() -> {
+            try {
+                String osName = System.getProperty("os.name").toLowerCase();
+                ProcessBuilder pb;
+
+                if (osName.contains("windows")) {
+                    // Windows: Use handle.exe or wmic to find and kill processes
+                    String fileName = new File(executablePath).getName();
+                    pb = new ProcessBuilder("cmd", "/c",
+                        "taskkill /f /im \"" + fileName + "\"");
+                } else {
+                    // Unix/Linux: Use fuser to kill processes using the file
+                    pb = new ProcessBuilder("bash", "-c",
+                        "fuser -k \"" + executablePath + "\" 2>/dev/null || true");
+                }
+
+                Process process = pb.start();
+                boolean finished = process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS);
+
+                if (finished) {
+                    int exitCode = process.exitValue();
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                        "Force cleanup executable finished with exit code: " + exitCode);
+                } else {
+                    process.destroyForcibly();
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                        "Force cleanup executable timed out, process killed");
+                }
+
+            } catch (Exception e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "Error in forceCleanupExecutable: " + e.getMessage());
             }
-            
-            Process process = pb.start();
-            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
-            
-            if (finished) {
-                int exitCode = process.exitValue();
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Force cleanup executable finished with exit code: " + exitCode);
-            } else {
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    "Force cleanup executable timed out");
-            }
-            
-        } catch (Exception e) {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                "Error in forceCleanupExecutable: " + e.getMessage());
-        }
+        }, "HarbourForceCleanup").start();
     }
     
     /**
@@ -1926,10 +1926,8 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 pb = new ProcessBuilder("bash", "-c", "pkill -f harbour_debug 2>/dev/null || true");
                 executeKillCommand(pb, "harbour_debug cleanup");
             }
-            
-            // Give processes time to terminate
-            Thread.sleep(500);
-            
+            // Note: No sleep needed - kill commands run asynchronously in background threads
+
         } catch (Exception e) {
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                 "Error in terminateRunningProcesses: " + e.getMessage());
@@ -1937,30 +1935,37 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
     }
     
     /**
-     * Execute a kill command and log the result
+     * Execute a kill command asynchronously to avoid EDT freeze.
+     * Fire-and-forget - we don't wait for the result on EDT.
      */
     private void executeKillCommand(ProcessBuilder pb, String description) {
-        try {
-            Process process = pb.start();
-            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
-            
-            if (finished) {
-                int exitCode = process.exitValue();
-                if (exitCode == 0) {
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        description + " succeeded");
+        // Run the kill command in a background thread to avoid EDT freeze
+        new Thread(() -> {
+            try {
+                Process process = pb.start();
+                // Use a short timeout - cleanup is best-effort
+                boolean finished = process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS);
+
+                if (finished) {
+                    int exitCode = process.exitValue();
+                    if (exitCode == 0) {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                            description + " succeeded");
+                    } else {
+                        HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                            description + " completed with exit code: " + exitCode);
+                    }
                 } else {
-                    HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                        description + " completed with exit code: " + exitCode);
+                    // Destroy the process if it didn't finish in time
+                    process.destroyForcibly();
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                        description + " timed out, process killed");
                 }
-            } else {
-                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                    description + " timed out");
+            } catch (Exception e) {
+                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    description + " error: " + e.getMessage());
             }
-        } catch (Exception e) {
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                description + " error: " + e.getMessage());
-        }
+        }, "HarbourKillCommand-" + description.replace(" ", "-")).start();
     }
 
     /**
