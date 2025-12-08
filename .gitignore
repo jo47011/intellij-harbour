@@ -19,3 +19,7 @@ wrapper
 /log/
 /tmp/
 *.c
+
+# Source artwork files (not needed for build)
+img/harbour*.png
+img/harbour*.svg
