@@ -615,11 +615,18 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             parameters.addAll(StringUtil.split(runConfig.getCompilerOptions(), " "));
         }
         
-        // Add rebuild flag if requested
-        if (runConfig.isUseRebuildFlag()) {
+        // Add rebuild flag if requested (either permanent or one-time)
+        if (runConfig.isUseRebuildFlag() || runConfig.isRebuildOnce()) {
             parameters.add("-rebuild");
-            HarbourLogger.log(env.getProject(), "HarbourDebugger", 
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
                     "Added -rebuild flag to compiler arguments");
+
+            // Clear rebuildOnce flag after use
+            if (runConfig.isRebuildOnce()) {
+                runConfig.setRebuildOnce(false);
+                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                        "Cleared 'Rebuild once' flag - will not rebuild on next run");
+            }
         }
 
         // Error handling libraries - add to command line for PyCharm execution

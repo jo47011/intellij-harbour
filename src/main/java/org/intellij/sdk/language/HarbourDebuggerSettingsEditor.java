@@ -34,6 +34,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
     private JTextField debugPortField;
     private JCheckBox useDirectExecutionCheckbox;
     private JCheckBox useRebuildFlagCheckbox;
+    private JCheckBox rebuildOnceCheckbox;
 
     public HarbourDebuggerSettingsEditor() {
         createUIComponents();
@@ -133,8 +134,24 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         compilePanel.add(createLabeledField("Compiler Options:", compilerOptionsField), c);
 
         // Rebuild flag checkbox
-        useRebuildFlagCheckbox = new JCheckBox("Add -rebuild flag to compiler arguments");
+        useRebuildFlagCheckbox = new JCheckBox("Add -rebuild flag (permanent)");
         compilePanel.add(useRebuildFlagCheckbox, c);
+
+        // Rebuild once checkbox
+        rebuildOnceCheckbox = new JCheckBox("Rebuild once (auto-clears after next run)");
+        compilePanel.add(rebuildOnceCheckbox, c);
+
+        // Make checkboxes mutually exclusive
+        useRebuildFlagCheckbox.addActionListener(e -> {
+            if (useRebuildFlagCheckbox.isSelected()) {
+                rebuildOnceCheckbox.setSelected(false);
+            }
+        });
+        rebuildOnceCheckbox.addActionListener(e -> {
+            if (rebuildOnceCheckbox.isSelected()) {
+                useRebuildFlagCheckbox.setSelected(false);
+            }
+        });
 
         // Create the direct panel (for direct execution)
         directPanel = new JPanel(new GridBagLayout());
@@ -194,6 +211,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         sourceFileField.setText(StringUtil.notNullize(configuration.getSourceFile()));
         compilerOptionsField.setText(StringUtil.notNullize(configuration.getCompilerOptions()));
         useRebuildFlagCheckbox.setSelected(configuration.isUseRebuildFlag());
+        rebuildOnceCheckbox.setSelected(configuration.isRebuildOnce());
 
         // Direct execution settings
         executablePathField.setText(StringUtil.notNullize(configuration.getExecutablePath()));
@@ -242,6 +260,7 @@ public class HarbourDebuggerSettingsEditor extends SettingsEditor<HarbourDebugge
         configuration.setSourceFile(sourceFile);
         configuration.setCompilerOptions(compilerOptionsField.getText());
         configuration.setUseRebuildFlag(useRebuildFlagCheckbox.isSelected());
+        configuration.setRebuildOnce(rebuildOnceCheckbox.isSelected());
 
         // Direct execution settings
         configuration.setExecutablePath(executablePathField.getText());
