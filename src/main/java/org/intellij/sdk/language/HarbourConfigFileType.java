@@ -7,8 +7,9 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 
 /**
- * File type for Harbour configuration files (.hbp, .hbc, .cfg)
+ * File type for Harbour configuration files (.hbp, .hbc)
  * These files use # for line comments (shell-style comments)
+ * Note: .cfg was removed - too generic/common, causes slow indexing
  */
 public class HarbourConfigFileType extends LanguageFileType {
     public static final HarbourConfigFileType INSTANCE = new HarbourConfigFileType();
