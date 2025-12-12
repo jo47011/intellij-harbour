@@ -180,11 +180,11 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
                 // Create a custom data context with the suggested name
                 DataContext customContext = new DataContext() {
                     @Override
-                    public Object getData(String dataId) {
+                    public Object getData(@NotNull String dataId) {
                         if ("rename.suggested.name".equals(dataId) && finalCurrentName != null) {
                             return finalCurrentName;
                         }
-                        if (PsiElementRenameHandler.DEFAULT_NAME.equals(dataId)) {
+                        if (PsiElementRenameHandler.DEFAULT_NAME.is(dataId)) {
                             return finalElement;
                         }
                         return dataContext.getData(dataId);

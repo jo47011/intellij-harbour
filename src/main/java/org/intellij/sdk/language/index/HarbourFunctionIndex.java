@@ -129,13 +129,22 @@ public class HarbourFunctionIndex extends FileBasedIndexExtension<String, Harbou
 
     @Override
     public int getVersion() {
-        return 6; // Optimized key retrieval for Windows performance
+        return 7; // Added explicit extension check to avoid indexing .old/.bak files
     }
 
     @NotNull
     @Override
     public FileBasedIndex.InputFilter getInputFilter() {
-        return new DefaultFileTypeSpecificInputFilter(HarbourFileType.INSTANCE);
+        // Use explicit extension check in addition to file type to avoid indexing
+        // backup files like .old, .bak etc. that IntelliJ may associate with Harbour
+        // due to cached VFS file type associations
+        return file -> {
+            if (file.getFileType() != HarbourFileType.INSTANCE) {
+                return false;
+            }
+            String ext = file.getExtension();
+            return ext != null && (ext.equalsIgnoreCase("prg") || ext.equalsIgnoreCase("ch"));
+        };
     }
 
     @Override
