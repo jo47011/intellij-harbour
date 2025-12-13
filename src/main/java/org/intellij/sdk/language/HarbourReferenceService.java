@@ -1675,32 +1675,35 @@ public final class HarbourReferenceService {
 
     /**
      * Find all variable elements for rename operation.
+     * Uses getAllResults=true to ensure ALL occurrences are found for renaming.
      *
      * @param variableName The name of the variable to find
      * @return A list of PSI elements for the variable usages
      */
     public List<PsiElement> findVariablesForRename(String variableName) {
-        return findVariables(variableName);
+        return findVariables(variableName, true);  // Get ALL results for rename
     }
 
     /**
      * Find all function elements for rename operation.
+     * Uses getAllResults=true to ensure ALL occurrences are found for renaming.
      *
      * @param functionName The name of the function to find
      * @return A list of PSI elements for the function declarations/calls
      */
     public List<PsiElement> findFunctionsForRename(String functionName) {
-        return findFunctions(functionName);
+        return findFunctions(functionName, true);  // Get ALL results for rename
     }
 
     /**
      * Find all symbol elements for rename operation.
+     * Uses getAllResults=true to ensure ALL occurrences are found for renaming.
      *
      * @param symbolName The name of the symbol to find
      * @return A list of PSI elements for the symbol occurrences
      */
     public List<PsiElement> findSymbolForRename(String symbolName) {
-        return findSymbol(symbolName);
+        return findSymbol(symbolName, true);  // Get ALL results for rename
     }
 
     /**
