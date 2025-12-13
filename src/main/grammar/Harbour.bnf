@@ -106,7 +106,6 @@
     // Additional keywords
     MEMVAR='memvar'
     PRIVATE='private'
-    TROUBLE='trouble'
     DATA='data'
     INIT='init'
     DEFAULT='default'

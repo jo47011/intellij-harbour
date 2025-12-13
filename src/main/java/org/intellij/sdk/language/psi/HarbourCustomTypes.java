@@ -98,7 +98,6 @@ public class HarbourCustomTypes {
     // Additional keywords
     public static final IElementType MEMVAR = HarbourTypes.MEMVAR;
     public static final IElementType PRIVATE = HarbourTypes.PRIVATE;
-    public static final IElementType TROUBLE = HarbourTypes.TROUBLE;
     public static final IElementType DATA = HarbourTypes.DATA;
     public static final IElementType INIT = HarbourTypes.INIT;
     public static final IElementType DEFAULT = HarbourTypes.DEFAULT;

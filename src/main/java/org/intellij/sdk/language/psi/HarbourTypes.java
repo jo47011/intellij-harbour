@@ -84,7 +84,6 @@ public interface HarbourTypes {
     IElementType NIL = new HarbourTokenType("NIL");
     IElementType SELF = new HarbourTokenType("SELF");
     IElementType SUPER = new HarbourTokenType("SUPER");
-    IElementType TROUBLE = new HarbourTokenType("TROUBLE");
     IElementType TO = new HarbourTokenType("TO");
     IElementType DATA = new HarbourTokenType("DATA");
     IElementType INIT = new HarbourTokenType("INIT");

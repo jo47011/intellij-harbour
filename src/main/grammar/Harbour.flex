@@ -105,7 +105,6 @@ SPECIAL_CHARS = [ÄÖÜäöüß]
     "nil"                   { return HarbourCustomTypes.NIL; }
     "self"                  { return HarbourCustomTypes.SELF; }
     "super"                 { return HarbourCustomTypes.SUPER; }
-    "trouble"               { return HarbourCustomTypes.TROUBLE; }
     "to"                    { return HarbourCustomTypes.TO; }
 
     // Additional keywords for data/default/run/hidden
