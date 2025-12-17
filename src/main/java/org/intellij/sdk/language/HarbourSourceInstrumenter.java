@@ -3,10 +3,14 @@ package org.intellij.sdk.language;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -31,11 +35,16 @@ public class HarbourSourceInstrumenter {
     private final String debugFunctionName;
     private final String originalFileName;
     private final File buildDir;
-    
-    public HarbourSourceInstrumenter(File sourceFile, File buildDir) {
+    private final Charset charset;
+
+    /**
+     * Creates an instrumenter using the specified charset for file I/O
+     */
+    public HarbourSourceInstrumenter(File sourceFile, File buildDir, Charset charset) {
         this.sourceFile = sourceFile;
         this.buildDir = buildDir;
         this.originalFileName = sourceFile.getName();
+        this.charset = charset != null ? charset : StandardCharsets.UTF_8;
         String baseName = sourceFile.getName();
         if (baseName.endsWith(".prg")) {
             baseName = baseName.substring(0, baseName.length() - 4);
@@ -43,6 +52,13 @@ public class HarbourSourceInstrumenter {
         // Place instrumented file in build directory
         this.instrumentedFile = new File(buildDir, baseName + "_instrumented.prg");
         this.debugFunctionName = "debug_check";
+    }
+
+    /**
+     * Creates an instrumenter using UTF-8 charset as default
+     */
+    public HarbourSourceInstrumenter(File sourceFile, File buildDir) {
+        this(sourceFile, buildDir, StandardCharsets.UTF_8);
     }
     
     /**
@@ -53,8 +69,9 @@ public class HarbourSourceInstrumenter {
         if (!sourceFile.exists()) {
             throw new IOException("Source file does not exist: " + sourceFile.getAbsolutePath());
         }
-        
-        List<String> lines = Files.readAllLines(sourceFile.toPath());
+
+        // Read source file with the configured charset
+        List<String> lines = Files.readAllLines(sourceFile.toPath(), charset);
         List<String> instrumentedLines = new ArrayList<>();
         
         boolean injectingBreakpointLoader = false;
@@ -184,9 +201,11 @@ public class HarbourSourceInstrumenter {
         // First, create a backup of the original file in the build directory
         File backupFile = new File(buildDir, sourceFile.getName() + ".backup");
         Files.copy(sourceFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        
+
+        // Read source file with the configured charset
         List<String> lines = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new FileReader(sourceFile))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(sourceFile), charset))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 lines.add(line);
@@ -282,8 +301,9 @@ public class HarbourSourceInstrumenter {
             }
         }
         
-        // Write instrumented file
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(instrumentedFile))) {
+        // Write instrumented file with the same charset as the source
+        try (BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(new FileOutputStream(instrumentedFile), charset))) {
             for (String line : instrumentedLines) {
                 writer.write(line);
                 writer.newLine();
@@ -391,8 +411,9 @@ public class HarbourSourceInstrumenter {
         if (!sourceFile.exists()) {
             throw new IOException("Source file does not exist: " + sourceFile.getAbsolutePath());
         }
-        
-        List<String> lines = Files.readAllLines(sourceFile.toPath());
+
+        // Read source file with the configured charset
+        List<String> lines = Files.readAllLines(sourceFile.toPath(), charset);
         List<String> instrumentedLines = new ArrayList<>();
         
         boolean foundMainProcedure = false;
@@ -434,8 +455,9 @@ public class HarbourSourceInstrumenter {
             instrumentedLines.add(line);
         }
         
-        // Write instrumented file
-        try (PrintWriter writer = new PrintWriter(new FileWriter(instrumentedFile))) {
+        // Write instrumented file with the same charset as the source
+        try (PrintWriter writer = new PrintWriter(
+                new OutputStreamWriter(new FileOutputStream(instrumentedFile), charset))) {
             for (String line : instrumentedLines) {
                 writer.println(line);
             }

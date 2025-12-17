@@ -34,12 +34,15 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
+
+import com.intellij.openapi.vfs.LocalFileSystem;
 
 /**
  * RunProfileState that compiles and runs a Harbour program with debugging enabled.
@@ -443,9 +446,13 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 if (!sourceFile.isAbsolute()) {
                     sourceFile = new File(workingDir, buildTarget);
                 }
-                
-                HarbourSourceInstrumenter instrumenter = new HarbourSourceInstrumenter(sourceFile, buildDirFile);
-                
+
+                // Get the file's charset from the VirtualFile to preserve encoding
+                VirtualFile vFile = LocalFileSystem.getInstance().findFileByIoFile(sourceFile);
+                Charset fileCharset = vFile != null ? vFile.getCharset() : null;
+
+                HarbourSourceInstrumenter instrumenter = new HarbourSourceInstrumenter(sourceFile, buildDirFile, fileCharset);
+
                 // Use console-specific instrumentation (full debug hooks)
                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                         "Console program detected - using full debug instrumentation: " + sourceFile.getAbsolutePath());
