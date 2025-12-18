@@ -191,13 +191,13 @@ public class HarbourLiveDBFConnection implements Disposable {
     
     /**
      * Parse workarea information from debugger message
-     * Format: AREA:Alias:Area:fCount:recno:reccount:scope:
+     * Format: AREA:Alias:Area:fCount:recno:reccount:scope:eof:deleted:
      */
     private void parseWorkareaInfo(@NotNull String message) {
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "@@@ parseWorkareaInfo() parsing: " + message);
-        
-        // Split only on the first 6 colons to handle index expressions with colons
-        String[] parts = message.split(":", 7);
+
+        // Split only on the first 8 colons to handle index expressions with colons
+        String[] parts = message.split(":", 9);
         if (parts.length >= 7) {
             String alias = parts[1];
             int areaNumber = Integer.parseInt(parts[2]);
@@ -205,19 +205,27 @@ public class HarbourLiveDBFConnection implements Disposable {
             int currentRecord = Integer.parseInt(parts[4]);
             int totalRecords = Integer.parseInt(parts[5]);
             String indexScope = parts[6]; // This can now contain colons
-            
+
+            // Parse EOF and DELETED flags (new in protocol, backwards compatible)
+            boolean eof = false;
+            boolean deleted = false;
+            if (parts.length >= 9) {
+                eof = "T".equalsIgnoreCase(parts[7]);
+                deleted = "T".equalsIgnoreCase(parts[8]);
+            }
+
             WorkareaInfo workarea = new WorkareaInfo(
-                alias, areaNumber, fieldCount, currentRecord, totalRecords, indexScope
+                alias, areaNumber, fieldCount, currentRecord, totalRecords, indexScope, eof, deleted
             );
-            
+
             workareas.put(alias, workarea);
-            
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
-                String.format("@@@ WORKAREA ADDED: %s (Area %d, %d/%d records, %d fields)", 
-                    alias, areaNumber, currentRecord, totalRecords, fieldCount));
-            
-            HarbourLogger.log("HarbourLiveDBFConnection", 
-                String.format("Updated workarea: %s (Area %d, %d/%d records, %d fields)", 
+
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                String.format("@@@ WORKAREA ADDED: %s (Area %d, %d/%d records, %d fields, EOF=%b, DEL=%b)",
+                    alias, areaNumber, currentRecord, totalRecords, fieldCount, eof, deleted));
+
+            HarbourLogger.log("HarbourLiveDBFConnection",
+                String.format("Updated workarea: %s (Area %d, %d/%d records, %d fields)",
                     alias, areaNumber, currentRecord, totalRecords, fieldCount));
         }
     }
@@ -250,12 +258,25 @@ public class HarbourLiveDBFConnection implements Disposable {
      */
     @Nullable
     public WorkareaInfo getCurrentSelectedWorkarea() {
-        if (currentSelectedArea <= 0) return null;
+        HarbourLogger.log("HarbourLiveDBFConnection",
+            "getCurrentSelectedWorkarea() called - currentSelectedArea=" + currentSelectedArea +
+            ", workareas.size=" + workareas.size());
+        if (currentSelectedArea <= 0) {
+            HarbourLogger.log("HarbourLiveDBFConnection",
+                "getCurrentSelectedWorkarea() returning null - area <= 0");
+            return null;
+        }
         for (WorkareaInfo wa : workareas.values()) {
+            HarbourLogger.log("HarbourLiveDBFConnection",
+                "  Checking: " + wa.getAlias() + " (Area " + wa.getAreaNumber() + ")");
             if (wa.getAreaNumber() == currentSelectedArea) {
+                HarbourLogger.log("HarbourLiveDBFConnection",
+                    "  MATCH FOUND: " + wa.getAlias());
                 return wa;
             }
         }
+        HarbourLogger.log("HarbourLiveDBFConnection",
+            "getCurrentSelectedWorkarea() returning null - no match found for area " + currentSelectedArea);
         return null;
     }
 
@@ -565,47 +586,73 @@ public class HarbourLiveDBFConnection implements Disposable {
         private final int currentRecord;
         private final int totalRecords;
         private final String indexScope;
-        
-        public WorkareaInfo(@NotNull String alias, int areaNumber, int fieldCount, 
+        private final boolean eof;
+        private final boolean deleted;
+
+        public WorkareaInfo(@NotNull String alias, int areaNumber, int fieldCount,
                            int currentRecord, int totalRecords, @NotNull String indexScope) {
+            this(alias, areaNumber, fieldCount, currentRecord, totalRecords, indexScope, false, false);
+        }
+
+        public WorkareaInfo(@NotNull String alias, int areaNumber, int fieldCount,
+                           int currentRecord, int totalRecords, @NotNull String indexScope,
+                           boolean eof, boolean deleted) {
             this.alias = alias;
             this.areaNumber = areaNumber;
             this.fieldCount = fieldCount;
             this.currentRecord = currentRecord;
             this.totalRecords = totalRecords;
             this.indexScope = indexScope;
+            this.eof = eof;
+            this.deleted = deleted;
         }
-        
+
         @NotNull
         public String getAlias() {
             return alias;
         }
-        
+
         public int getAreaNumber() {
             return areaNumber;
         }
-        
+
         public int getFieldCount() {
             return fieldCount;
         }
-        
+
         public int getCurrentRecord() {
             return currentRecord;
         }
-        
+
         public int getTotalRecords() {
             return totalRecords;
         }
-        
+
         @NotNull
         public String getIndexScope() {
             return indexScope;
         }
-        
+
+        public boolean isEof() {
+            return eof;
+        }
+
+        public boolean isDeleted() {
+            return deleted;
+        }
+
         @Override
         public String toString() {
-            return String.format("%s (Area %d): %d/%d records, %d fields", 
-                alias, areaNumber, currentRecord, totalRecords, fieldCount);
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("%s (Area %d): %d/%d records, %d fields",
+                alias, areaNumber, currentRecord, totalRecords, fieldCount));
+            if (eof) {
+                sb.append(" [EOF]");
+            }
+            if (deleted) {
+                sb.append(" [DEL]");
+            }
+            return sb.toString();
         }
     }
 }

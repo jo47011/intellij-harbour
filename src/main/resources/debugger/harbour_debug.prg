@@ -1758,7 +1758,8 @@ STATIC PROCEDURE SendWorkAreas()
    LOCAL i, aArea
    
    // Enumerate all open workareas using hb_WAEval
-   hb_WAEval( {|| IIF( Used(), AAdd( aAreas, { Select(), Alias(), RecNo(), LastRec(), FCount(), IIF(IndexOrd() > 0, OrdKey(), ""), RddName() } ), NIL ) } )
+   // Array structure: {Area, Alias, RecNo, LastRec, FCount, IndexScope, RddName, EOF, Deleted}
+   hb_WAEval( {|| IIF( Used(), AAdd( aAreas, { Select(), Alias(), RecNo(), LastRec(), FCount(), IIF(IndexOrd() > 0, OrdKey(), ""), RddName(), Eof(), Deleted() } ), NIL ) } )
    
    // Restore original workarea
    dbSelectArea( nOldArea )
@@ -1772,14 +1773,16 @@ STATIC PROCEDURE SendWorkAreas()
    IF Len(aAreas) > 0
       FOR i := 1 TO Len(aAreas)
          aArea := aAreas[i]
-         // Format: AREA:Alias:Area:fCount:recno:reccount:scope:
+         // Format: AREA:Alias:Area:fCount:recno:reccount:scope:eof:deleted:
          hb_inetSend(oDebugInfo["socket"], "AREA:" + ;
                      aArea[2] + ":" + ;                    // Alias
                      AllTrim(Str(aArea[1])) + ":" + ;      // Area number
                      AllTrim(Str(aArea[5])) + ":" + ;      // Field count
                      AllTrim(Str(aArea[3])) + ":" + ;      // Current record
                      AllTrim(Str(aArea[4])) + ":" + ;      // Total records
-                     aArea[6] + ":" + CRLF)                // Index scope/key
+                     aArea[6] + ":" + ;                    // Index scope/key
+                     IIF(aArea[8], "T", "F") + ":" + ;     // EOF flag
+                     IIF(aArea[9], "T", "F") + ":" + CRLF) // Deleted flag
       NEXT
    ENDIF
    

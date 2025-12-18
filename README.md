@@ -265,6 +265,9 @@ During debugging, the plugin provides a Database View tool window that shows all
 
 The Database View automatically updates when you step through code that opens, closes, or modifies database records.
 
+**Performance Note:** The Database View queries the debugger for workarea information on each update. 
+For optimal debugging performance, keep the DB View panel collapsed when not actively inspecting database state.
+
 ### Pause/Break Without Breakpoints
 
 The debugger supports pausing execution at the current point without setting breakpoints:
