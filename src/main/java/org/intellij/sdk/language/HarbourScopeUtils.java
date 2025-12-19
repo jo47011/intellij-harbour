@@ -32,9 +32,11 @@ public class HarbourScopeUtils {
         // Find the start line (procedure/function declaration)
         int startLine = -1;
         for (int i = currentLineNumber; i >= 0; i--) {
-            String line = i < lines.length ? lines[i].toUpperCase() : "";
-            // Check for procedure or function declaration
-            if (line.contains("PROCEDURE ") || line.contains("FUNCTION ") || line.contains("METHOD ")) {
+            String line = i < lines.length ? lines[i].toUpperCase().trim() : "";
+            // Check for procedure or function declaration (must start with keyword)
+            if (line.startsWith("PROCEDURE ") || line.startsWith("FUNCTION ") ||
+                    line.startsWith("STATIC PROCEDURE ") || line.startsWith("STATIC FUNCTION ") ||
+                    line.startsWith("METHOD ")) {
                 startLine = i;
                 break;
             }
@@ -46,13 +48,15 @@ public class HarbourScopeUtils {
         }
 
         // Find the end line (next procedure/function declaration or end of file)
+        // NOTE: Do NOT stop at RETURN - Harbour procedures can have multiple RETURN statements
         int endLine = lines.length - 1;
         for (int i = startLine + 1; i < lines.length; i++) {
-            String line = lines[i].toUpperCase();
-            // Check for next procedure or function declaration or return statement
-            if (line.contains("PROCEDURE ") || line.contains("FUNCTION ") ||
-                    line.contains("METHOD ") || line.contains("RETURN") || line.contains("/* EOP */")) {
-                endLine = i;
+            String line = lines[i].toUpperCase().trim();
+            // Check for next procedure or function declaration (must start with keyword)
+            if (line.startsWith("PROCEDURE ") || line.startsWith("FUNCTION ") ||
+                    line.startsWith("STATIC PROCEDURE ") || line.startsWith("STATIC FUNCTION ") ||
+                    line.startsWith("METHOD ") || line.startsWith("/* EOP */")) {
+                endLine = i - 1;  // End at line BEFORE the next procedure
                 break;
             }
         }

@@ -1235,10 +1235,12 @@ public final class HarbourReferenceService {
                                 } else {
                                     otherFileUsages.add(element);
                                 }
-                                // Stop collecting if we have too many
-                                int totalUsages = sameFileUsages.size() + otherFileUsages.size();
-                                if (totalUsages >= maxResults * 2) {
-                                    break;
+                                // Stop collecting if we have too many (unless getting all)
+                                if (!getAllResults) {
+                                    int totalUsages = sameFileUsages.size() + otherFileUsages.size();
+                                    if (totalUsages >= maxResults * 2) {
+                                        break;
+                                    }
                                 }
                             }
                         }
