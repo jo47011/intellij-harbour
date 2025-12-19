@@ -6,11 +6,6 @@
 /Compilation
 /.intellijPlatform/localPlatformArtifacts/
 /.intellijPlatform/
-CLAUDE.md
-FEEDBACK.txt
-SUMMARY.md
-VERSION_HISTORY.md
-/.claude/
 caches
 daemon
 native
@@ -19,6 +14,14 @@ wrapper
 /log/
 /tmp/
 *.c
+
+# some claude stuff
+CLAUDE.md
+FEEDBACK*.txt
+SUMMARY.md
+VERSION_HISTORY.md
+/.claude/
+.claude/
 
 # Source artwork files (not needed for build)
 img/harbour*.png
