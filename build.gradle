@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.1.37'
+version = '1.1.60'
 
 repositories {
     mavenCentral()
@@ -67,8 +67,7 @@ test {
             println "  Failed: ${result.failedTestCount}"
             println "  Skipped: ${result.skippedTestCount}"
             if (result.skippedTestCount > 0) {
-                println "\n  Note: HarbourFormattingTest is skipped without -DtestDir"
-                println "  Run with: ./gradlew test -DtestDir=/path/to/prg/files"
+                println "\n  Note: Some tests were skipped. Check test output for details."
             }
             println "==========================================\n"
         }

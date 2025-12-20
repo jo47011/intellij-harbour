@@ -4,6 +4,7 @@ import org.junit.Assume;
 import org.junit.Test;
 
 import java.io.*;
+import java.net.URL;
 import java.nio.file.*;
 import java.util.*;
 
@@ -18,12 +19,23 @@ import static org.junit.Assert.*;
  * Usage:
  *   ./gradlew test --tests "*HarbourFormattingTest*" -DtestDir=/path/to/prg/files
  *
+ * If -DtestDir is not provided, uses embedded test files from src/test/resources/formatting/
+ *
  * Optional parameters:
  *   -DharbourCompiler=/path/to/harbour   (default: searches PATH, then common locations)
  *   -DharbourInclude=/path/to/include    (default: derived from compiler path)
  *   -DlineBreakPosition=99               (default: 99)
  */
 public class HarbourFormattingTest {
+
+    // Embedded test files (used when -DtestDir not provided)
+    private static final String[] EMBEDDED_TEST_FILES = {
+        "simple-function.prg",
+        "long-lines.prg",
+        "all-operators.prg",
+        "nested-blocks.prg",
+        "array-literals.prg"
+    };
 
     // Configurable via system properties
     private static final String TEST_DIR = System.getProperty("testDir");
@@ -72,15 +84,26 @@ public class HarbourFormattingTest {
 
     @Test
     public void testFormatAndCompileAllFiles() throws Exception {
-        // Skip test if mandatory parameter is missing (use Assume to mark as skipped, not failed)
-        Assume.assumeTrue(
-            "Skipping: -DtestDir parameter required. " +
-            "Usage: ./gradlew test --tests \"*HarbourFormattingTest*\" -DtestDir=/path/to/prg/files",
-            TEST_DIR != null && !TEST_DIR.isEmpty()
-        );
+        // Determine test directory - use external or embedded resources
+        String effectiveTestDir = TEST_DIR;
+        boolean useEmbedded = (TEST_DIR == null || TEST_DIR.isEmpty());
+        Path tempDir = null;
 
-        // Check HARBOUR_HOME or harbourCompiler system property
-        if (HARBOUR_COMPILER == null || HARBOUR_INCLUDE == null) {
+        if (useEmbedded) {
+            // Extract embedded test files to temp directory
+            tempDir = extractEmbeddedTestFiles();
+            if (tempDir == null) {
+                fail("Could not extract embedded test files from resources");
+                return;
+            }
+            effectiveTestDir = tempDir.toString();
+            System.out.println("Using embedded test files (no -DtestDir provided)");
+        }
+
+        // For embedded tests, we only test formatting (no Harbour compiler needed)
+        boolean skipCompilation = useEmbedded && (HARBOUR_COMPILER == null || HARBOUR_INCLUDE == null);
+
+        if (!skipCompilation && (HARBOUR_COMPILER == null || HARBOUR_INCLUDE == null)) {
             fail("HARBOUR_HOME environment variable not set. " +
                  "Please set HARBOUR_HOME to your Harbour installation directory.\n" +
                  "Example: export HARBOUR_HOME=/opt/harbour\n" +
@@ -88,9 +111,9 @@ public class HarbourFormattingTest {
         }
 
         System.out.println("=== Harbour Formatting Test ===");
-        System.out.println("Testing directory: " + TEST_DIR);
-        System.out.println("Harbour compiler: " + HARBOUR_COMPILER);
-        System.out.println("Harbour include:  " + HARBOUR_INCLUDE);
+        System.out.println("Testing directory: " + effectiveTestDir);
+        System.out.println("Harbour compiler: " + (skipCompilation ? "(skipped)" : HARBOUR_COMPILER));
+        System.out.println("Harbour include:  " + (skipCompilation ? "(skipped)" : HARBOUR_INCLUDE));
         System.out.println("Line break position: " + LINE_BREAK_POSITION);
 
         // Create the formatter instance
@@ -100,13 +123,15 @@ public class HarbourFormattingTest {
         int success = 0;
         int total = 0;
 
-        // Discover all .prg files if COMPILABLE_FILES is null
+        // Discover all .prg files
         String[] filesToProcess;
-        if (COMPILABLE_FILES == null) {
-            File dir = new File(TEST_DIR);
+        if (useEmbedded) {
+            filesToProcess = EMBEDDED_TEST_FILES;
+        } else if (COMPILABLE_FILES == null) {
+            File dir = new File(effectiveTestDir);
             File[] prgFiles = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".prg"));
             if (prgFiles == null) {
-                fail("Could not list files in " + TEST_DIR);
+                fail("Could not list files in " + effectiveTestDir);
                 return;
             }
             filesToProcess = new String[prgFiles.length];
@@ -120,8 +145,10 @@ public class HarbourFormattingTest {
         }
 
         // Process each compilable file
+        final String finalTestDir = effectiveTestDir;
+        final boolean finalSkipCompilation = skipCompilation;
         for (String fileName : filesToProcess) {
-            Path filePath = Paths.get(TEST_DIR, fileName);
+            Path filePath = Paths.get(finalTestDir, fileName);
             if (!Files.exists(filePath)) {
                 System.out.println("SKIP: " + fileName + " (not found)");
                 continue;
@@ -131,7 +158,7 @@ public class HarbourFormattingTest {
             System.out.println("\n=== Processing: " + fileName + " ===");
 
             try {
-                boolean result = formatAndCompileFile(filePath, processor);
+                boolean result = formatAndCompileFile(filePath, processor, finalSkipCompilation, finalTestDir);
                 if (result) {
                     success++;
                     System.out.println("OK: " + fileName);
@@ -144,6 +171,11 @@ public class HarbourFormattingTest {
                 System.out.println("ERROR: " + fileName + " - " + e.getMessage());
                 e.printStackTrace();
             }
+        }
+
+        // Clean up temp directory
+        if (tempDir != null) {
+            deleteDirectory(tempDir);
         }
 
         // Print summary
@@ -162,16 +194,61 @@ public class HarbourFormattingTest {
         assertTrue("Some files failed formatting/compilation: " + failures, failures.isEmpty());
     }
 
-    private boolean formatAndCompileFile(Path filePath, HarbourPostFormatProcessor processor) throws Exception {
+    /**
+     * Extract embedded test files from resources to a temp directory.
+     */
+    private Path extractEmbeddedTestFiles() {
+        try {
+            Path tempDir = Files.createTempDirectory("harbour-formatting-test");
+            for (String fileName : EMBEDDED_TEST_FILES) {
+                InputStream is = getClass().getResourceAsStream("/formatting/" + fileName);
+                if (is == null) {
+                    System.err.println("Resource not found: /formatting/" + fileName);
+                    continue;
+                }
+                Path targetFile = tempDir.resolve(fileName);
+                Files.copy(is, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                is.close();
+            }
+            return tempDir;
+        } catch (IOException e) {
+            System.err.println("Failed to extract test files: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Delete a directory recursively.
+     */
+    private void deleteDirectory(Path dir) {
+        try {
+            Files.walk(dir)
+                .sorted(Comparator.reverseOrder())
+                .forEach(path -> {
+                    try {
+                        Files.delete(path);
+                    } catch (IOException e) {
+                        // Ignore
+                    }
+                });
+        } catch (IOException e) {
+            // Ignore cleanup errors
+        }
+    }
+
+    private boolean formatAndCompileFile(Path filePath, HarbourPostFormatProcessor processor,
+                                          boolean skipCompilation, String testDir) throws Exception {
         // Read original content
         String originalContent = new String(Files.readAllBytes(filePath));
 
-        // FIRST: Check if original file compiles
+        // FIRST: Check if original file compiles (unless compilation is skipped)
         // If it doesn't, skip this file - it needs includes we don't have
-        boolean originalCompiles = compileFile(filePath.toString());
-        if (!originalCompiles) {
-            System.out.println("SKIP: Original file doesn't compile (missing includes?)");
-            return true; // Return true to not count as failure - this is not a formatter bug
+        if (!skipCompilation) {
+            boolean originalCompiles = compileFile(filePath.toString(), testDir);
+            if (!originalCompiles) {
+                System.out.println("SKIP: Original file doesn't compile (missing includes?)");
+                return true; // Return true to not count as failure - this is not a formatter bug
+            }
         }
 
         // Call formatHarbourCodeWithDefaults - the public method with default settings
@@ -192,16 +269,21 @@ public class HarbourFormattingTest {
             System.out.println("Formatted content written");
         }
 
-        // Compile to verify
-        boolean compileOk = compileFile(filePath.toString());
+        // Compile to verify (unless compilation is skipped)
+        boolean compileOk = true;
+        if (!skipCompilation) {
+            compileOk = compileFile(filePath.toString(), testDir);
 
-        if (!compileOk && changed) {
-            // Restore from backup
-            Path backupPath = Paths.get(filePath.toString() + ".bak");
-            if (Files.exists(backupPath)) {
-                Files.copy(backupPath, filePath, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("Compilation failed! Restored from backup.");
+            if (!compileOk && changed) {
+                // Restore from backup
+                Path backupPath = Paths.get(filePath.toString() + ".bak");
+                if (Files.exists(backupPath)) {
+                    Files.copy(backupPath, filePath, StandardCopyOption.REPLACE_EXISTING);
+                    System.out.println("Compilation failed! Restored from backup.");
+                }
             }
+        } else {
+            System.out.println("Compilation skipped (no Harbour compiler)");
         }
 
         // Clean up backup if successful
@@ -213,9 +295,9 @@ public class HarbourFormattingTest {
         return compileOk;
     }
 
-    private boolean compileFile(String filePath) throws Exception {
+    private boolean compileFile(String filePath, String testDir) throws Exception {
         System.out.println("Compiling: " + filePath);
-        System.out.println("Command: " + HARBOUR_COMPILER + " " + filePath + " -n -w1 -i" + HARBOUR_INCLUDE + " -i" + TEST_DIR + "/include");
+        System.out.println("Command: " + HARBOUR_COMPILER + " " + filePath + " -n -w1 -i" + HARBOUR_INCLUDE + " -i" + testDir + "/include");
 
         ProcessBuilder pb = new ProcessBuilder(
                 HARBOUR_COMPILER,
@@ -223,7 +305,7 @@ public class HarbourFormattingTest {
                 "-n",
                 "-w1",
                 "-i" + HARBOUR_INCLUDE,
-                "-i" + TEST_DIR + "/include"
+                "-i" + testDir + "/include"
         );
         pb.redirectErrorStream(true);
         Process process = pb.start();
