@@ -423,7 +423,6 @@ Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** 
 - **Official JetBrains Plugin** - Submit to JetBrains Marketplace for easier installation
 - **Process Coupling** - When the debugging process in PyCharm is stopped the running harbour GUI should be terminated
   as well.
-- **Tests** - write tests.
 
 ## Known Issues
 
