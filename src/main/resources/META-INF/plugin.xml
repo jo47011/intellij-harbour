@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.2.32</version>
+    <version>1.1.32</version>
     <vendor email="support@example.com" url="http://www.example.com">Harbour Development</vendor>
 
     <description><![CDATA[
@@ -30,9 +30,10 @@
         <fileType name="Harbour File" implementationClass="org.intellij.sdk.language.HarbourFileType"
                   fieldName="INSTANCE" language="Harbour" extensions="prg;ch"/>
 
-        <!-- Harbour Config File Type (for .hbp, .hbc, .cfg files that use # comments) -->
+        <!-- Harbour Config File Type (for .hbp, .hbc files that use # comments) -->
+        <!-- Note: .cfg removed - too common/generic, causes slow indexing on branch switch -->
         <fileType name="Harbour Config File" implementationClass="org.intellij.sdk.language.HarbourConfigFileType"
-                  fieldName="INSTANCE" language="HarbourConfig" extensions="hbp;hbc;cfg"/>
+                  fieldName="INSTANCE" language="HarbourConfig" extensions="hbp;hbc"/>
 
         <!-- Language -->
         <lang.parserDefinition language="Harbour"
@@ -166,8 +167,8 @@
         <!-- Line Indent Provider for fast auto-indentation - TEMPORARILY DISABLED -->
         <!-- <codeInsight.lineIndentProvider language="Harbour" implementationClass="org.intellij.sdk.language.HarbourLineIndentProvider"/> -->
         
-        <!-- Notification Group - displayType NONE_LOG to avoid popups -->
-        <notificationGroup id="Harbour Application" displayType="NONE_LOG" isLogByDefault="true"/>
+        <!-- Notification Group - displayType NONE to avoid popups, logs only -->
+        <notificationGroup id="Harbour Application" displayType="NONE" isLogByDefault="true"/>
         
         <!-- Database Support - Custom implementation for Community Edition -->
         <!-- <com.intellij.database.dialect implementation="org.intellij.sdk.language.HarbourDBFDialect"/>

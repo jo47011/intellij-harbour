@@ -58,7 +58,8 @@ public class HarbourRenameProcessor extends RenamePsiElementProcessor {
                 element instanceof HarbourNamedElement ||
                         element instanceof HarbourIdElement ||
                         element instanceof FunctionCallImpl ||
-                        element instanceof LeafPsiElement);
+                        element instanceof LeafPsiElement ||
+                        element instanceof HarbourNamedElementWrapper);
 
         HarbourLogger.log(COMPONENT, "canProcessElement: " + element.getText() +
                 ", class: " + element.getClass().getName() + " = " + canProcess);
@@ -708,8 +709,11 @@ public class HarbourRenameProcessor extends RenamePsiElementProcessor {
 
     @Override
     public boolean isInplaceRenameSupported() {
-        HarbourLogger.log(COMPONENT, "isInplaceRenameSupported called, returning true");
-        return true;
+        // Return false to force the full rename dialog which properly finds all usages
+        // via prepareRenaming(). Inline rename relies on references which don't work
+        // well for Harbour variables.
+        HarbourLogger.log(COMPONENT, "isInplaceRenameSupported called, returning false");
+        return false;
     }
     
     @Override

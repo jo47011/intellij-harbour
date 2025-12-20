@@ -4,10 +4,13 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.refactoring.RefactoringFactory;
+import com.intellij.refactoring.RenameRefactoring;
 import com.intellij.refactoring.rename.PsiElementRenameHandler;
 import org.intellij.sdk.language.psi.HarbourFile;
 import org.intellij.sdk.language.psi.HarbourNamedElement;
@@ -78,10 +81,6 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
         // We'll allow renaming if we're in a Harbour file and the element is valid
         boolean canRename = element != null && isHarbourFile && isValid;
 
-        HarbourLogger.log(COMPONENT, "isAvailableOnDataContext for file: " + (file != null ? file.getName() : "null") +
-                ", element: " + (element != null ? element.getText() + " (" + element.getClass().getName() + ")" : "null") +
-                ", isHarbourFile: " + isHarbourFile + ", isValid: " + isValid + ", canRename: " + canRename);
-
         return canRename;
     }
 
@@ -93,7 +92,6 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
 
         // Check validity first
         if (!isValidElement(element)) {
-            HarbourLogger.log(COMPONENT, "Original element is not valid, cannot find renamable element");
             return null;
         }
 
@@ -145,7 +143,6 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
 
         // Check if the original element is valid
         if (!isValidElement(element)) {
-            HarbourLogger.log(COMPONENT, "Cannot rename - element is not valid");
             return;
         }
 
@@ -155,49 +152,134 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             if (renamableElement != null && renamableElement != element) {
                 // Verify the renamable element is still valid
                 if (isValidElement(renamableElement)) {
-                    HarbourLogger.log(COMPONENT, "Using more specific element for rename: " + renamableElement.getText());
                     element = renamableElement;
                 } else {
-                    HarbourLogger.log(COMPONENT, "Found renamable element is invalid");
                     return;
                 }
             }
         }
 
-        HarbourLogger.log(COMPONENT, "invoke called on element: " + (element != null ? element.getText() : "null"));
-
         if (element != null) {
-            HarbourLogger.log(COMPONENT, "Starting rename on: " + element.getText());
             try {
-                // Get the current name for suggestion
+                // Get the current name
                 String currentName = getCurrentElementName(element);
-                HarbourLogger.log(COMPONENT, "Current name for suggestion: " + currentName);
-                
-                // Make element final for use in lambda
-                final PsiElement finalElement = element;
-                final String finalCurrentName = currentName;
-                
-                // Create a custom data context with the suggested name
-                DataContext customContext = new DataContext() {
-                    @Override
-                    public Object getData(String dataId) {
-                        if ("rename.suggested.name".equals(dataId) && finalCurrentName != null) {
-                            return finalCurrentName;
+
+                if (currentName == null || currentName.isEmpty()) {
+                    return;
+                }
+
+                // Show input dialog for new name
+                String newName = Messages.showInputDialog(
+                    project,
+                    "Rename '" + currentName + "' to:",
+                    "Rename Variable",
+                    Messages.getQuestionIcon(),
+                    currentName,
+                    null
+                );
+
+                if (newName != null && !newName.isEmpty() && !newName.equals(currentName)) {
+
+                    // Find all occurrences in the current file within the same scope
+                    PsiFile psiFile = element.getContainingFile();
+                    String fileText = psiFile.getText();
+
+                    // Get the procedure/function scope for local variables (returns line numbers)
+                    int[] scopeLines = HarbourScopeUtils.getProcedureFunctionScope(element);
+
+                    // Convert line numbers to offsets
+                    int scopeStartOffset = 0;
+                    int scopeEndOffset = fileText.length();
+                    if (scopeLines != null) {
+                        String[] lines = fileText.split("\n", -1);
+                        // Calculate start offset (beginning of start line)
+                        for (int i = 0; i < scopeLines[0] && i < lines.length; i++) {
+                            scopeStartOffset += lines[i].length() + 1; // +1 for newline
                         }
-                        if (PsiElementRenameHandler.DEFAULT_NAME.equals(dataId)) {
-                            return finalElement;
+                        // Calculate end offset (end of end line)
+                        scopeEndOffset = 0;
+                        for (int i = 0; i <= scopeLines[1] && i < lines.length; i++) {
+                            scopeEndOffset += lines[i].length() + 1;
                         }
-                        return dataContext.getData(dataId);
                     }
-                };
-                
-                super.invoke(project, editor, file, customContext);
+
+
+                    // Find all identifier occurrences with word boundaries
+                    java.util.List<int[]> occurrences = new java.util.ArrayList<>();
+                    java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                        "\\b" + java.util.regex.Pattern.quote(currentName) + "\\b",
+                        java.util.regex.Pattern.CASE_INSENSITIVE
+                    );
+                    java.util.regex.Matcher matcher = pattern.matcher(fileText);
+
+                    while (matcher.find()) {
+                        int start = matcher.start();
+                        int end = matcher.end();
+                        // Check if within scope
+                        if (start >= scopeStartOffset && end <= scopeEndOffset) {
+                            // Verify it's actually an identifier (not in a string or comment)
+                            PsiElement elemAtPos = psiFile.findElementAt(start);
+                            if (elemAtPos instanceof LeafPsiElement) {
+                                LeafPsiElement leaf = (LeafPsiElement) elemAtPos;
+                                if (leaf.getElementType() == HarbourTypes.IDENT &&
+                                    leaf.getText().equalsIgnoreCase(currentName)) {
+                                    occurrences.add(new int[]{start, end});
+                                }
+                            }
+                        }
+                    }
+
+                    if (!occurrences.isEmpty()) {
+                        // Sort by offset descending (replace from end to preserve earlier offsets)
+                        occurrences.sort((a, b) -> b[0] - a[0]);
+
+                        // Perform the rename in a write action
+                        com.intellij.openapi.editor.Document document =
+                            com.intellij.psi.PsiDocumentManager.getInstance(project).getDocument(psiFile);
+
+                        if (document != null) {
+                            com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project,
+                                "Rename " + currentName + " to " + newName, null, () -> {
+                                for (int[] occ : occurrences) {
+                                    document.replaceString(occ[0], occ[1], newName);
+                                }
+                            });
+
+                            // Commit the document changes and refresh references
+                            com.intellij.psi.PsiDocumentManager psiDocManager = com.intellij.psi.PsiDocumentManager.getInstance(project);
+                            psiDocManager.commitDocument(document);
+                            psiDocManager.commitAllDocuments();
+
+                            // Invalidate all caches for this file to refresh references
+                            String filePath = psiFile.getVirtualFile() != null ? psiFile.getVirtualFile().getPath() : null;
+                            if (filePath != null) {
+                                HarbourIndexCache indexCache = HarbourIndexCache.getInstance(project);
+                                if (indexCache != null) {
+                                    indexCache.removeFileFromCache(filePath);
+                                }
+                            }
+
+                            // Clear reference service caches (function/variable lookups)
+                            HarbourReferenceService refService = HarbourReferenceService.getInstance(project);
+                            if (refService != null) {
+                                refService.clearCache();
+                            }
+
+                            // Trigger file re-parse to update PSI
+                            com.intellij.util.FileContentUtil.reparseFiles(project,
+                                java.util.Collections.singletonList(psiFile.getVirtualFile()), true);
+
+                            // Also trigger index refresh for this file
+                            com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().saveAllDocuments();
+                            com.intellij.util.indexing.FileBasedIndex.getInstance().requestReindex(psiFile.getVirtualFile());
+
+                            HarbourLogger.log(COMPONENT, "Rename completed - " + occurrences.size() + " occurrences");
+                        }
+                    }
+                }
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during invoke: " + e.getMessage());
-                HarbourLogger.logStackTrace(COMPONENT, e);
             }
-        } else {
-            HarbourLogger.log(COMPONENT, "Cannot rename - no valid element found at caret position");
         }
     }
 
@@ -212,9 +294,7 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             }
             if ("rename.suggested.name".equals(dataId)) {
                 // Provide the current name as suggestion
-                String currentName = getCurrentElementName(element);
-                HarbourLogger.log(COMPONENT, "Suggesting name for rename: " + currentName);
-                return currentName;
+                return getCurrentElementName(element);
             }
             return dataContext.getData(dataId);
         };
@@ -267,12 +347,9 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
 
     @Override
     public void invoke(@NotNull Project project, @NotNull PsiElement[] elements, DataContext dataContext) {
-        HarbourLogger.log(COMPONENT, "invoke called with elements array of length: " + elements.length);
-
         if (elements.length > 0) {
             // Check if the first element is valid
             if (!isValidElement(elements[0])) {
-                HarbourLogger.log(COMPONENT, "Cannot rename - first element is not valid");
                 return;
             }
 
@@ -284,19 +361,15 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
                 // Verify the renamable element is still valid
                 if (isValidElement(renamableElement)) {
                     elements = new PsiElement[]{renamableElement};
-                    HarbourLogger.log(COMPONENT, "Using more specific element for rename: " + renamableElement.getText());
                 } else {
-                    HarbourLogger.log(COMPONENT, "Found renamable element is invalid");
                     return;
                 }
             }
 
-            HarbourLogger.log(COMPONENT, "Starting rename on: " + elements[0].getText());
             try {
                 super.invoke(project, elements, dataContext);
             } catch (Exception e) {
                 HarbourLogger.log(COMPONENT, "Exception during invoke: " + e.getMessage());
-                HarbourLogger.logStackTrace(COMPONENT, e);
             }
         }
     }
@@ -311,8 +384,6 @@ public class HarbourRenameHandler extends PsiElementRenameHandler {
             if (editor != null && file != null) {
                 int offset = editor.getCaretModel().getOffset();
                 element = file.findElementAt(offset);
-                HarbourLogger.log(COMPONENT, "Found element at offset " + offset + ": " +
-                        (element != null ? element.getText() + " (" + element.getClass().getName() + ")" : "null"));
             }
         }
         return element;

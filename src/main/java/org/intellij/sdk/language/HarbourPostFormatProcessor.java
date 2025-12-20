@@ -156,6 +156,77 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             log("Processing text range: " + textRange.getStartOffset() + " to " + textRange.getEndOffset());
             log("Selected text length: " + selectedText.length());
 
+            // Determine context indentation from surrounding code
+            // This is needed when reformatting a selection to preserve proper indentation context
+            String contextIndent = "";
+            boolean isPartialSelection = textRange.getStartOffset() > 0 ||
+                                         textRange.getEndOffset() < document.getTextLength();
+
+            if (isPartialSelection) {
+                int selectionStartLine = document.getLineNumber(textRange.getStartOffset());
+
+                // Scan upward to find context: count nesting level from control structures
+                // and function declarations
+                int contextIndentLevel = 0;
+
+                for (int lineNum = selectionStartLine - 1; lineNum >= 0; lineNum--) {
+                    int lineStart = document.getLineStartOffset(lineNum);
+                    int lineEnd = document.getLineEndOffset(lineNum);
+                    String line = document.getText(new TextRange(lineStart, lineEnd));
+                    String trimmedLower = line.trim().toLowerCase();
+
+                    // Check if we find a function/procedure declaration - stop here
+                    if (trimmedLower.startsWith("function ") ||
+                        trimmedLower.startsWith("procedure ") ||
+                        trimmedLower.startsWith("method ") ||
+                        trimmedLower.startsWith("static function ") ||
+                        trimmedLower.startsWith("static procedure ")) {
+                        contextIndentLevel++; // Inside function body = 1 level
+                        log("Found function declaration above selection at line " + (lineNum + 1));
+                        break;
+                    }
+
+                    // Check if we find class end or file start (stop searching)
+                    if (trimmedLower.startsWith("endclass") || trimmedLower.startsWith("end class")) {
+                        break;
+                    }
+
+                    // Count block-opening statements that increase nesting
+                    // We're scanning UP, so we see block starts that wrap our selection
+                    if (trimmedLower.startsWith("if ") ||
+                        trimmedLower.startsWith("do while ") ||
+                        trimmedLower.startsWith("while ") ||
+                        trimmedLower.startsWith("for ") ||
+                        trimmedLower.startsWith("do case") ||
+                        trimmedLower.startsWith("switch ") ||
+                        trimmedLower.startsWith("begin sequence") ||
+                        trimmedLower.startsWith("try")) {
+                        contextIndentLevel++;
+                        log("Found block opening at line " + (lineNum + 1) + ": " + trimmedLower.substring(0, Math.min(20, trimmedLower.length())));
+                    }
+
+                    // Decrease for block endings we encounter going up (they close blocks BELOW the selection)
+                    if (trimmedLower.startsWith("endif") ||
+                        trimmedLower.startsWith("enddo") ||
+                        trimmedLower.startsWith("next") ||
+                        trimmedLower.startsWith("endcase") ||
+                        trimmedLower.startsWith("endswitch") ||
+                        trimmedLower.startsWith("end sequence") ||
+                        trimmedLower.startsWith("catch") ||
+                        trimmedLower.startsWith("finally") ||
+                        trimmedLower.startsWith("end try")) {
+                        contextIndentLevel--;
+                    }
+                }
+
+                if (contextIndentLevel > 0) {
+                    // Apply context indentation based on nesting level
+                    int indentSize = 2; // Default Harbour indent size
+                    contextIndent = " ".repeat(contextIndentLevel * indentSize);
+                    log("Context indentation level " + contextIndentLevel + ": " + contextIndent.length() + " chars");
+                }
+            }
+
             // DEBUG: Log the actual input text line by line - DISABLED FOR PERFORMANCE
             // Only enable for debugging specific issues
             /*
@@ -179,6 +250,47 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Process step by step
             String formattedText = formatHarbourCode(selectedText, lineBreakPosition, harbourCodeStyleSettings);
+
+            // Apply context indentation to each line if we have context from surrounding code
+            // But don't add context indent to lines that already have special (custom) indentation,
+            // like RETURN at function end which uses RETURN_INDENT setting (usually 0)
+            if (!contextIndent.isEmpty()) {
+                String[] formattedLines = formattedText.split("\n", -1);
+                StringBuilder indentedResult = new StringBuilder();
+                for (int i = 0; i < formattedLines.length; i++) {
+                    String line = formattedLines[i];
+                    String trimmedLower = line.trim().toLowerCase();
+                    if (!line.trim().isEmpty()) {
+                        // Get current line's indentation
+                        int currentIndent = 0;
+                        while (currentIndent < line.length() && Character.isWhitespace(line.charAt(currentIndent))) {
+                            currentIndent++;
+                        }
+
+                        // Check if this is a RETURN statement at function end (has 0 or custom indent)
+                        // RETURN at function end should NOT get context indent added
+                        // It's at function end if it has NO indentation in the formatted output
+                        boolean isReturnAtFunctionEnd = (trimmedLower.equals("return") ||
+                                                         trimmedLower.startsWith("return ")) &&
+                                                        currentIndent == 0;
+                        if (isReturnAtFunctionEnd) {
+                            // Keep RETURN as-is (it's at column 0 per RETURN_INDENT setting)
+                            indentedResult.append(line);
+                        } else {
+                            // Add context indent to other non-empty lines
+                            indentedResult.append(contextIndent).append(line);
+                        }
+                    } else {
+                        // Keep empty lines as-is
+                        indentedResult.append(line);
+                    }
+                    if (i < formattedLines.length - 1) {
+                        indentedResult.append("\n");
+                    }
+                }
+                formattedText = indentedResult.toString();
+                log("Applied context indentation: " + contextIndent.length() + " chars");
+            }
 
             // Make sure to restore exact original trailing whitespace
             formattedText = ensureTrailingWhitespace(formattedText, originalTrailingWhitespace);

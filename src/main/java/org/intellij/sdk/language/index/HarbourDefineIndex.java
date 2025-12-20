@@ -68,11 +68,15 @@ public class HarbourDefineIndex extends FileBasedIndexExtension<String, Void> {
     @NotNull
     @Override
     public FileBasedIndex.InputFilter getInputFilter() {
-        return new FileBasedIndex.InputFilter() {
-            @Override
-            public boolean acceptInput(@NotNull VirtualFile file) {
-                return file.getFileType() == HarbourFileType.INSTANCE;
+        // Use explicit extension check in addition to file type to avoid indexing
+        // backup files like .old, .bak etc. that IntelliJ may associate with Harbour
+        // due to cached VFS file type associations
+        return file -> {
+            if (file.getFileType() != HarbourFileType.INSTANCE) {
+                return false;
             }
+            String ext = file.getExtension();
+            return ext != null && (ext.equalsIgnoreCase("prg") || ext.equalsIgnoreCase("ch"));
         };
     }
     
@@ -83,7 +87,7 @@ public class HarbourDefineIndex extends FileBasedIndexExtension<String, Void> {
     
     @Override
     public int getVersion() {
-        return 1;
+        return 2; // Added explicit extension check to avoid indexing .old/.bak files
     }
     
     public static boolean isDefinedConstant(@NotNull Project project, @NotNull String constantName) {

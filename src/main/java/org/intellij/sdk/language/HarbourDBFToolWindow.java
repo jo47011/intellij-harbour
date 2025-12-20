@@ -533,14 +533,18 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     updateStatus(String.format("Connected - %d workarea(s) open", workareas.size()));
                     HarbourLogger.log("HarbourDBFToolWindow", "*** Updated status to show " + workareas.size() + " workarea(s)");
 
-                    // Auto-select first workarea's Current Record on first load
+                    // Auto-select program's current workarea on first load
                     if (!currentRecordWasSelected && autoSelectOnFirstLoad) {
                         autoSelectOnFirstLoad = false;  // Only auto-select once
-                        // Auto-select the first workarea's Current Record
-                        HarbourLiveDBFConnection.WorkareaInfo firstWorkarea = workareas.iterator().next();
-                        final String firstAlias = firstWorkarea.getAlias();
+                        // Auto-select the program's currently selected workarea (from SELECT())
+                        // Fall back to first workarea if none is selected
+                        HarbourLiveDBFConnection.WorkareaInfo targetWorkarea = liveConnection.getCurrentSelectedWorkarea();
+                        if (targetWorkarea == null) {
+                            targetWorkarea = workareas.iterator().next();
+                        }
+                        final String targetAlias = targetWorkarea.getAlias();
                         HarbourLogger.log("HarbourDBFToolWindow",
-                            "Auto-selecting first workarea's Current Record: " + firstAlias);
+                            "Auto-selecting program's current workarea: " + targetAlias);
 
                         SwingUtilities.invokeLater(() -> {
                             DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) treeModel.getRoot();
@@ -549,7 +553,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                                 if (child.getUserObject() instanceof HarbourLiveDBFConnection.WorkareaInfo) {
                                     HarbourLiveDBFConnection.WorkareaInfo info =
                                         (HarbourLiveDBFConnection.WorkareaInfo) child.getUserObject();
-                                    if (info.getAlias().equals(firstAlias)) {
+                                    if (info.getAlias().equals(targetAlias)) {
                                         // Expand the workarea node
                                         TreePath workareaPath = new TreePath(child.getPath());
                                         workareaTree.expandPath(workareaPath);
@@ -562,7 +566,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                                                 TreePath recordPath = new TreePath(childNode.getPath());
                                                 workareaTree.setSelectionPath(recordPath);
                                                 HarbourLogger.log("HarbourDBFToolWindow",
-                                                    "Auto-selected Current Record for " + firstAlias);
+                                                    "Auto-selected Current Record for " + targetAlias);
                                                 break;
                                             }
                                         }
@@ -1196,7 +1200,17 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             HarbourLiveDBFConnection.WorkareaInfo programSelected = liveConnection.getCurrentSelectedWorkarea();
             if (programSelected != null) {
                 String formattedRecno = String.format("%,d", programSelected.getCurrentRecord());
-                currentInfoLabel.setText("Selected: " + programSelected.getAlias() + " [" + formattedRecno + "]");
+                StringBuilder info = new StringBuilder();
+                info.append("Selected: ").append(programSelected.getAlias())
+                    .append(" [").append(formattedRecno).append("]");
+                // Add EOF/DELETED flags
+                if (programSelected.isEof()) {
+                    info.append(" EOF");
+                }
+                if (programSelected.isDeleted()) {
+                    info.append(" DEL");
+                }
+                currentInfoLabel.setText(info.toString());
             } else {
                 int areaNum = liveConnection.getCurrentSelectedArea();
                 if (areaNum > 0) {

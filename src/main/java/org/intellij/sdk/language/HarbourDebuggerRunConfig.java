@@ -30,6 +30,7 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
     private String breakpointFile = "init.cld";
     private boolean useDirectExecution = false;
     private boolean useRebuildFlag = false;
+    private boolean rebuildOnce = false;
 
     protected HarbourDebuggerRunConfig(@NotNull Project project,
                                        @NotNull ConfigurationFactory factory,
@@ -93,6 +94,7 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
         breakpointFile = element.getAttributeValue("breakpointFile", "init.cld");
         useDirectExecution = Boolean.parseBoolean(element.getAttributeValue("useDirectExecution", "false"));
         useRebuildFlag = Boolean.parseBoolean(element.getAttributeValue("useRebuildFlag", "false"));
+        rebuildOnce = Boolean.parseBoolean(element.getAttributeValue("rebuildOnce", "false"));
     }
 
     @Override
@@ -123,6 +125,7 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
         element.setAttribute("breakpointFile", breakpointFile);
         element.setAttribute("useDirectExecution", String.valueOf(useDirectExecution));
         element.setAttribute("useRebuildFlag", String.valueOf(useRebuildFlag));
+        element.setAttribute("rebuildOnce", String.valueOf(rebuildOnce));
     }
 
     // Getters and setters
@@ -218,5 +221,11 @@ public class HarbourDebuggerRunConfig extends RunConfigurationBase<Element> {
     }
     public void setUseRebuildFlag(boolean useRebuildFlag) {
         this.useRebuildFlag = useRebuildFlag;
+    }
+    public boolean isRebuildOnce() {
+        return rebuildOnce;
+    }
+    public void setRebuildOnce(boolean rebuildOnce) {
+        this.rebuildOnce = rebuildOnce;
     }
 }
