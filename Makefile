@@ -11,7 +11,7 @@ IDEA_LIB := $(shell if [ -d "/opt/idea-ce/lib" ]; then echo "/opt/idea-ce/lib"; 
             elif [ -d "/opt/idea-IC-243.25659.39/lib" ]; then echo "/opt/idea-IC-243.25659.39/lib"; \
             else echo "/opt/idea-ce/lib"; fi)
 
-.PHONY: all flex bnf clean clean-log clean-plugins build run plugin help check-main release release-dry-run up update ci diff
+.PHONY: all flex bnf clean clean-log clean-plugins build run plugin help check-main release release-dry-run up update ci diff test
 
 all: flex bnf plugin  ## Build everything (flex, bnf, plugin)
 
@@ -58,6 +58,9 @@ run: build  ## Build and run IDE with plugin
 
 plugin:  ## Build plugin distribution zip
 	./gradlew buildPlugin
+
+test:  ## Run all tests
+	./gradlew test
 
 clean-plugins:  ## Remove old plugin zips
 	rm -f ./build/distributions/harbour-language-plugin-*.zip

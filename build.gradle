@@ -46,15 +46,17 @@ test {
     // Always run tests (don't use cache)
     outputs.upToDateWhen { false }
 
-    // Show test output in console
+    // Show test output in console (compact format, no empty lines)
     testLogging {
-        events "passed", "skipped", "failed"
-        showStandardStreams = false  // Set to true for detailed output
+        showStandardStreams = false
         exceptionFormat = "full"
-
-        // Show skip reasons
         showCauses = true
         showExceptions = true
+    }
+
+    // Compact test output without empty lines
+    afterTest { desc, result ->
+        println "${desc.className} > ${desc.name} ${result.resultType}"
     }
 
     // Print summary after tests
