@@ -3,6 +3,7 @@ package org.intellij.sdk.language;
 import com.intellij.application.options.CodeStyleAbstractConfigurable;
 import com.intellij.application.options.CodeStyleAbstractPanel;
 import com.intellij.application.options.TabbedLanguageCodeStylePanel;
+import com.intellij.lang.Language;
 import com.intellij.psi.codeStyle.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -32,6 +33,12 @@ public class HarbourCodeStyleSettingsProvider extends CodeStyleSettingsProvider 
     @Override
     public String getConfigurableDisplayName() {
         return "Harbour";
+    }
+
+    @Nullable
+    @Override
+    public Language getLanguage() {
+        return HarbourLanguage.INSTANCE;
     }
     
     private static class HarbourCodeStyleMainPanel extends TabbedLanguageCodeStylePanel {
