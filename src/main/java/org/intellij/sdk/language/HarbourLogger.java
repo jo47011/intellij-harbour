@@ -2,6 +2,7 @@ package org.intellij.sdk.language;
 
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -11,7 +12,6 @@ import com.intellij.psi.PsiFile;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -124,32 +124,42 @@ public class HarbourLogger {
             }
         }
 
-        try {
-            // If project is null, try to get the current active project
-            if (project == null) {
-                Project[] projects = ProjectManager.getInstance().getOpenProjects();
-                if (projects.length > 0) {
-                    project = projects[0];
-                }
-            }
+        // Capture values for async file write
+        final Project finalProject = project;
+        final String finalMessage = message;
+        final String finalComponentName = componentName;
 
-            if (project != null) {
-                HarbourSettings settings = HarbourSettings.getInstance(project);
-                if (settings != null) {
-                    // Use componentName as-is with hyphens instead of converting to lowercase
-                    String logFileName = componentName.replace(" ", "-") + ".log";
-                    String logFilePath = settings.getLogFilePath(logFileName);
-
-                    if (logFilePath != null) {
-                        // We have a valid log path, write to file
-                        writeToLogFile(logFilePath, message);
+        // Run file I/O on pooled thread to avoid EDT file system access issues
+        // This prevents: "Remote file system accessed in EDT before Eel initialization"
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                Project projectToUse = finalProject;
+                // If project is null, try to get the current active project
+                if (projectToUse == null) {
+                    Project[] projects = ProjectManager.getInstance().getOpenProjects();
+                    if (projects.length > 0) {
+                        projectToUse = projects[0];
                     }
                 }
+
+                if (projectToUse != null) {
+                    HarbourSettings settings = HarbourSettings.getInstance(projectToUse);
+                    if (settings != null) {
+                        // Use componentName as-is with hyphens instead of converting to lowercase
+                        String logFileName = finalComponentName.replace(" ", "-") + ".log";
+                        String logFilePath = settings.getLogFilePath(logFileName);
+
+                        if (logFilePath != null) {
+                            // We have a valid log path, write to file
+                            writeToLogFile(logFilePath, finalMessage);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // If any issues with file logging, just silently continue
+                Logger.getInstance(finalComponentName).warn("Failed to write to log file: " + e.getMessage());
             }
-        } catch (Exception e) {
-            // If any issues with file logging, just silently continue
-            logger.warn("Failed to write to log file: " + e.getMessage());
-        }
+        });
     }
 
     /**
@@ -240,30 +250,36 @@ public class HarbourLogger {
             }
         }
 
-        try {
-            Project[] projects = ProjectManager.getInstance().getOpenProjects();
-            if (projects.length > 0) {
-                Project project = projects[0];
-                HarbourSettings settings = HarbourSettings.getInstance(project);
-                if (settings != null) {
-                    // Use componentName as-is with hyphens instead of converting to lowercase
-                    String logFileName = componentName.replace(" ", "-") + ".log";
-                    String logFilePath = settings.getLogFilePath(logFileName);
+        // Format exception message for file log (capture before async)
+        final StringBuilder sb = new StringBuilder();
+        sb.append("EXCEPTION: ").append(e.getMessage()).append("\n");
+        for (StackTraceElement element : e.getStackTrace()) {
+            sb.append("    at ").append(element.toString()).append("\n");
+        }
+        final String exceptionLogMessage = sb.toString();
+        final String finalComponentName = componentName;
 
-                    if (logFilePath != null) {
-                        // Format exception for file log
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("EXCEPTION: ").append(e.getMessage()).append("\n");
-                        for (StackTraceElement element : e.getStackTrace()) {
-                            sb.append("    at ").append(element.toString()).append("\n");
+        // Run file I/O on pooled thread to avoid EDT file system access issues
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                Project[] projects = ProjectManager.getInstance().getOpenProjects();
+                if (projects.length > 0) {
+                    Project project = projects[0];
+                    HarbourSettings settings = HarbourSettings.getInstance(project);
+                    if (settings != null) {
+                        // Use componentName as-is with hyphens instead of converting to lowercase
+                        String logFileName = finalComponentName.replace(" ", "-") + ".log";
+                        String logFilePath = settings.getLogFilePath(logFileName);
+
+                        if (logFilePath != null) {
+                            writeToLogFile(logFilePath, exceptionLogMessage);
                         }
-                        writeToLogFile(logFilePath, sb.toString());
                     }
                 }
+            } catch (Exception ex) {
+                // Silently continue if there's an issue with file logging
             }
-        } catch (Exception ex) {
-            // Silently continue if there's an issue with file logging
-        }
+        });
     }
 
     /**

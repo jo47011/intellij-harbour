@@ -149,7 +149,9 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     }
 
     /**
-     * Gets the full path for a log file
+     * Gets the full path for a log file.
+     * Note: Does NOT check/create directory to avoid EDT file system access issues.
+     * Directory creation is handled by HarbourLogger.writeToLogFile().
      * @param fileName The log file name
      * @return The full path, or null if debug logging is disabled
      */
@@ -158,13 +160,10 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
             return null; // Debug logging disabled
         }
 
-        File dir = new File(debugLogPath);
-        if (!dir.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            dir.mkdirs();
-        }
-
-        return new File(dir, fileName).getAbsolutePath();
+        // Don't check/create directory here - it triggers remote file system access on EDT
+        // which causes: "Remote file system accessed in EDT before Eel initialization"
+        // Directory creation is handled in HarbourLogger.writeToLogFile()
+        return new File(debugLogPath, fileName).getAbsolutePath();
     }
 
     // Line break position methods
