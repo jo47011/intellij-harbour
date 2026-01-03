@@ -131,7 +131,12 @@ public class HarbourLogger {
 
         // Run file I/O on pooled thread to avoid EDT file system access issues
         // This prevents: "Remote file system accessed in EDT before Eel initialization"
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        // Note: Application can be null in unit tests - skip file logging in that case
+        com.intellij.openapi.application.Application app = ApplicationManager.getApplication();
+        if (app == null) {
+            return; // No Application available (unit test environment) - skip file logging
+        }
+        app.executeOnPooledThread(() -> {
             try {
                 Project projectToUse = finalProject;
                 // If project is null, try to get the current active project
@@ -260,7 +265,12 @@ public class HarbourLogger {
         final String finalComponentName = componentName;
 
         // Run file I/O on pooled thread to avoid EDT file system access issues
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        // Note: Application can be null in unit tests - skip file logging in that case
+        com.intellij.openapi.application.Application app = ApplicationManager.getApplication();
+        if (app == null) {
+            return; // No Application available (unit test environment) - skip file logging
+        }
+        app.executeOnPooledThread(() -> {
             try {
                 Project[] projects = ProjectManager.getInstance().getOpenProjects();
                 if (projects.length > 0) {
