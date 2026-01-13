@@ -1,28 +1,22 @@
 package org.intellij.sdk.language;
 
-import com.intellij.notification.Notification;
-import com.intellij.notification.NotificationType;
-import com.intellij.notification.Notifications;
+import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
-import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
-import com.intellij.psi.util.PsiTreeUtil;
 import org.intellij.sdk.language.psi.HarbourFile;
-import org.intellij.sdk.language.psi.HarbourTypes;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.regex.Matcher;
@@ -77,17 +71,13 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         String variableName = getWordAtOffset(document, offset);
         
         if (variableName == null || variableName.isEmpty()) {
-            showNotification(project, "No Variable", 
-                "No variable name found under cursor", 
-                NotificationType.WARNING);
+            showHint(editor, "No variable name found under cursor", true);
             return;
         }
 
         // Check if it's a valid identifier
         if (!isValidIdentifier(variableName)) {
-            showNotification(project, "Invalid Identifier", 
-                "'" + variableName + "' is not a valid variable name", 
-                NotificationType.WARNING);
+            showHint(editor, "'" + variableName + "' is not a valid variable name", true);
             return;
         }
 
@@ -97,9 +87,7 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         String validationResult = validateIdentifier(project, variableName);
         if (validationResult != null) {
             HarbourLogger.log("DeclareLocalVariable", "Validation failed: " + validationResult);
-            showNotification(project, "Cannot Declare",
-                validationResult,
-                NotificationType.WARNING);
+            showHint(editor, validationResult, true);
             return;
         }
         HarbourLogger.log("DeclareLocalVariable", "Validation passed");
@@ -111,9 +99,7 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
 
         if (functionStart == -1) {
             HarbourLogger.log("DeclareLocalVariable", "No function found");
-            showNotification(project, "No Function",
-                "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD",
-                NotificationType.WARNING);
+            showHint(editor, "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD", true);
             return;
         }
 
@@ -129,18 +115,15 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
 
                 if (localInsertPosition == -1) {
                     HarbourLogger.log("DeclareLocalVariable", "Could not determine insert position");
-                    showNotification(project, "Error",
-                        "Could not determine where to insert LOCAL declaration",
-                        NotificationType.ERROR);
+                    showHint(editor, "Could not determine where to insert LOCAL declaration", true);
                     return;
                 }
 
                 // Check if variable is already declared
                 if (isVariableDeclared(text, functionStart, localInsertPosition, variableName)) {
                     HarbourLogger.log("DeclareLocalVariable", "Variable already declared");
-                    showNotification(project, "Already Declared",
-                        "Variable '" + variableName + "' is already declared",
-                        NotificationType.WARNING);
+                    String msg = "'" + variableName + "' is already declared as LOCAL";
+                    showHint(editor, msg, true);
                     return;
                 }
                 HarbourLogger.log("DeclareLocalVariable", "Variable not yet declared, proceeding");
@@ -164,15 +147,11 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 PsiDocumentManager.getInstance(project).commitDocument(document);
 
                 HarbourLogger.log("DeclareLocalVariable", "Success - LOCAL " + variableName + " added");
-                showNotification(project, "Variable Declared",
-                    "LOCAL " + variableName + " added",
-                    NotificationType.INFORMATION);
+                showHint(editor, "Added: LOCAL " + variableName, false);
                     
             } catch (Exception ex) {
                 HarbourLogger.log("DeclareLocalVariable", "Error: " + ex.getMessage());
-                showNotification(project, "Error", 
-                    "Failed to declare variable: " + ex.getMessage(), 
-                    NotificationType.ERROR);
+                showHint(editor, "Failed to declare variable: " + ex.getMessage(), true);
             }
         });
     }
@@ -425,11 +404,20 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         return indent.toString();
     }
 
-    private void showNotification(Project project, String title, String content, NotificationType type) {
-        Notifications.Bus.notify(
-            new Notification("Harbour Application", title, content, type),
-            project
-        );
+    /**
+     * Show a hint message near the caret position in the editor.
+     * This is more visible than notifications which may be collapsed.
+     */
+    private void showHint(Editor editor, String message, boolean isError) {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (editor != null && !editor.isDisposed()) {
+                if (isError) {
+                    HintManager.getInstance().showErrorHint(editor, message);
+                } else {
+                    HintManager.getInstance().showInformationHint(editor, message);
+                }
+            }
+        });
     }
 
     private int getLocalIndentSetting(Project project) {
