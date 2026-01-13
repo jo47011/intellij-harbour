@@ -355,30 +355,32 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         if (functionEnd == -1) {
             functionEnd = text.length();
         }
-        
+
         String functionText = text.substring(functionStart, functionEnd);
-        
+
         // Pattern to match LOCAL declarations
         Pattern pattern = Pattern.compile(
             "(?i)^\\s*LOCAL\\s+(.+)$",
             Pattern.MULTILINE
         );
-        
+
         Matcher matcher = pattern.matcher(functionText);
-        
+
         while (matcher.find()) {
             String varList = matcher.group(1);
             // Split by comma to get individual variables
             String[] vars = varList.split(",");
             for (String var : vars) {
                 // Remove any assignment or type declaration
-                var = var.trim().split("\\s+")[0].split(":")[0].split("=")[0];
-                if (var.equalsIgnoreCase(variableName)) {
+                String cleanVar = var.trim().split("\\s+")[0].split(":")[0].split("=")[0];
+                if (cleanVar.equalsIgnoreCase(variableName)) {
+                    HarbourLogger.log("DeclareLocalVariable",
+                            "Variable '" + variableName + "' already declared in: LOCAL " + varList.trim());
                     return true;
                 }
             }
         }
-        
+
         return false;
     }
     

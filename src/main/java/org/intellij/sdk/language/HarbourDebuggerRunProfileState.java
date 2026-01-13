@@ -1482,15 +1482,20 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 // Log enabled breakpoints
                 VirtualFile file = bp.getSourcePosition().getFile();
                 String fileName = file.getName();
-                int line = bp.getSourcePosition().getLine() + 1;
+                int originalLine = bp.getSourcePosition().getLine() + 1;
+
+                // For multi-line statements, find the effective line (end of continuation)
+                // Harbour debugger only stops at the last line of multi-line statements
+                int line = findEffectiveBreakpointLine(file, originalLine);
 
                 // Variables already declared above for logging
                 String filePath = file.getPath();
-                
-                HarbourLogger.log(project, "HarbourDebugger", 
+
+                HarbourLogger.log(project, "HarbourDebugger",
                         "=== WRITING BREAKPOINT TO init.cld ===");
-                HarbourLogger.log(project, "HarbourDebugger", 
-                        "File: " + fileName + ", Line: " + line);
+                HarbourLogger.log(project, "HarbourDebugger",
+                        "File: " + fileName + ", Original line: " + originalLine +
+                        (line != originalLine ? " -> Effective line: " + line : ", Line: " + line));
                 HarbourLogger.log(project, "HarbourDebugger", 
                         "Enabled: " + bp.isEnabled() + " (should be true)");
                 
@@ -1910,7 +1915,67 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }, "HarbourForceCleanup").start();
     }
-    
+
+    /**
+     * Find the effective line number for a breakpoint on a multi-line statement.
+     * In Harbour, lines ending with ';' are continuation lines.
+     * The debugger only stops at the last line of a multi-line statement.
+     * This method finds that last line to ensure breakpoints work correctly.
+     *
+     * @param file The virtual file containing the code
+     * @param originalLine The 1-based line number where the breakpoint is set
+     * @return The effective 1-based line number (end of multi-line statement)
+     */
+    private int findEffectiveBreakpointLine(VirtualFile file, int originalLine) {
+        try {
+            // Read file content
+            String content = new String(file.contentsToByteArray(), file.getCharset());
+            String[] lines = content.split("\n", -1);
+
+            // Convert to 0-based index
+            int lineIndex = originalLine - 1;
+
+            if (lineIndex < 0 || lineIndex >= lines.length) {
+                return originalLine;
+            }
+
+            // Check if current line is part of a multi-line statement
+            // A multi-line statement has lines ending with ';' (continuation marker)
+            int effectiveLineIndex = lineIndex;
+
+            // First, check if current line ends with ';' - if so, find the end
+            while (effectiveLineIndex < lines.length - 1) {
+                String currentLine = lines[effectiveLineIndex].trim();
+                // Remove trailing comment if any
+                int commentPos = currentLine.indexOf("//");
+                if (commentPos > 0) {
+                    currentLine = currentLine.substring(0, commentPos).trim();
+                }
+
+                if (currentLine.endsWith(";")) {
+                    effectiveLineIndex++;
+                } else {
+                    break;
+                }
+            }
+
+            // Convert back to 1-based
+            int effectiveLine = effectiveLineIndex + 1;
+
+            if (effectiveLine != originalLine) {
+                HarbourLogger.log(project, "HarbourDebugger",
+                        "Multi-line breakpoint: Line " + originalLine + " -> effective line " + effectiveLine +
+                        " (file: " + file.getName() + ")");
+            }
+
+            return effectiveLine;
+        } catch (Exception e) {
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Error finding effective breakpoint line: " + e.getMessage());
+            return originalLine;
+        }
+    }
+
     /**
      * Terminate all running Harbour processes
      */
