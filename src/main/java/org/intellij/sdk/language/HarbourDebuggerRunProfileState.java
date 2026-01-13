@@ -197,8 +197,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     HarbourLogger.log(env.getProject(), "HarbourDebugger",
                             "Process terminated with exit code: " + event.getExitCode());
 
-                    // DEBUG MODE ONLY: For GUI applications, launch executable after successful compilation
-                    if (event.getExitCode() == 0 && isGuiProgram && isDebugMode) {
+                    // For GUI applications, launch executable after successful compilation
+                    // This applies to both DEBUG MODE and RUN MODE since GUI programs don't use -run flag
+                    if (event.getExitCode() == 0 && isGuiProgram) {
                         
                         try {
                             // Determine executable name from build target
@@ -235,19 +236,31 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                                         "Found GUI executable: " + executable.getAbsolutePath());
                                 
-                                // Create command to launch executable with debug environment
+                                // Create command to launch executable
                                 GeneralCommandLine launchCommand = new GeneralCommandLine();
                                 launchCommand.setExePath(executable.getAbsolutePath());
                                 launchCommand.setWorkDirectory(projectDir);
-                                launchCommand.withEnvironment("HB_REMOTE_DEBUG", "1");
-                                launchCommand.withEnvironment("HB_DBG_PATH", projectDir.getAbsolutePath());
-                                
-                                // Launch as separate process for debugging
+
+                                // Only set debug environment variables in debug mode
+                                if (isDebugMode) {
+                                    launchCommand.withEnvironment("HB_REMOTE_DEBUG", "1");
+                                    launchCommand.withEnvironment("HB_DBG_PATH", projectDir.getAbsolutePath());
+                                }
+
+                                // Add program arguments if specified
+                                String programArgs = runConfig.getProgramArguments();
+                                if (!StringUtil.isEmpty(programArgs)) {
+                                    launchCommand.addParameters(StringUtil.split(programArgs, " "));
+                                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                            "GUI executable: Added program arguments: " + programArgs);
+                                }
+
+                                // Launch as separate process
                                 OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
                                 launchHandler.startNotify();
-                                
-                                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                                        "GUI executable launched successfully for debugging");
+
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                        "GUI executable launched successfully" + (isDebugMode ? " for debugging" : ""));
                             } else {
                                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                                         "GUI executable not found: " + executable.getAbsolutePath());
@@ -651,9 +664,21 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             parameters.add(debugSourcePath);
         }
 
-        if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
-            parameters.add("--");
-            parameters.addAll(StringUtil.split(runConfig.getProgramArguments(), " "));
+        // Only add -runflag for console programs (which use -run flag)
+        // For GUI programs, arguments are passed when launching the executable separately
+        if (!isGui && !StringUtil.isEmpty(runConfig.getProgramArguments())) {
+            // Use -runflag= for each argument instead of -- separator
+            // The -- separator doesn't work correctly with hbmk2 as it gets passed to the compiler
+            for (String arg : StringUtil.split(runConfig.getProgramArguments(), " ")) {
+                if (!arg.isEmpty()) {
+                    parameters.add("-runflag=" + arg);
+                }
+            }
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "Console program: Added -runflag arguments: " + runConfig.getProgramArguments());
+        } else if (isGui && !StringUtil.isEmpty(runConfig.getProgramArguments())) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "GUI program: Arguments will be passed when launching executable: " + runConfig.getProgramArguments());
         }
 
         // Log the complete command for debugging - make it very visible

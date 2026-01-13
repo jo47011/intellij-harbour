@@ -96,44 +96,54 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         // Check if this is actually a function/method call or keyword
         String validationResult = validateIdentifier(project, variableName);
         if (validationResult != null) {
-            showNotification(project, "Cannot Declare", 
-                validationResult, 
+            HarbourLogger.log("DeclareLocalVariable", "Validation failed: " + validationResult);
+            showNotification(project, "Cannot Declare",
+                validationResult,
                 NotificationType.WARNING);
             return;
         }
+        HarbourLogger.log("DeclareLocalVariable", "Validation passed");
 
         // Find the containing function, procedure, or method
         String text = document.getText();
         int functionStart = findFunctionStart(text, offset);
-        
+        HarbourLogger.log("DeclareLocalVariable", "Function start: " + functionStart);
+
         if (functionStart == -1) {
-            showNotification(project, "No Function", 
-                "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD", 
+            HarbourLogger.log("DeclareLocalVariable", "No function found");
+            showNotification(project, "No Function",
+                "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD",
                 NotificationType.WARNING);
             return;
         }
 
         // Perform the modification in a write action
+        HarbourLogger.log("DeclareLocalVariable", "Starting WriteCommandAction");
         WriteCommandAction.runWriteCommandAction(project, "Declare LOCAL Variable", null, () -> {
             try {
+                HarbourLogger.log("DeclareLocalVariable", "Inside WriteCommandAction try block");
                 // Find where to insert the LOCAL declaration
                 String functionText = text.substring(functionStart);
                 int localInsertPosition = findLocalInsertPosition(text, functionStart);
-                
+                HarbourLogger.log("DeclareLocalVariable", "Local insert position: " + localInsertPosition);
+
                 if (localInsertPosition == -1) {
-                    showNotification(project, "Error", 
-                        "Could not determine where to insert LOCAL declaration", 
+                    HarbourLogger.log("DeclareLocalVariable", "Could not determine insert position");
+                    showNotification(project, "Error",
+                        "Could not determine where to insert LOCAL declaration",
                         NotificationType.ERROR);
                     return;
                 }
 
                 // Check if variable is already declared
                 if (isVariableDeclared(text, functionStart, localInsertPosition, variableName)) {
-                    showNotification(project, "Already Declared", 
-                        "Variable '" + variableName + "' is already declared", 
+                    HarbourLogger.log("DeclareLocalVariable", "Variable already declared");
+                    showNotification(project, "Already Declared",
+                        "Variable '" + variableName + "' is already declared",
                         NotificationType.WARNING);
                     return;
                 }
+                HarbourLogger.log("DeclareLocalVariable", "Variable not yet declared, proceeding");
 
                 // Get the configured LOCAL indentation from settings
                 int localIndent = getLocalIndentSetting(project);
@@ -145,15 +155,17 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 // If there are existing LOCALs, we add at end with no leading newline
                 // If no LOCALs exist, we add right after function with no leading newline
                 String localDeclaration = indentation + "LOCAL " + variableName + "\n";
-                
+                HarbourLogger.log("DeclareLocalVariable", "Inserting: '" + localDeclaration.trim() + "' at position " + localInsertPosition);
+
                 // Insert the declaration
                 document.insertString(localInsertPosition, localDeclaration);
-                
+
                 // Commit changes
                 PsiDocumentManager.getInstance(project).commitDocument(document);
-                
-                showNotification(project, "Variable Declared", 
-                    "LOCAL " + variableName + " added", 
+
+                HarbourLogger.log("DeclareLocalVariable", "Success - LOCAL " + variableName + " added");
+                showNotification(project, "Variable Declared",
+                    "LOCAL " + variableName + " added",
                     NotificationType.INFORMATION);
                     
             } catch (Exception ex) {
@@ -428,30 +440,19 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         if (identifier == null || identifier.isEmpty()) {
             return null;
         }
-        
+
         String upperIdent = identifier.toUpperCase();
-        
-        // Check if it's a Harbour keyword
+
+        // Check if it's a Harbour keyword - these cannot be used as variable names
         if (isKeyword(upperIdent)) {
             return "'" + identifier + "' is a Harbour keyword and cannot be declared as a variable";
         }
-        
-        // Check if it's a known function using the classification service
-        HarbourFunctionClassificationService classificationService = 
-            project.getService(HarbourFunctionClassificationService.class);
-        
-        if (classificationService != null && classificationService.isInitialized()) {
-            // Check if it's an internal function (this includes functions, procedures, and methods)
-            if (classificationService.isInternalFunction(identifier)) {
-                return "'" + identifier + "' is an internal function/procedure/method in this project";
-            }
-            
-            // Note: We don't check isExternalFunction here because it just returns !isInternalFunction
-            // which would incorrectly identify all non-internal identifiers as standard functions.
-            // There's currently no reliable way to check if something is a standard Harbour function
-            // without a proper list of standard functions.
-        }
-        
+
+        // Note: We intentionally DO NOT check if it's a function/procedure name
+        // In Harbour, it's valid (though potentially confusing) to have a LOCAL variable
+        // with the same name as a function. The LOCAL will shadow the function within scope.
+        // This is a common pattern and should be allowed.
+
         return null; // Identifier is valid for declaration
     }
 }
