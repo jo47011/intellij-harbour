@@ -1618,7 +1618,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         console.attachToProcess(processHandler);
         
         // Add process termination listener to clean up error monitor thread
-        // For GUI applications, don't stop the monitor when compilation completes
+        // Note: GUI executable launch is handled in startProcess() - do NOT duplicate it here
         processHandler.addProcessListener(new ProcessAdapter() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
@@ -1627,53 +1627,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
                 if (isGui) {
                     // For GUI applications (both debug and run mode), keep the error monitor running
-                    // In run mode, launch the executable after successful compilation
-                    if (!isDebugMode && event.getExitCode() == 0) {
-
-                        try {
-                            // Determine executable name from build target
-                            String buildTarget = runConfig.getSourceFile();
-                            String exeName;
-                            String currentOS = System.getProperty("os.name").toLowerCase();
-                            String exeExtension = currentOS.contains("windows") ? ".exe" : "";
-
-                            if (buildTarget.endsWith(".hbp")) {
-                                File hbpFile = new File(buildTarget);
-                                String projectName = hbpFile.getName().replace(".hbp", "");
-                                exeName = projectName + exeExtension;
-                            } else {
-                                File sourceFile = new File(buildTarget);
-                                String sourceName = sourceFile.getName().replace(".prg", "");
-                                exeName = sourceName + exeExtension;
-                            }
-
-                            // Use the working directory from configuration
-                            String workingDir = runConfig.getWorkingDirectory();
-                            if (workingDir == null || workingDir.isEmpty()) {
-                                workingDir = env.getProject().getBasePath();
-                            }
-
-                            File projectDir = new File(workingDir);
-                            File executable = new File(projectDir, exeName);
-
-                            if (executable.exists()) {
-                                // Create command to launch executable in run mode
-                                GeneralCommandLine launchCommand = new GeneralCommandLine();
-                                launchCommand.setExePath(executable.getAbsolutePath());
-                                launchCommand.setWorkDirectory(projectDir);
-
-                                // Launch as separate process
-                                OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
-                                launchHandler.startNotify();
-                            } else {
-                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                        "ERROR: Executable not found: " + executable.getAbsolutePath());
-                            }
-                        } catch (Exception e) {
-                            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                    "Error launching GUI executable: " + e.getMessage());
-                        }
-                    }
+                    // GUI executable launch is handled in startProcess() processTerminated listener
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                            "GUI application compilation finished, exit code: " + event.getExitCode());
                 } else if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
                     // For console applications only, stop the monitor
                     errorMonitorThread.interrupt();
