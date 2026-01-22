@@ -132,25 +132,9 @@ public final class HarbourIndexCache implements PersistentStateComponent<Harbour
     
     @Override
     public @Nullable HarbourIndexCache getState() {
-        // Write to a file to confirm this is called
-        try {
-            String debugFile = System.getProperty("user.home") + "/log/cache-getstate-debug.txt";
-            new java.io.File(System.getProperty("user.home") + "/log").mkdirs();
-            try (java.io.FileWriter fw = new java.io.FileWriter(debugFile, true)) {
-                fw.write(java.time.LocalDateTime.now() + " - getState() called with " + cacheEntries.size() + " entries\n");
-            }
-        } catch (Exception e) {
-            // Ignore
-        }
-        
-        HarbourLogger.log(COMPONENT, "getState() called - preparing to save cache with " + cacheEntries.size() + " entries");
-        
-        // Clean up before saving if needed
-        if (shouldCleanup()) {
-            cleanupCache();
-        }
-        
-        HarbourLogger.log(COMPONENT, "getState() returning cache with " + cacheEntries.size() + " entries and " + fileTimestamps.size() + " timestamps");
+        // CRITICAL FIX: Do NOT call cleanupCache() or any logging/service access here
+        // This method is called during project save - any service access or I/O can cause deadlock
+        // Just return the state immediately without any side effects
         return this;
     }
     

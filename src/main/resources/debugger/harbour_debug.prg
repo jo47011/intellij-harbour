@@ -1,13 +1,11 @@
-// IntelliJ Harbour Debug Handler - COMPLETE VERSION 1.4.1
+// IntelliJ Harbour Debug Handler - COMPLETE VERSION 1.4.4
 // Combines working variable names + breakpoint functionality + GLOBAL ERROR HANDLING
 // Based on working VSCode pattern with socket integration
 
 #pragma -B-
-REQUEST HB_GT_STD_DEFAULT
-
-// Windows console suppression - use environment variable control
-// The GT driver will be controlled via HB_GT_LIB environment variable
-// This allows flexibility without hardcoding the terminal type
+// REMOVED: REQUEST HB_GT_STD_DEFAULT - was overriding GUI applications' GT driver (GTWVT/GTWVG)
+// The debugger uses socket communication only, no console output needed
+// Let the main application's GT driver remain as default
 
 #include <hbdebug.ch>
 #include <hbmemvar.ch>
@@ -100,7 +98,7 @@ RETURN nKey
 // Idle block to check socket for commands during GET/READ/MENU
 STATIC FUNCTION IdleSocketCheck()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL tmp, cCurrentFile, nCurrentLine
+   LOCAL tmp, cCurrentFile, nCurrentLine, i
 
    // Skip if internal operation in progress to prevent recursion
    IF oDebugInfo["lInternalRun"] == .T.
@@ -111,20 +109,28 @@ STATIC FUNCTION IdleSocketCheck()
       tmp := hb_inetRecvLine(oDebugInfo["socket"])
       IF !Empty(tmp)
          // Get current location for all commands
+         cCurrentFile := ""
+         nCurrentLine := 0
          IF Len(oDebugInfo["aStack"]) > 0
             cCurrentFile := ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE]
             nCurrentLine := ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE]
          ELSE
-            cCurrentFile := "unknown"
-            nCurrentLine := 0
+            // Fallback to ProcFile/ProcLine
+            FOR i := 2 TO 5
+               cCurrentFile := ProcFile(i)
+               IF !Empty(cCurrentFile) .AND. !("harbour_debug" $ Lower(cCurrentFile))
+                  nCurrentLine := ProcLine(i)
+                  EXIT
+               ENDIF
+            NEXT
          ENDIF
 
          DO CASE
             CASE tmp == "PAUSE"
                // Send STOP message immediately to unblock IntelliJ
-               hb_inetSend(oDebugInfo["socket"], "STOP:" + cCurrentFile + ":" + ;
+               hb_inetSend(oDebugInfo["socket"], "STOP:pause:" + cCurrentFile + ":" + ;
                   AllTrim(Str(nCurrentLine)) + CRLF)
-               LogDebugInfo("PAUSE received in idle - sent STOP:" + cCurrentFile + ":" + ;
+               LogDebugInfo("PAUSE received in idle - sent STOP:pause:" + cCurrentFile + ":" + ;
                   AllTrim(Str(nCurrentLine)))
                // Set flag to break at next line execution
                oDebugInfo["lRunning"] := .F.
@@ -621,6 +627,8 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
                   lNeedExit := .T.
+                  LogDebugInfo("GO received - lRunning=.T., breakpoints=" + ;
+                     AllTrim(Str(Len(oDebugInfo["aBreaks"]))))
                   
                CASE tmp == "STEP"
                   oDebugInfo["lRunning"] := .T.
@@ -649,9 +657,32 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   lNeedExit := .T.
 
                CASE tmp == "PAUSE"
-                  // User requested pause - stop at next line execution
+                  // User requested pause - send STOP immediately to unblock PyCharm
                   oDebugInfo["lRunning"] := .F.
-                  lStopSent := .F.
+                  IF !lStopSent
+                     // Get current file and line from stack (they may not be set yet)
+                     cCurrentFile := ""
+                     nCurrentLine := 0
+                     IF Len(oDebugInfo["aStack"]) > 0
+                        aStack := ATail(oDebugInfo["aStack"])
+                        cCurrentFile := aStack[HB_DBG_CS_MODULE]
+                        nCurrentLine := aStack[HB_DBG_CS_LINE]
+                     ELSE
+                        FOR i := 2 TO 5
+                           cCurrentFile := ProcFile(i)
+                           IF !Empty(cCurrentFile) .AND. ;
+                              !("harbour_debug" $ Lower(cCurrentFile))
+                              nCurrentLine := ProcLine(i)
+                              EXIT
+                           ENDIF
+                        NEXT
+                     ENDIF
+                     hb_inetSend(oDebugInfo["socket"], "STOP:pause:" + cCurrentFile + ;
+                        ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+                     LogDebugInfo("PAUSE received - sent STOP:pause:" + cCurrentFile + ;
+                        ":" + AllTrim(Str(nCurrentLine)))
+                     lStopSent := .T.
+                  ENDIF
 
                CASE tmp == "STACK"
                   SendStack()
@@ -806,8 +837,12 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                      ENDIF
                   NEXT
                ENDIF
-               hb_inetSend(oDebugInfo["socket"], "STOP:break:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+               LogDebugInfo("Sending STOP:break:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
+               hb_inetSend(oDebugInfo["socket"], "STOP:break:" + cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)) + CRLF)
                lStopSent := .T.
+            ELSE
+               LogDebugInfo("InBreakpoint returned .T. but lStopSent already .T. - skipping")
             ENDIF
          ENDIF
          
@@ -1209,8 +1244,9 @@ STATIC FUNCTION InBreakpoint()
    LOCAL cFile := ""
    LOCAL nLine := 0
    LOCAL cKey, i, aStack
-   
-   
+   LOCAL lResult := .F.
+   LOCAL nBreakCount
+
    // Get current position from stack
    IF Len(oDebugInfo["aStack"]) > 0
       aStack := ATail(oDebugInfo["aStack"])
@@ -1227,7 +1263,7 @@ STATIC FUNCTION InBreakpoint()
          ENDIF
       NEXT
    ENDIF
-   
+
    // Extract filename without path
    i := RAt("/", cFile)
    IF i == 0
@@ -1236,15 +1272,18 @@ STATIC FUNCTION InBreakpoint()
    IF i > 0
       cFile := SubStr(cFile, i + 1)
    ENDIF
-   
+
    cKey := cFile + ":" + AllTrim(Str(nLine))
-   
+   nBreakCount := Len(oDebugInfo["aBreaks"])
+
    // Check if this file:line has a breakpoint
    IF hb_HHasKey(oDebugInfo["aBreaks"], cKey)
-      RETURN .T.
+      lResult := .T.
+      LogDebugInfo("InBreakpoint: HIT at " + cKey + " (breakpoints registered: " + ;
+         AllTrim(Str(nBreakCount)) + ")")
    ENDIF
-   
-RETURN .F.
+
+RETURN lResult
 
 // Check if current HB_DBG_ACTIVATE was triggered by AltD()
 STATIC FUNCTION IsAltDStop()
