@@ -54,6 +54,7 @@
 STATIC t_oDebugInfo
 STATIC s_lSocketEnabled := .T.  // Socket communication enabled for debugger breakpoints
 STATIC s_lThisProcessConnected := .F.  // Track if THIS process successfully connected to debugger
+STATIC s_aTracepoints := {}  // Array of {varName, lastValue} for data breakpoints
 
 // Debug logging function - writes to .hbmk/debug.log
 STATIC PROCEDURE LogDebugInfo(cMessage)
@@ -717,8 +718,38 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   
                CASE tmp == "BREAKPOINT"
                   // BREAKPOINT command is just an acknowledgment - actual breakpoints come as ADDBREAK commands
-                  
+
+               CASE tmp == "TRACEPOINT"
+                  // TRACEPOINT command marker - actual tracepoint data comes in next message
+                  LogDebugInfo("TRACEPOINT command received - waiting for variable name")
+
+               CASE Left(tmp, 2) == "+:" .AND. !("." $ SubStr(tmp, 3, 20))
+                  // Could be a tracepoint add: +:variableName[:initialValue]
+                  // Distinguish from breakpoint by checking if there's a filename (contains .)
+                  LogDebugInfo("CASE +: matched for: " + tmp)
+                  LogDebugInfo("  SubStr(tmp, 3): " + SubStr(tmp, 3))
+                  LogDebugInfo("  At('.', SubStr(tmp, 3)): " + AllTrim(Str(At(".", SubStr(tmp, 3)))))
+                  IF Len(tmp) > 2 .AND. At(".", SubStr(tmp, 3)) == 0
+                     LogDebugInfo("  -> Calling HandleTracepoint")
+                     HandleTracepoint(tmp)
+                  ELSE
+                     LogDebugInfo("  -> Calling SetBreakpoint (has dot)")
+                     SetBreakpoint(tmp)
+                  ENDIF
+
+               CASE Left(tmp, 2) == "-:" .AND. !("." $ SubStr(tmp, 3, 20))
+                  // Could be a tracepoint remove: -:variableName
+                  LogDebugInfo("CASE -: matched for: " + tmp)
+                  IF Len(tmp) > 2 .AND. At(".", SubStr(tmp, 3)) == 0
+                     LogDebugInfo("  -> Calling HandleTracepoint (remove)")
+                     HandleTracepoint(tmp)
+                  ELSE
+                     LogDebugInfo("  -> Calling SetBreakpoint (has dot)")
+                     SetBreakpoint(tmp)
+                  ENDIF
+
                CASE Left(tmp, 1) == "+" .OR. Left(tmp, 1) == "-"
+                  LogDebugInfo("CASE +/- (breakpoint) matched for: " + tmp)
                   SetBreakpoint(tmp)
                   
                CASE Left(tmp, 8) == "ADDBREAK"
@@ -867,8 +898,42 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                      ENDIF
                   NEXT
                ENDIF
-               hb_inetSend(oDebugInfo["socket"], "STOP:AltD:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+               hb_inetSend(oDebugInfo["socket"], "STOP:AltD:" + cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)) + CRLF)
                lStopSent := .T.
+            ENDIF
+         ENDIF
+
+         // Check for tracepoints (data breakpoints - watch variable changes)
+         LogDebugInfo("Tracepoint check: lRunning=" + IIF(oDebugInfo["lRunning"], "T", "F") + ;
+                      ", s_aTracepoints len=" + AllTrim(Str(Len(s_aTracepoints))))
+         IF oDebugInfo["lRunning"] .AND. !Empty(s_aTracepoints)
+            // Only check tracepoints if we're still running (not stopped by breakpoint/step)
+            LogDebugInfo("  -> Calling CheckTracepoints()")
+            IF CheckTracepoints()
+               // Tracepoint hit - stop execution
+               oDebugInfo["lRunning"] := .F.
+               IF !lStopSent
+                  // Get current file and line
+                  cCurrentFile := ""
+                  nCurrentLine := 0
+                  IF Len(oDebugInfo["aStack"]) > 0
+                     aStack := ATail(oDebugInfo["aStack"])
+                     cCurrentFile := aStack[HB_DBG_CS_MODULE]
+                     nCurrentLine := aStack[HB_DBG_CS_LINE]
+                  ELSE
+                     FOR i := 2 TO 5
+                        cCurrentFile := ProcFile(i)
+                        IF !Empty(cCurrentFile) .AND. !("harbour_debug" $ Lower(cCurrentFile))
+                           nCurrentLine := ProcLine(i)
+                           EXIT
+                        ENDIF
+                     NEXT
+                  ENDIF
+                  hb_inetSend(oDebugInfo["socket"], "STOP:tracepoint:" + cCurrentFile + ":" + ;
+                     AllTrim(Str(nCurrentLine)) + CRLF)
+                  lStopSent := .T.
+               ENDIF
             ENDIF
          ENDIF
       ENDIF
@@ -2553,6 +2618,202 @@ STATIC PROCEDURE SendExpression(cParams)
                cType + ":" + ;
                cValue + CRLF)
 RETURN
+
+// Handle TRACEPOINT command from IDE
+// Format: +:variableName[:initialValue] or -:variableName
+STATIC PROCEDURE HandleTracepoint(cParams)
+   LOCAL cOp, cVarName, cInitialValue, i, nPos
+
+   LogDebugInfo("HandleTracepoint called with: " + cParams)
+
+   // Parse operation (+/-)
+   cOp := Left(cParams, 1)
+   cParams := SubStr(cParams, 3)  // Skip "+:" or "-:"
+
+   // Parse variable name and optional initial value
+   nPos := At(":", cParams)
+   IF nPos > 0
+      cVarName := Left(cParams, nPos - 1)
+      cInitialValue := SubStr(cParams, nPos + 1)
+      // Restore any escaped colons
+      cInitialValue := StrTran(cInitialValue, ";", ":")
+   ELSE
+      cVarName := cParams
+      cInitialValue := NIL
+   ENDIF
+
+   IF cOp == "+"
+      // Add tracepoint
+      // Check if already exists
+      FOR i := 1 TO Len(s_aTracepoints)
+         IF Upper(s_aTracepoints[i][1]) == Upper(cVarName)
+            // Already exists, update initial value
+            s_aTracepoints[i][2] := cInitialValue
+            LogDebugInfo("Tracepoint updated for: " + cVarName + ;
+                        " (value: " + IIF(cInitialValue != NIL, cInitialValue, "NIL") + ")")
+            RETURN
+         ENDIF
+      NEXT
+
+      // Add new tracepoint
+      AAdd(s_aTracepoints, {cVarName, cInitialValue})
+      LogDebugInfo("Tracepoint added for: " + cVarName + ;
+                  " (initial value: " + IIF(cInitialValue != NIL, cInitialValue, "NIL") + ")")
+      LogDebugInfo("Total active tracepoints: " + AllTrim(Str(Len(s_aTracepoints))))
+
+   ELSEIF cOp == "-"
+      // Remove tracepoint
+      FOR i := Len(s_aTracepoints) TO 1 STEP -1
+         IF Upper(s_aTracepoints[i][1]) == Upper(cVarName)
+            ADel(s_aTracepoints, i)
+            ASize(s_aTracepoints, Len(s_aTracepoints) - 1)
+            LogDebugInfo("Tracepoint removed for: " + cVarName)
+            LogDebugInfo("Total active tracepoints: " + AllTrim(Str(Len(s_aTracepoints))))
+            RETURN
+         ENDIF
+      NEXT
+      LogDebugInfo("Tracepoint not found for removal: " + cVarName)
+   ENDIF
+RETURN
+
+// Check all tracepoints for value changes
+// Returns .T. if a tracepoint was hit (value changed), .F. otherwise
+// If hit, sends TRACEPOINT_HIT message to IDE
+STATIC FUNCTION CheckTracepoints()
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL i, cVarName, cOldValue, xNewValue, cNewValue
+
+   // No tracepoints? Quick return
+   IF Empty(s_aTracepoints)
+      RETURN .F.
+   ENDIF
+
+   LogDebugInfo("CheckTracepoints: checking " + AllTrim(Str(Len(s_aTracepoints))) + " tracepoints")
+
+   FOR i := 1 TO Len(s_aTracepoints)
+      cVarName := s_aTracepoints[i][1]
+      cOldValue := s_aTracepoints[i][2]
+
+      // Evaluate current value using the same mechanism as SendExpression
+      xNewValue := EvaluateTracepointExpression(cVarName)
+      cNewValue := FormatValue(xNewValue)
+
+      // Compare values (string comparison)
+      IF cOldValue != NIL .AND. cOldValue != cNewValue
+         // Value changed! Send notification
+         LogDebugInfo("TRACEPOINT HIT: " + cVarName + " changed from '" + cOldValue + ;
+                     "' to '" + cNewValue + "'")
+
+         // Update stored value
+         s_aTracepoints[i][2] := cNewValue
+
+         // Send TRACEPOINT_HIT message
+         // Format: TRACEPOINT_HIT:variableName:oldValue:newValue
+         // Escape colons in values to avoid protocol confusion
+         IF !Empty(oDebugInfo["socket"])
+            hb_inetSend(oDebugInfo["socket"], "TRACEPOINT_HIT:" + ;
+                        cVarName + ":" + ;
+                        StrTran(cOldValue, ":", ";") + ":" + ;
+                        StrTran(cNewValue, ":", ";") + CRLF)
+         ENDIF
+
+         RETURN .T.  // Tracepoint hit - stop execution
+      ENDIF
+
+      // Update stored value if it was NIL (first capture)
+      IF cOldValue == NIL
+         s_aTracepoints[i][2] := cNewValue
+         LogDebugInfo("Tracepoint " + cVarName + " initial value captured: " + cNewValue)
+      ENDIF
+   NEXT
+
+RETURN .F.  // No tracepoint hit
+
+// Evaluate a tracepoint expression to get its current value
+// Uses the same approach as SendLocals - supports variables and DBF field references
+STATIC FUNCTION EvaluateTracepointExpression(cExpression)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL xResult := NIL
+   LOCAL bError, oErr
+   LOCAL lFound := .F.
+   LOCAL vmStack, tmp, i, cVarName
+
+   LogDebugInfo("EvaluateTracepointExpression: " + cExpression)
+   cVarName := Upper(AllTrim(cExpression))
+
+   // Get the VM stack - this is what SendLocals uses successfully
+   vmStack := oDebugInfo["vmStack"]
+   LogDebugInfo("  vmStack available: " + IF(vmStack != NIL, "YES, " + AllTrim(Str(Len(vmStack))) + " frames", "NO"))
+
+   // Set up error handler
+   bError := ErrorBlock({|e| oErr := e, Break(e)})
+
+   BEGIN SEQUENCE
+      // First try: check if it's a DBF field reference (ALIAS->FIELD)
+      IF "->" $ cExpression
+         xResult := &(cExpression)
+         LogDebugInfo("  DBF field eval successful: " + ValType(xResult))
+         lFound := .T.
+      ENDIF
+
+      // Try to get from locals using vmStack (like SendLocals does)
+      IF !lFound .AND. vmStack != NIL .AND. Len(vmStack) > 0
+         // Use first frame (top of stack) - same as SendLocals for level 0
+         IF vmStack[1, HB_DBG_CS_LOCALS] != NIL .AND. Len(vmStack[1, HB_DBG_CS_LOCALS]) > 0
+            LogDebugInfo("  Checking " + AllTrim(Str(Len(vmStack[1, HB_DBG_CS_LOCALS]))) + " locals")
+            FOR i := 1 TO Len(vmStack[1, HB_DBG_CS_LOCALS])
+               tmp := vmStack[1, HB_DBG_CS_LOCALS, i]
+               LogDebugInfo("    Local[" + AllTrim(Str(i)) + "]: " + tmp[HB_DBG_VAR_NAME])
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == cVarName
+                  xResult := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], ;
+                                            tmp[HB_DBG_VAR_INDEX])
+                  LogDebugInfo("  Found in locals: " + ValType(xResult) + " = " + FormatValue(xResult))
+                  lFound := .T.
+                  EXIT
+               ENDIF
+            NEXT
+         ELSE
+            LogDebugInfo("  No locals in stack frame")
+         ENDIF
+      ENDIF
+
+      // Try statics from vmStack
+      IF !lFound .AND. vmStack != NIL .AND. Len(vmStack) > 0
+         IF vmStack[1, HB_DBG_CS_STATICS] != NIL .AND. Len(vmStack[1, HB_DBG_CS_STATICS]) > 0
+            LogDebugInfo("  Checking " + AllTrim(Str(Len(vmStack[1, HB_DBG_CS_STATICS]))) + " statics")
+            FOR i := 1 TO Len(vmStack[1, HB_DBG_CS_STATICS])
+               tmp := vmStack[1, HB_DBG_CS_STATICS, i]
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == cVarName
+                  xResult := __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
+                  LogDebugInfo("  Found in statics: " + ValType(xResult))
+                  lFound := .T.
+                  EXIT
+               ENDIF
+            NEXT
+         ENDIF
+      ENDIF
+
+      // Try private/public via GetPrivateOrPublic
+      IF !lFound
+         xResult := GetPrivateOrPublic(cExpression)
+         IF xResult != NIL
+            LogDebugInfo("  Found in privates/publics: " + ValType(xResult))
+            lFound := .T.
+         ENDIF
+      ENDIF
+
+      // Fallback: try direct macro evaluation
+      IF !lFound
+         xResult := &(cExpression)
+         LogDebugInfo("  Macro eval successful: " + ValType(xResult))
+      ENDIF
+   RECOVER
+      xResult := NIL
+      LogDebugInfo("  Evaluation failed for: " + cExpression)
+   END SEQUENCE
+
+   ErrorBlock(bError)
+RETURN xResult
 
 // Check if a string is a simple variable name (no operators, function calls, etc.)
 STATIC FUNCTION IsSimpleVariable(cExpression)

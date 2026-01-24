@@ -98,7 +98,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
 
     // Hit count tracking for conditional breakpoints
     private final Map<String, Integer> breakpointHitCounts = new ConcurrentHashMap<>();
-    
+
+    // Tracepoint manager for data breakpoints (watch variable changes)
+    private HarbourTracepointManager tracepointManager;
+
     // Track connection timing to prevent premature shutdown
     private volatile long connectionStartTime = 0;
     private static final long MIN_CONNECTION_TIME = 2000; // 2 seconds minimum before allowing stop()
@@ -146,7 +149,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Create live DBF connection for workarea monitoring
         this.liveDBFConnection = new HarbourLiveDBFConnection(project, connection);
-        
+
+        // Create tracepoint manager for data breakpoints
+        this.tracepointManager = new HarbourTracepointManager(this);
+
         HarbourLogger.log("HarbourDebuggerRemoteProcess", "Created remote debugger on port " + debugPort);
         
         
@@ -452,7 +458,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         HarbourLogger.log("HarbourDebuggerRemoteProcess", "*** WORKAREAS in first switch - redirecting to multi-line handler");
                         // Fall through to multi-line handler below
                         break;
-                        
+
+                    case "TRACEPOINT_HIT":
+                        // Handle tracepoint hit notification
+                        // Format: TRACEPOINT_HIT:variableName:oldValue:newValue
+                        handleTracepointHit(command);
+                        break;
+
                     default:
                         // Check if this is a variable sent outside blocks (format: NAME:TYPE:VALUE)
                         if (parts.length == 3) {
@@ -1536,7 +1548,10 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         // Create variable key and value
                         String key = scope + "." + name;
                         HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name, type, value);
-                        
+
+                        // ALWAYS set debug process reference for tracepoint icon support
+                        debugValue.setDebugProcess(this);
+
                         // Special handling for arrays
                         if ("A".equals(type) && value.startsWith("Array(") && value.endsWith(")")) {
                             try {
@@ -1672,6 +1687,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                             HarbourDebuggerValue existingValue = variables.get(key);
 
                             HarbourDebuggerValue debugValue = new HarbourDebuggerValue(name.trim(), type.trim(), value);
+
+                            // ALWAYS set debug process reference for tracepoint icon support
+                            debugValue.setDebugProcess(this);
 
                             // Parse array info if it's an array type
                             if ("A".equals(type.trim()) && value.startsWith("Array(") && value.endsWith(")")) {
@@ -2933,6 +2951,45 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     /**
+     * Handle tracepoint hit notification from the Harbour debugger.
+     * Format: TRACEPOINT_HIT:variableName:oldValue:newValue
+     */
+    private void handleTracepointHit(String command) {
+        // Parse the tracepoint hit message
+        // Format: TRACEPOINT_HIT:variableName:oldValue:newValue
+        String[] parts = command.split(":", 4);
+        if (parts.length >= 4) {
+            String variableName = parts[1];
+            String oldValue = parts[2];
+            String newValue = parts[3];
+
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Tracepoint hit: " + variableName + " changed from '" + oldValue + "' to '" + newValue + "'");
+
+            // Update the tracepoint manager
+            if (tracepointManager != null) {
+                tracepointManager.handleTracepointHit(variableName, oldValue, newValue);
+            }
+
+            // Show message in console
+            ApplicationManager.getApplication().invokeLater(() -> {
+                ExecutionConsole console = getSession().getConsoleView();
+                if (console instanceof ConsoleView) {
+                    ConsoleView consoleView = (ConsoleView) console;
+                    consoleView.print("Tracepoint: " + variableName + " changed from '" +
+                        oldValue + "' to '" + newValue + "'\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+                }
+            });
+
+            // The debugger is already stopped at this point (STOP message should follow)
+            // The variables panel will show the changed value
+        } else {
+            HarbourLogger.warning("HarbourDebuggerRemoteProcess",
+                "Invalid TRACEPOINT_HIT format: " + command);
+        }
+    }
+
+    /**
      * Handle console output from the debugged program
      */
     private void handleConsoleOutput(String output) {
@@ -3107,7 +3164,15 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     public HarbourLiveDBFConnection getLiveDBFConnection() {
         return liveDBFConnection;
     }
-    
+
+    /**
+     * Get the tracepoint manager for data breakpoints (watch variable changes)
+     */
+    @Nullable
+    public HarbourTracepointManager getTracepointManager() {
+        return tracepointManager;
+    }
+
     /**
      * Helper method to clean up all resources - can be called from shutdown hook
      */

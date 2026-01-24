@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>org.intellij.sdk.language</id>
     <name>Harbour Language Support</name>
-    <version>1.1.32</version>
+    <version>1.1.35</version>
     <vendor email="support@example.com" url="http://www.example.com">Harbour Development</vendor>
 
     <description><![CDATA[
@@ -221,6 +221,12 @@
         <action id="HarbourPauseDebugAction" class="org.intellij.sdk.language.HarbourPauseDebugAction"
                 text="Pause Harbour Debugger" description="Break execution at current point without breakpoint">
             <keyboard-shortcut keymap="$default" first-keystroke="alt D"/>
+        </action>
+
+        <!-- Watch for Changes (Tracepoint) Action in Debugger Variables -->
+        <action id="HarbourWatchForChangesAction" class="org.intellij.sdk.language.HarbourWatchForChangesAction"
+                text="Watch for Changes" description="Stop execution when this variable value changes">
+            <add-to-group group-id="XDebugger.ValueGroup" anchor="after" relative-to-action="XDebugger.AddToWatches"/>
         </action>
     </actions>
 
