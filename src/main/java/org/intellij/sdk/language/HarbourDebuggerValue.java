@@ -111,15 +111,7 @@ public class HarbourDebuggerValue extends XValue {
             HarbourTracepointManager tpManager = ((HarbourDebuggerRemoteProcess) debugProcess).getTracepointManager();
             if (tpManager != null) {
                 hasTracepoint = tpManager.hasTracepoint(fullName);
-                HarbourLogger.log("HarbourDebuggerValue", "computePresentation for " + fullName +
-                    ": hasTracepoint=" + hasTracepoint);
-            } else {
-                HarbourLogger.log("HarbourDebuggerValue", "computePresentation for " + fullName +
-                    ": tpManager is NULL");
             }
-        } else {
-            HarbourLogger.log("HarbourDebuggerValue", "computePresentation for " + fullName +
-                ": debugProcess is " + (debugProcess == null ? "NULL" : debugProcess.getClass().getSimpleName()));
         }
 
         // Use watch icon for traced variables, otherwise use standard value icon

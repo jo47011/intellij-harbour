@@ -2971,15 +2971,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                 tracepointManager.handleTracepointHit(variableName, oldValue, newValue);
             }
 
-            // Show message in console
-            ApplicationManager.getApplication().invokeLater(() -> {
-                ExecutionConsole console = getSession().getConsoleView();
-                if (console instanceof ConsoleView) {
-                    ConsoleView consoleView = (ConsoleView) console;
-                    consoleView.print("Tracepoint: " + variableName + " changed from '" +
-                        oldValue + "' to '" + newValue + "'\n", ConsoleViewContentType.SYSTEM_OUTPUT);
-                }
-            });
+            // Note: Tracepoint notification is logged but not printed to console to reduce noise
 
             // The debugger is already stopped at this point (STOP message should follow)
             // The variables panel will show the changed value

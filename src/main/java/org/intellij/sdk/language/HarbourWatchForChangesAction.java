@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.frame.XValue;
+import com.intellij.xdebugger.frame.XValuePlace;
 import com.intellij.xdebugger.impl.ui.tree.actions.XDebuggerTreeActionBase;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NotNull;
@@ -96,6 +97,9 @@ public class HarbourWatchForChangesAction extends AnAction {
             boolean isNowActive = tpManager.toggleTracepoint(varName, harbourValue.getValue());
             HarbourLogger.log("WatchForChangesAction",
                 "Tracepoint toggled for " + varName + ": " + (isNowActive ? "ACTIVE" : "REMOVED"));
+
+            // Immediately refresh the node's presentation to show/hide watch icon
+            harbourValue.computePresentation(node, XValuePlace.TREE);
         }
     }
 

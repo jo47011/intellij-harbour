@@ -2679,26 +2679,34 @@ RETURN
 // Check all tracepoints for value changes
 // Returns .T. if a tracepoint was hit (value changed), .F. otherwise
 // If hit, sends TRACEPOINT_HIT message to IDE
+// NOTE: Only triggers when variable is FOUND in current scope AND value changed
 STATIC FUNCTION CheckTracepoints()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL i, cVarName, cOldValue, xNewValue, cNewValue
+   LOCAL i, cVarName, cOldValue, aEvalResult, lFound, xNewValue, cNewValue
 
    // No tracepoints? Quick return
    IF Empty(s_aTracepoints)
       RETURN .F.
    ENDIF
 
-   LogDebugInfo("CheckTracepoints: checking " + AllTrim(Str(Len(s_aTracepoints))) + " tracepoints")
-
    FOR i := 1 TO Len(s_aTracepoints)
       cVarName := s_aTracepoints[i][1]
       cOldValue := s_aTracepoints[i][2]
 
-      // Evaluate current value using the same mechanism as SendExpression
-      xNewValue := EvaluateTracepointExpression(cVarName)
+      // Evaluate current value - returns { lFound, xValue }
+      aEvalResult := EvaluateTracepointExpression(cVarName)
+      lFound := aEvalResult[1]
+      xNewValue := aEvalResult[2]
       cNewValue := FormatValue(xNewValue)
 
-      // Compare values (string comparison)
+      // Only check for changes if variable was found in current scope
+      IF !lFound
+         // Variable not in scope (e.g., we entered another function)
+         // Don't trigger - just skip this check
+         LOOP  // Check next tracepoint (LOOP is Harbour's continue)
+      ENDIF
+
+      // Compare values (string comparison) - only if we have an old value
       IF cOldValue != NIL .AND. cOldValue != cNewValue
          // Value changed! Send notification
          LogDebugInfo("TRACEPOINT HIT: " + cVarName + " changed from '" + cOldValue + ;
@@ -2720,7 +2728,7 @@ STATIC FUNCTION CheckTracepoints()
          RETURN .T.  // Tracepoint hit - stop execution
       ENDIF
 
-      // Update stored value if it was NIL (first capture)
+      // Update stored value if it was NIL (first capture) and variable was found
       IF cOldValue == NIL
          s_aTracepoints[i][2] := cNewValue
          LogDebugInfo("Tracepoint " + cVarName + " initial value captured: " + cNewValue)
@@ -2731,6 +2739,7 @@ RETURN .F.  // No tracepoint hit
 
 // Evaluate a tracepoint expression to get its current value
 // Uses the same approach as SendLocals - supports variables and DBF field references
+// Returns array: { lFound, xValue } where lFound indicates if variable was found in scope
 STATIC FUNCTION EvaluateTracepointExpression(cExpression)
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL xResult := NIL
@@ -2738,12 +2747,10 @@ STATIC FUNCTION EvaluateTracepointExpression(cExpression)
    LOCAL lFound := .F.
    LOCAL vmStack, tmp, i, cVarName
 
-   LogDebugInfo("EvaluateTracepointExpression: " + cExpression)
    cVarName := Upper(AllTrim(cExpression))
 
    // Get the VM stack - this is what SendLocals uses successfully
    vmStack := oDebugInfo["vmStack"]
-   LogDebugInfo("  vmStack available: " + IF(vmStack != NIL, "YES, " + AllTrim(Str(Len(vmStack))) + " frames", "NO"))
 
    // Set up error handler
    bError := ErrorBlock({|e| oErr := e, Break(e)})
@@ -2752,7 +2759,6 @@ STATIC FUNCTION EvaluateTracepointExpression(cExpression)
       // First try: check if it's a DBF field reference (ALIAS->FIELD)
       IF "->" $ cExpression
          xResult := &(cExpression)
-         LogDebugInfo("  DBF field eval successful: " + ValType(xResult))
          lFound := .T.
       ENDIF
 
@@ -2760,32 +2766,25 @@ STATIC FUNCTION EvaluateTracepointExpression(cExpression)
       IF !lFound .AND. vmStack != NIL .AND. Len(vmStack) > 0
          // Use first frame (top of stack) - same as SendLocals for level 0
          IF vmStack[1, HB_DBG_CS_LOCALS] != NIL .AND. Len(vmStack[1, HB_DBG_CS_LOCALS]) > 0
-            LogDebugInfo("  Checking " + AllTrim(Str(Len(vmStack[1, HB_DBG_CS_LOCALS]))) + " locals")
             FOR i := 1 TO Len(vmStack[1, HB_DBG_CS_LOCALS])
                tmp := vmStack[1, HB_DBG_CS_LOCALS, i]
-               LogDebugInfo("    Local[" + AllTrim(Str(i)) + "]: " + tmp[HB_DBG_VAR_NAME])
                IF Upper(tmp[HB_DBG_VAR_NAME]) == cVarName
                   xResult := __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], ;
                                             tmp[HB_DBG_VAR_INDEX])
-                  LogDebugInfo("  Found in locals: " + ValType(xResult) + " = " + FormatValue(xResult))
                   lFound := .T.
                   EXIT
                ENDIF
             NEXT
-         ELSE
-            LogDebugInfo("  No locals in stack frame")
          ENDIF
       ENDIF
 
       // Try statics from vmStack
       IF !lFound .AND. vmStack != NIL .AND. Len(vmStack) > 0
          IF vmStack[1, HB_DBG_CS_STATICS] != NIL .AND. Len(vmStack[1, HB_DBG_CS_STATICS]) > 0
-            LogDebugInfo("  Checking " + AllTrim(Str(Len(vmStack[1, HB_DBG_CS_STATICS]))) + " statics")
             FOR i := 1 TO Len(vmStack[1, HB_DBG_CS_STATICS])
                tmp := vmStack[1, HB_DBG_CS_STATICS, i]
                IF Upper(tmp[HB_DBG_VAR_NAME]) == cVarName
                   xResult := __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX])
-                  LogDebugInfo("  Found in statics: " + ValType(xResult))
                   lFound := .T.
                   EXIT
                ENDIF
@@ -2794,26 +2793,29 @@ STATIC FUNCTION EvaluateTracepointExpression(cExpression)
       ENDIF
 
       // Try private/public via GetPrivateOrPublic
+      // NOTE: Only consider it "found" if we get a non-NIL value
+      // to avoid false positives from macro evaluation of shadowed variables
       IF !lFound
          xResult := GetPrivateOrPublic(cExpression)
          IF xResult != NIL
-            LogDebugInfo("  Found in privates/publics: " + ValType(xResult))
             lFound := .T.
          ENDIF
       ENDIF
 
-      // Fallback: try direct macro evaluation
-      IF !lFound
-         xResult := &(cExpression)
-         LogDebugInfo("  Macro eval successful: " + ValType(xResult))
-      ENDIF
+      // NO FALLBACK MACRO EVALUATION for tracepoints
+      // We only consider a variable "in scope" if explicitly found in:
+      // - Local variables of current stack frame
+      // - Static variables of current module
+      // - Private/Public variables with non-NIL value
+      // This prevents false triggers when entering functions where the
+      // watched variable name happens to exist as a different variable
    RECOVER
       xResult := NIL
-      LogDebugInfo("  Evaluation failed for: " + cExpression)
+      lFound := .F.  // Variable not found in current scope
    END SEQUENCE
 
    ErrorBlock(bError)
-RETURN xResult
+RETURN { lFound, xResult }
 
 // Check if a string is a simple variable name (no operators, function calls, etc.)
 STATIC FUNCTION IsSimpleVariable(cExpression)

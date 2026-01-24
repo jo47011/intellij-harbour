@@ -1653,11 +1653,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Clear console after monitors are set up but before showing command
         console.clear();
 
-        // Print the exact command to the console
+        // Print the exact HBMK2 command for user reference
         if (lastExecutedCommand != null) {
-            console.print("=== EXACT HBMK2 COMMAND ===\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
-            console.print(lastExecutedCommand + "\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
-            console.print("================================\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
+            console.print("=== EXACT HBMK2 COMMAND ===\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+            console.print(lastExecutedCommand + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+            console.print("================================\n", ConsoleViewContentType.SYSTEM_OUTPUT);
         }
 
         return new DefaultExecutionResult(console, processHandler);
