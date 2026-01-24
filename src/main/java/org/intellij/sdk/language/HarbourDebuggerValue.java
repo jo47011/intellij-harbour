@@ -1,6 +1,8 @@
 package org.intellij.sdk.language;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.*;
@@ -9,6 +11,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.Icon;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -100,23 +103,37 @@ public class HarbourDebuggerValue extends XValue {
     public void computePresentation(@NotNull XValueNode node, @NotNull XValuePlace place) {
         Icon icon = AllIcons.Debugger.Value;
 
-        if ("N".equals(type) || "NUM".equals(type) || "NUMBER".equals(type)) {
-            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
+        // Check if this variable has an active tracepoint (watch for changes)
+        boolean hasTracepoint = false;
+        String fullName = getFullExpressionName();
+
+        if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+            HarbourTracepointManager tpManager = ((HarbourDebuggerRemoteProcess) debugProcess).getTracepointManager();
+            if (tpManager != null) {
+                hasTracepoint = tpManager.hasTracepoint(fullName);
+            }
+        }
+
+        // Use watch icon for traced variables, otherwise use standard value icon
+        if (hasTracepoint) {
+            icon = AllIcons.Debugger.Watch;
+        } else if ("N".equals(type) || "NUM".equals(type) || "NUMBER".equals(type)) {
+            icon = AllIcons.Debugger.Value;
         } else if ("C".equals(type) || "CHAR".equals(type) || "CHARACTER".equals(type)) {
-            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
+            icon = AllIcons.Debugger.Value;
         } else if ("L".equals(type) || "LOGICAL".equals(type)) {
-            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
+            icon = AllIcons.Debugger.Value;
         } else if ("D".equals(type) || "DATE".equals(type)) {
-            icon = AllIcons.Debugger.Value;  // Use generic value icon for primitives
+            icon = AllIcons.Debugger.Value;
         } else if ("A".equals(type) || "ARRAY".equals(type)) {
-            icon = AllIcons.Debugger.Value;  // Use generic value icon for arrays (Db_array might not exist)
+            icon = AllIcons.Debugger.Value;
         } else if ("O".equals(type) || "OBJECT".equals(type)) {
             icon = AllIcons.Debugger.Value;
         }
 
         // For arrays, hashes, and objects, indicate they have children even if not loaded yet
-        boolean hasChildren = !children.isEmpty() || 
-            ("A".equals(type) && arraySize > 0) || 
+        boolean hasChildren = !children.isEmpty() ||
+            ("A".equals(type) && arraySize > 0) ||
             ("H".equals(type) && hashSize > 0) ||
             ("O".equals(type));  // Objects are always expandable
         node.setPresentation(icon, type, value, hasChildren);
@@ -345,4 +362,108 @@ public class HarbourDebuggerValue extends XValue {
 
     // TODO: Find a way to disable "Jump to Source" functionality
     // Currently not possible through XValue API
+
+    /**
+     * Provide additional popup actions for the variable context menu.
+     * This adds "Watch for Changes" (tracepoint) functionality.
+     */
+    @Override
+    @Nullable
+    public XValueModifier getModifier() {
+        // Return null - we don't support modifying values
+        return null;
+    }
+
+    /**
+     * Get the full expression name for this value (used for tracepoint registration).
+     * For simple variables, this is just the name.
+     * For array elements or object properties, this builds the full access path.
+     */
+    @NotNull
+    public String getFullExpressionName() {
+        // For simple variables, just return the name
+        // For array elements: arrayName[index]
+        // For hash elements: hashName[key]
+        // For object properties: objectName:propertyName
+
+        if (isArrayElement && arrayName != null) {
+            // Extract index from name like "[1]" or "1"
+            return arrayName + "[" + name.replaceAll("[\\[\\]]", "") + "]";
+        } else if (isHashElement && hashName != null) {
+            return hashName + "[" + name + "]";
+        } else if (isObjectProperty && objectName != null) {
+            return objectName + ":" + name;
+        }
+
+        return name;
+    }
+
+    /**
+     * Custom action class for "Watch for Changes" context menu item.
+     */
+    private class WatchForChangesAction extends AnAction {
+        private final HarbourDebuggerValue targetValue;
+
+        WatchForChangesAction(HarbourDebuggerValue value) {
+            super();
+            this.targetValue = value;
+            updatePresentation();
+        }
+
+        private void updatePresentation() {
+            String varName = targetValue.getFullExpressionName();
+            boolean hasTracepoint = false;
+
+            if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                HarbourTracepointManager tpManager = remoteProcess.getTracepointManager();
+                if (tpManager != null) {
+                    hasTracepoint = tpManager.hasTracepoint(varName);
+                }
+            }
+
+            if (hasTracepoint) {
+                getTemplatePresentation().setText("Stop Watching for Changes");
+                getTemplatePresentation().setDescription("Remove tracepoint - stop when " + varName + " changes");
+                getTemplatePresentation().setIcon(AllIcons.Actions.Cancel);
+            } else {
+                getTemplatePresentation().setText("Watch for Changes");
+                getTemplatePresentation().setDescription("Add tracepoint - stop when " + varName + " changes");
+                getTemplatePresentation().setIcon(AllIcons.Debugger.Watch);
+            }
+        }
+
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+                HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+                HarbourTracepointManager tpManager = remoteProcess.getTracepointManager();
+                if (tpManager != null) {
+                    String varName = targetValue.getFullExpressionName();
+                    boolean isNowActive = tpManager.toggleTracepoint(varName, targetValue.getValue());
+                    HarbourLogger.log("HarbourDebuggerValue",
+                        "Tracepoint toggled for " + varName + ": " + (isNowActive ? "ACTIVE" : "REMOVED"));
+                }
+            }
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            updatePresentation();
+            e.getPresentation().copyFrom(getTemplatePresentation());
+        }
+    }
+
+    /**
+     * Provide additional popup menu actions for variables.
+     * This is called by IntelliJ when the user right-clicks on a variable.
+     */
+    @NotNull
+    public List<? extends AnAction> createAdditionalActions() {
+        // Only provide tracepoint action if we have a debug process
+        if (debugProcess instanceof HarbourDebuggerRemoteProcess) {
+            return Collections.singletonList(new WatchForChangesAction(this));
+        }
+        return Collections.emptyList();
+    }
 }

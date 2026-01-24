@@ -244,6 +244,27 @@ featuring conditional breakpoints, variable inspection, step debugging, and watc
   <em>GUI debugging with PyCharm debugger and variable inspection</em>
 </p>
 
+### Tracepoints (Watch for Changes)
+
+Tracepoints allow you to automatically stop execution when a variable's value changes. This is useful for tracking down where a variable gets modified unexpectedly.
+
+**To set a tracepoint:**
+1. Stop at a breakpoint where the variable is visible
+2. Right-click on the variable in the Variables panel
+3. Select **"Watch for Changes"**
+
+<p align="center">
+  <img src="img/debug-tracepoint.png" alt="Tracepoint Context Menu"/>
+  <br>
+  <em>Right-click on a variable to watch for value changes</em>
+</p>
+
+The debugger will automatically stop execution whenever the watched variable's value changes. Traced variables are indicated with a watch icon (👁️) in the Variables panel.
+
+To remove a tracepoint, right-click the variable and select **"Stop Watching for Changes"**.
+
+**Note:** Tracepoints only trigger when the variable is in scope. If you enter a function where the variable doesn't exist, the tracepoint is silently skipped until you return to a scope where it's visible.
+
 ### Database View
 
 During debugging, the plugin provides a Database View tool window that shows all currently open database workareas in your Harbour application. This allows you to inspect database state while stepping through code.

@@ -1,28 +1,22 @@
 package org.intellij.sdk.language;
 
-import com.intellij.notification.Notification;
-import com.intellij.notification.NotificationType;
-import com.intellij.notification.Notifications;
+import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
-import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
-import com.intellij.psi.util.PsiTreeUtil;
 import org.intellij.sdk.language.psi.HarbourFile;
-import org.intellij.sdk.language.psi.HarbourTypes;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.regex.Matcher;
@@ -77,17 +71,13 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         String variableName = getWordAtOffset(document, offset);
         
         if (variableName == null || variableName.isEmpty()) {
-            showNotification(project, "No Variable", 
-                "No variable name found under cursor", 
-                NotificationType.WARNING);
+            showHint(editor, "No variable name found under cursor", true);
             return;
         }
 
         // Check if it's a valid identifier
         if (!isValidIdentifier(variableName)) {
-            showNotification(project, "Invalid Identifier", 
-                "'" + variableName + "' is not a valid variable name", 
-                NotificationType.WARNING);
+            showHint(editor, "'" + variableName + "' is not a valid variable name", true);
             return;
         }
 
@@ -96,44 +86,47 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         // Check if this is actually a function/method call or keyword
         String validationResult = validateIdentifier(project, variableName);
         if (validationResult != null) {
-            showNotification(project, "Cannot Declare", 
-                validationResult, 
-                NotificationType.WARNING);
+            HarbourLogger.log("DeclareLocalVariable", "Validation failed: " + validationResult);
+            showHint(editor, validationResult, true);
             return;
         }
+        HarbourLogger.log("DeclareLocalVariable", "Validation passed");
 
         // Find the containing function, procedure, or method
         String text = document.getText();
         int functionStart = findFunctionStart(text, offset);
-        
+        HarbourLogger.log("DeclareLocalVariable", "Function start: " + functionStart);
+
         if (functionStart == -1) {
-            showNotification(project, "No Function", 
-                "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD", 
-                NotificationType.WARNING);
+            HarbourLogger.log("DeclareLocalVariable", "No function found");
+            showHint(editor, "Cursor is not inside a FUNCTION, PROCEDURE, or METHOD", true);
             return;
         }
 
         // Perform the modification in a write action
+        HarbourLogger.log("DeclareLocalVariable", "Starting WriteCommandAction");
         WriteCommandAction.runWriteCommandAction(project, "Declare LOCAL Variable", null, () -> {
             try {
+                HarbourLogger.log("DeclareLocalVariable", "Inside WriteCommandAction try block");
                 // Find where to insert the LOCAL declaration
                 String functionText = text.substring(functionStart);
                 int localInsertPosition = findLocalInsertPosition(text, functionStart);
-                
+                HarbourLogger.log("DeclareLocalVariable", "Local insert position: " + localInsertPosition);
+
                 if (localInsertPosition == -1) {
-                    showNotification(project, "Error", 
-                        "Could not determine where to insert LOCAL declaration", 
-                        NotificationType.ERROR);
+                    HarbourLogger.log("DeclareLocalVariable", "Could not determine insert position");
+                    showHint(editor, "Could not determine where to insert LOCAL declaration", true);
                     return;
                 }
 
                 // Check if variable is already declared
                 if (isVariableDeclared(text, functionStart, localInsertPosition, variableName)) {
-                    showNotification(project, "Already Declared", 
-                        "Variable '" + variableName + "' is already declared", 
-                        NotificationType.WARNING);
+                    HarbourLogger.log("DeclareLocalVariable", "Variable already declared");
+                    String msg = "'" + variableName + "' is already declared as LOCAL";
+                    showHint(editor, msg, true);
                     return;
                 }
+                HarbourLogger.log("DeclareLocalVariable", "Variable not yet declared, proceeding");
 
                 // Get the configured LOCAL indentation from settings
                 int localIndent = getLocalIndentSetting(project);
@@ -145,22 +138,20 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
                 // If there are existing LOCALs, we add at end with no leading newline
                 // If no LOCALs exist, we add right after function with no leading newline
                 String localDeclaration = indentation + "LOCAL " + variableName + "\n";
-                
+                HarbourLogger.log("DeclareLocalVariable", "Inserting: '" + localDeclaration.trim() + "' at position " + localInsertPosition);
+
                 // Insert the declaration
                 document.insertString(localInsertPosition, localDeclaration);
-                
+
                 // Commit changes
                 PsiDocumentManager.getInstance(project).commitDocument(document);
-                
-                showNotification(project, "Variable Declared", 
-                    "LOCAL " + variableName + " added", 
-                    NotificationType.INFORMATION);
+
+                HarbourLogger.log("DeclareLocalVariable", "Success - LOCAL " + variableName + " added");
+                showHint(editor, "Added: LOCAL " + variableName, false);
                     
             } catch (Exception ex) {
                 HarbourLogger.log("DeclareLocalVariable", "Error: " + ex.getMessage());
-                showNotification(project, "Error", 
-                    "Failed to declare variable: " + ex.getMessage(), 
-                    NotificationType.ERROR);
+                showHint(editor, "Failed to declare variable: " + ex.getMessage(), true);
             }
         });
     }
@@ -343,30 +334,32 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         if (functionEnd == -1) {
             functionEnd = text.length();
         }
-        
+
         String functionText = text.substring(functionStart, functionEnd);
-        
+
         // Pattern to match LOCAL declarations
         Pattern pattern = Pattern.compile(
             "(?i)^\\s*LOCAL\\s+(.+)$",
             Pattern.MULTILINE
         );
-        
+
         Matcher matcher = pattern.matcher(functionText);
-        
+
         while (matcher.find()) {
             String varList = matcher.group(1);
             // Split by comma to get individual variables
             String[] vars = varList.split(",");
             for (String var : vars) {
                 // Remove any assignment or type declaration
-                var = var.trim().split("\\s+")[0].split(":")[0].split("=")[0];
-                if (var.equalsIgnoreCase(variableName)) {
+                String cleanVar = var.trim().split("\\s+")[0].split(":")[0].split("=")[0];
+                if (cleanVar.equalsIgnoreCase(variableName)) {
+                    HarbourLogger.log("DeclareLocalVariable",
+                            "Variable '" + variableName + "' already declared in: LOCAL " + varList.trim());
                     return true;
                 }
             }
         }
-        
+
         return false;
     }
     
@@ -411,11 +404,20 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         return indent.toString();
     }
 
-    private void showNotification(Project project, String title, String content, NotificationType type) {
-        Notifications.Bus.notify(
-            new Notification("Harbour Application", title, content, type),
-            project
-        );
+    /**
+     * Show a hint message near the caret position in the editor.
+     * This is more visible than notifications which may be collapsed.
+     */
+    private void showHint(Editor editor, String message, boolean isError) {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (editor != null && !editor.isDisposed()) {
+                if (isError) {
+                    HintManager.getInstance().showErrorHint(editor, message);
+                } else {
+                    HintManager.getInstance().showInformationHint(editor, message);
+                }
+            }
+        });
     }
 
     private int getLocalIndentSetting(Project project) {
@@ -428,30 +430,19 @@ public class HarbourDeclareLocalVariableAction extends AnAction {
         if (identifier == null || identifier.isEmpty()) {
             return null;
         }
-        
+
         String upperIdent = identifier.toUpperCase();
-        
-        // Check if it's a Harbour keyword
+
+        // Check if it's a Harbour keyword - these cannot be used as variable names
         if (isKeyword(upperIdent)) {
             return "'" + identifier + "' is a Harbour keyword and cannot be declared as a variable";
         }
-        
-        // Check if it's a known function using the classification service
-        HarbourFunctionClassificationService classificationService = 
-            project.getService(HarbourFunctionClassificationService.class);
-        
-        if (classificationService != null && classificationService.isInitialized()) {
-            // Check if it's an internal function (this includes functions, procedures, and methods)
-            if (classificationService.isInternalFunction(identifier)) {
-                return "'" + identifier + "' is an internal function/procedure/method in this project";
-            }
-            
-            // Note: We don't check isExternalFunction here because it just returns !isInternalFunction
-            // which would incorrectly identify all non-internal identifiers as standard functions.
-            // There's currently no reliable way to check if something is a standard Harbour function
-            // without a proper list of standard functions.
-        }
-        
+
+        // Note: We intentionally DO NOT check if it's a function/procedure name
+        // In Harbour, it's valid (though potentially confusing) to have a LOCAL variable
+        // with the same name as a function. The LOCAL will shadow the function within scope.
+        // This is a common pattern and should be allowed.
+
         return null; // Identifier is valid for declaration
     }
 }

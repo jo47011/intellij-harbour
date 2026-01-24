@@ -197,8 +197,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                     HarbourLogger.log(env.getProject(), "HarbourDebugger",
                             "Process terminated with exit code: " + event.getExitCode());
 
-                    // DEBUG MODE ONLY: For GUI applications, launch executable after successful compilation
-                    if (event.getExitCode() == 0 && isGuiProgram && isDebugMode) {
+                    // For GUI applications, launch executable after successful compilation
+                    // This applies to both DEBUG MODE and RUN MODE since GUI programs don't use -run flag
+                    if (event.getExitCode() == 0 && isGuiProgram) {
                         
                         try {
                             // Determine executable name from build target
@@ -235,19 +236,31 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                                         "Found GUI executable: " + executable.getAbsolutePath());
                                 
-                                // Create command to launch executable with debug environment
+                                // Create command to launch executable
                                 GeneralCommandLine launchCommand = new GeneralCommandLine();
                                 launchCommand.setExePath(executable.getAbsolutePath());
                                 launchCommand.setWorkDirectory(projectDir);
-                                launchCommand.withEnvironment("HB_REMOTE_DEBUG", "1");
-                                launchCommand.withEnvironment("HB_DBG_PATH", projectDir.getAbsolutePath());
-                                
-                                // Launch as separate process for debugging
+
+                                // Only set debug environment variables in debug mode
+                                if (isDebugMode) {
+                                    launchCommand.withEnvironment("HB_REMOTE_DEBUG", "1");
+                                    launchCommand.withEnvironment("HB_DBG_PATH", projectDir.getAbsolutePath());
+                                }
+
+                                // Add program arguments if specified
+                                String programArgs = runConfig.getProgramArguments();
+                                if (!StringUtil.isEmpty(programArgs)) {
+                                    launchCommand.addParameters(StringUtil.split(programArgs, " "));
+                                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                            "GUI executable: Added program arguments: " + programArgs);
+                                }
+
+                                // Launch as separate process
                                 OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
                                 launchHandler.startNotify();
-                                
-                                HarbourLogger.log(env.getProject(), "HarbourDebugger", 
-                                        "GUI executable launched successfully for debugging");
+
+                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                                        "GUI executable launched successfully" + (isDebugMode ? " for debugging" : ""));
                             } else {
                                 HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                                         "GUI executable not found: " + executable.getAbsolutePath());
@@ -651,9 +664,21 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             parameters.add(debugSourcePath);
         }
 
-        if (!StringUtil.isEmpty(runConfig.getProgramArguments())) {
-            parameters.add("--");
-            parameters.addAll(StringUtil.split(runConfig.getProgramArguments(), " "));
+        // Only add -runflag for console programs (which use -run flag)
+        // For GUI programs, arguments are passed when launching the executable separately
+        if (!isGui && !StringUtil.isEmpty(runConfig.getProgramArguments())) {
+            // Use -runflag= for each argument instead of -- separator
+            // The -- separator doesn't work correctly with hbmk2 as it gets passed to the compiler
+            for (String arg : StringUtil.split(runConfig.getProgramArguments(), " ")) {
+                if (!arg.isEmpty()) {
+                    parameters.add("-runflag=" + arg);
+                }
+            }
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "Console program: Added -runflag arguments: " + runConfig.getProgramArguments());
+        } else if (isGui && !StringUtil.isEmpty(runConfig.getProgramArguments())) {
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "GUI program: Arguments will be passed when launching executable: " + runConfig.getProgramArguments());
         }
 
         // Log the complete command for debugging - make it very visible
@@ -1457,15 +1482,20 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                 // Log enabled breakpoints
                 VirtualFile file = bp.getSourcePosition().getFile();
                 String fileName = file.getName();
-                int line = bp.getSourcePosition().getLine() + 1;
+                int originalLine = bp.getSourcePosition().getLine() + 1;
+
+                // For multi-line statements, find the effective line (end of continuation)
+                // Harbour debugger only stops at the last line of multi-line statements
+                int line = findEffectiveBreakpointLine(file, originalLine);
 
                 // Variables already declared above for logging
                 String filePath = file.getPath();
-                
-                HarbourLogger.log(project, "HarbourDebugger", 
+
+                HarbourLogger.log(project, "HarbourDebugger",
                         "=== WRITING BREAKPOINT TO init.cld ===");
-                HarbourLogger.log(project, "HarbourDebugger", 
-                        "File: " + fileName + ", Line: " + line);
+                HarbourLogger.log(project, "HarbourDebugger",
+                        "File: " + fileName + ", Original line: " + originalLine +
+                        (line != originalLine ? " -> Effective line: " + line : ", Line: " + line));
                 HarbourLogger.log(project, "HarbourDebugger", 
                         "Enabled: " + bp.isEnabled() + " (should be true)");
                 
@@ -1588,7 +1618,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         console.attachToProcess(processHandler);
         
         // Add process termination listener to clean up error monitor thread
-        // For GUI applications, don't stop the monitor when compilation completes
+        // Note: GUI executable launch is handled in startProcess() - do NOT duplicate it here
         processHandler.addProcessListener(new ProcessAdapter() {
             @Override
             public void processTerminated(@NotNull ProcessEvent event) {
@@ -1597,53 +1627,9 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
                 if (isGui) {
                     // For GUI applications (both debug and run mode), keep the error monitor running
-                    // In run mode, launch the executable after successful compilation
-                    if (!isDebugMode && event.getExitCode() == 0) {
-
-                        try {
-                            // Determine executable name from build target
-                            String buildTarget = runConfig.getSourceFile();
-                            String exeName;
-                            String currentOS = System.getProperty("os.name").toLowerCase();
-                            String exeExtension = currentOS.contains("windows") ? ".exe" : "";
-
-                            if (buildTarget.endsWith(".hbp")) {
-                                File hbpFile = new File(buildTarget);
-                                String projectName = hbpFile.getName().replace(".hbp", "");
-                                exeName = projectName + exeExtension;
-                            } else {
-                                File sourceFile = new File(buildTarget);
-                                String sourceName = sourceFile.getName().replace(".prg", "");
-                                exeName = sourceName + exeExtension;
-                            }
-
-                            // Use the working directory from configuration
-                            String workingDir = runConfig.getWorkingDirectory();
-                            if (workingDir == null || workingDir.isEmpty()) {
-                                workingDir = env.getProject().getBasePath();
-                            }
-
-                            File projectDir = new File(workingDir);
-                            File executable = new File(projectDir, exeName);
-
-                            if (executable.exists()) {
-                                // Create command to launch executable in run mode
-                                GeneralCommandLine launchCommand = new GeneralCommandLine();
-                                launchCommand.setExePath(executable.getAbsolutePath());
-                                launchCommand.setWorkDirectory(projectDir);
-
-                                // Launch as separate process
-                                OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
-                                launchHandler.startNotify();
-                            } else {
-                                HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                        "ERROR: Executable not found: " + executable.getAbsolutePath());
-                            }
-                        } catch (Exception e) {
-                            HarbourLogger.log(env.getProject(), "HarbourDebugger",
-                                    "Error launching GUI executable: " + e.getMessage());
-                        }
-                    }
+                    // GUI executable launch is handled in startProcess() processTerminated listener
+                    HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                            "GUI application compilation finished, exit code: " + event.getExitCode());
                 } else if (errorMonitorThread != null && errorMonitorThread.isAlive()) {
                     // For console applications only, stop the monitor
                     errorMonitorThread.interrupt();
@@ -1667,11 +1653,11 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         // Clear console after monitors are set up but before showing command
         console.clear();
 
-        // Print the exact command to the console
+        // Print the exact HBMK2 command for user reference
         if (lastExecutedCommand != null) {
-            console.print("=== EXACT HBMK2 COMMAND ===\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
-            console.print(lastExecutedCommand + "\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
-            console.print("================================\n", com.intellij.execution.ui.ConsoleViewContentType.SYSTEM_OUTPUT);
+            console.print("=== EXACT HBMK2 COMMAND ===\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+            console.print(lastExecutedCommand + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+            console.print("================================\n", ConsoleViewContentType.SYSTEM_OUTPUT);
         }
 
         return new DefaultExecutionResult(console, processHandler);
@@ -1885,7 +1871,67 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             }
         }, "HarbourForceCleanup").start();
     }
-    
+
+    /**
+     * Find the effective line number for a breakpoint on a multi-line statement.
+     * In Harbour, lines ending with ';' are continuation lines.
+     * The debugger only stops at the last line of a multi-line statement.
+     * This method finds that last line to ensure breakpoints work correctly.
+     *
+     * @param file The virtual file containing the code
+     * @param originalLine The 1-based line number where the breakpoint is set
+     * @return The effective 1-based line number (end of multi-line statement)
+     */
+    private int findEffectiveBreakpointLine(VirtualFile file, int originalLine) {
+        try {
+            // Read file content
+            String content = new String(file.contentsToByteArray(), file.getCharset());
+            String[] lines = content.split("\n", -1);
+
+            // Convert to 0-based index
+            int lineIndex = originalLine - 1;
+
+            if (lineIndex < 0 || lineIndex >= lines.length) {
+                return originalLine;
+            }
+
+            // Check if current line is part of a multi-line statement
+            // A multi-line statement has lines ending with ';' (continuation marker)
+            int effectiveLineIndex = lineIndex;
+
+            // First, check if current line ends with ';' - if so, find the end
+            while (effectiveLineIndex < lines.length - 1) {
+                String currentLine = lines[effectiveLineIndex].trim();
+                // Remove trailing comment if any
+                int commentPos = currentLine.indexOf("//");
+                if (commentPos > 0) {
+                    currentLine = currentLine.substring(0, commentPos).trim();
+                }
+
+                if (currentLine.endsWith(";")) {
+                    effectiveLineIndex++;
+                } else {
+                    break;
+                }
+            }
+
+            // Convert back to 1-based
+            int effectiveLine = effectiveLineIndex + 1;
+
+            if (effectiveLine != originalLine) {
+                HarbourLogger.log(project, "HarbourDebugger",
+                        "Multi-line breakpoint: Line " + originalLine + " -> effective line " + effectiveLine +
+                        " (file: " + file.getName() + ")");
+            }
+
+            return effectiveLine;
+        } catch (Exception e) {
+            HarbourLogger.log(project, "HarbourDebugger",
+                    "Error finding effective breakpoint line: " + e.getMessage());
+            return originalLine;
+        }
+    }
+
     /**
      * Terminate all running Harbour processes
      */
