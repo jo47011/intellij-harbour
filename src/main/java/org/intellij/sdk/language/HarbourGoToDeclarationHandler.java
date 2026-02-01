@@ -977,6 +977,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     GlobalSearchScope.projectScope(project));
                     
                 for (VirtualFile vFile : allFiles) {
+                    if (HarbourFileUtils.isFileExcluded(project, vFile)) {
+                        continue;
+                    }
                     PsiFile psiFile = PsiManager.getInstance(project).findFile(vFile);
                     if (psiFile != null) {
                         String fileText = psiFile.getText();
@@ -1301,7 +1304,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             HarbourLogger.log(COMPONENT, "Reached file limit in fallback search");
                             break;
                         }
-                        
+                        if (HarbourFileUtils.isFileExcluded(project, virtualFile)) {
+                            continue;
+                        }
+
                         try {
                             PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
                             if (psiFile != null) {
@@ -2450,6 +2456,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     Pattern.CASE_INSENSITIVE);
 
             for (VirtualFile virtualFile : virtualFiles) {
+                if (HarbourFileUtils.isFileExcluded(project, virtualFile)) {
+                    continue;
+                }
                 try {
                     PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
                     if (psiFile == null) continue;

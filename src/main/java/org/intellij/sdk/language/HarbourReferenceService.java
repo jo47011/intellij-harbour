@@ -148,6 +148,9 @@ public final class HarbourReferenceService {
         List<PsiElement> result = new ArrayList<>();
 
         for (VirtualFile file : files) {
+            if (isFileExcluded(file)) {
+                continue;
+            }
             PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
             if (psiFile != null) {
                 result.addAll(searchDefinesInPsiFile(psiFile, defineName, definePattern));
@@ -1852,7 +1855,7 @@ public final class HarbourReferenceService {
 
     /**
      * Check if a file is excluded from indexing based on its full path.
-     * Uses configurable directory patterns from settings.
+     * Uses configurable directory patterns from settings (with wildcard support).
      */
     public boolean isExcluded(VirtualFile file) {
         if (file == null) return false;
@@ -1872,20 +1875,8 @@ public final class HarbourReferenceService {
         HarbourSettings settings = HarbourSettings.getInstance(project);
         if (settings != null) {
             List<String> patterns = settings.getExcludedDirectoryPatterns();
-            if (patterns != null && !patterns.isEmpty()) {
-                String pathLower = path.toLowerCase();
-                for (String pattern : patterns) {
-                    if (pattern != null && !pattern.isEmpty()) {
-                        String patternLower = pattern.toLowerCase().trim();
-                        // Check if path contains the pattern (case-insensitive)
-                        if (pathLower.contains("/" + patternLower + "/") ||
-                            pathLower.contains("\\" + patternLower + "\\") ||
-                            pathLower.contains("/" + patternLower) ||
-                            pathLower.contains("\\" + patternLower)) {
-                            return true;
-                        }
-                    }
-                }
+            if (HarbourFileUtils.isPathExcludedByDirPatterns(path, patterns)) {
+                return true;
             }
         }
 
