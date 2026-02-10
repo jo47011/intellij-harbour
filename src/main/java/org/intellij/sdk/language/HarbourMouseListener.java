@@ -22,14 +22,10 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
     @Override
     public void mousePressed(EditorMouseEvent event) {
         boolean ctrlDown = event.getMouseEvent().isControlDown();
-        HarbourLogger.log(COMPONENT, "Mouse pressed - Ctrl down: " + ctrlDown);
-        
         if (ctrlDown) {
-            HarbourLogger.log(COMPONENT, "Ctrl+Press detected - setting click mode to TRUE");
             lastClickTime = System.currentTimeMillis();
             HarbourExternalDocumentationHandler.setClickMode(true);
         } else {
-            HarbourLogger.log(COMPONENT, "Mouse pressed without Ctrl - setting click mode to FALSE");
             HarbourExternalDocumentationHandler.setClickMode(false);
         }
     }
@@ -55,10 +51,7 @@ public class HarbourMouseListener implements EditorMouseListener, EditorMouseMot
         // The ExternalDocumentationHandler now has its own timeout mechanism
         boolean ctrlDown = event.getMouseEvent().isControlDown();
         
-        if (ctrlDown) {
-            HarbourLogger.log(COMPONENT, "Ctrl+Hover detected - click mode: " + 
-                HarbourExternalDocumentationHandler.isClickMode());
-        }
+        // Ctrl+Hover: no action needed, ExternalDocumentationHandler handles timeouts
         
         // No longer manage timeout here - let the ExternalDocumentationHandler handle it
         // This prevents race conditions between mouse events and handler processing

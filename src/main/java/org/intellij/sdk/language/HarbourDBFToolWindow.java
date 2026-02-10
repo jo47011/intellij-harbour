@@ -1827,7 +1827,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         }
                         
                         // 2. For string values (type C or M), remove surrounding quotes
-                        if ((fieldType.equals("C") || fieldType.equals("M")) && 
+                        if ((fieldType.equals("C") || fieldType.equals("M")) &&
+                            fieldValue.length() >= 2 &&
                             fieldValue.startsWith("\"") && fieldValue.endsWith("\"")) {
                             fieldValue = fieldValue.substring(1, fieldValue.length() - 1);
                         }

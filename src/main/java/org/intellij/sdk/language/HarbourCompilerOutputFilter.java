@@ -100,9 +100,6 @@ public class HarbourCompilerOutputFilter implements Filter {
     @Override
     public Result applyFilter(@NotNull String line, int entireLength) {
         
-        // Log every line for debugging
-        HarbourLogger.log("CompilerOutputFilter", "Processing line: " + line);
-
         Result result = null;
         Matcher fileMatcher = FILE_PATTERN.matcher(line);
         Matcher stackTraceMatcher = STACK_TRACE_PATTERN.matcher(line);
@@ -132,9 +129,9 @@ public class HarbourCompilerOutputFilter implements Filter {
             String functionName = warningWithFunctionMatcher.group(4);
             int functionLineNumber = Integer.parseInt(warningWithFunctionMatcher.group(5));
 
-            HarbourLogger.log("CompilerOutputFilter", "WARNING_WITH_FUNCTION_PATTERN matched - filePath: " + filePath + 
-                             ", warningLine: " + warningLineNumber + ", functionName: " + functionName + 
-                             ", functionLine: " + functionLineNumber);
+            HarbourLogger.trace("CompilerOutputFilter", "WARNING_WITH_FUNCTION_PATTERN matched - filePath: " + filePath +
+                              ", warningLine: " + warningLineNumber + ", functionName: " + functionName +
+                              ", functionLine: " + functionLineNumber);
 
             // Create two hyperlinks: one for the file reference and one for the function reference
             // According to user's request: "just open myinit.prg at line 20 when I click on Main(20)"
@@ -234,7 +231,7 @@ public class HarbourCompilerOutputFilter implements Filter {
             String filePath = fileMatcher.group(1);
             int lineNumber = Integer.parseInt(fileMatcher.group(3));
             
-            HarbourLogger.log("CompilerOutputFilter", "FILE_PATTERN matched - filePath: " + filePath + ", lineNumber: " + lineNumber);
+            HarbourLogger.trace("CompilerOutputFilter", "FILE_PATTERN matched - filePath: " + filePath + ", lineNumber: " + lineNumber);
 
             int start = fileMatcher.start();
             int end = fileMatcher.end();
@@ -286,8 +283,6 @@ public class HarbourCompilerOutputFilter implements Filter {
      * Create a result with file hyperlink.
      */
     private Result createResult(String line, int entireLength, String filePath, int lineNumber, int matchStart, int matchEnd) {
-        HarbourLogger.log("CompilerOutputFilter", "createResult called - filePath: " + filePath + ", lineNumber: " + lineNumber);
-        
         VirtualFile vFile = findFile(filePath);
         HyperlinkInfo hyperlinkInfo = null;
 
@@ -295,22 +290,13 @@ public class HarbourCompilerOutputFilter implements Filter {
             // Validate that the resolved file actually matches the expected filename
             String expectedFileName = new File(filePath).getName().toLowerCase();
             String actualFileName = vFile.getName().toLowerCase();
-            
-            HarbourLogger.log("CompilerOutputFilter", "File found - expected: " + expectedFileName + ", actual: " + actualFileName + ", path: " + vFile.getPath());
-            
+
             if (expectedFileName.equals(actualFileName)) {
-                // File names match - create normal hyperlink
-                HarbourLogger.log("CompilerOutputFilter", "File names match - creating normal hyperlink");
                 hyperlinkInfo = new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1);
             } else {
-                // File names don't match - this indicates wrong file resolution
-                // Use the enhanced search logic instead
-                HarbourLogger.log("CompilerOutputFilter", "File names don't match - using enhanced search logic");
                 hyperlinkInfo = createFileNotInProjectHyperlink(filePath, lineNumber);
             }
         } else {
-            // File not found - use enhanced search logic
-            HarbourLogger.log("CompilerOutputFilter", "File not found - using enhanced search logic");
             hyperlinkInfo = createFileNotInProjectHyperlink(filePath, lineNumber);
         }
 
@@ -330,22 +316,15 @@ public class HarbourCompilerOutputFilter implements Filter {
         return new HyperlinkInfo() {
             @Override
             public void navigate(Project project) {
-                HarbourLogger.log("CompilerOutputFilter", "createFileNotInProjectHyperlink.navigate called - filePath: " + filePath + ", lineNumber: " + lineNumber);
-                
                 // Extract function name from file path for search
                 String fileName = new File(filePath).getName();
                 String functionName = fileName.substring(0, fileName.lastIndexOf('.')); // Remove extension
-                
-                HarbourLogger.log("CompilerOutputFilter", "Extracted functionName: " + functionName + " from fileName: " + fileName);
-                
+
                 // If this looks like a main file, search for "main" function specifically
                 if (functionName.toLowerCase().contains("main") || functionName.toLowerCase().equals("myinit")) {
                     functionName = "main";
-                    HarbourLogger.log("CompilerOutputFilter", "Changed functionName to: main");
                 }
-                
-                // Use the enhanced search logic for files not in project
-                HarbourLogger.log("CompilerOutputFilter", "Calling handleFileNotInProject with functionName: " + functionName + ", lineNumber: " + lineNumber);
+
                 handleFileNotInProject(functionName, lineNumber);
             }
         };
@@ -355,63 +334,54 @@ public class HarbourCompilerOutputFilter implements Filter {
      * Find a file, trying both absolute and relative paths with enhanced debug support.
      */
     private VirtualFile findFile(String filePath) {
-        HarbourLogger.log("CompilerOutputFilter", "findFile called with: " + filePath + ", workingDirectory: " + workingDirectory);
-        
         // Clean up the file path (remove .\ prefix common in Windows)
         String cleanPath = filePath;
         if (cleanPath.startsWith(".\\") || cleanPath.startsWith("./")) {
             cleanPath = cleanPath.substring(2);
         }
-        
+
         // Normalize path separators for cross-platform compatibility
         cleanPath = cleanPath.replace('\\', '/');
-        
+
         // First try as absolute path
         VirtualFile vFile = LocalFileSystem.getInstance().findFileByPath(cleanPath);
-        HarbourLogger.log("CompilerOutputFilter", "Absolute path attempt: " + cleanPath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
-        
+
         // If not found and we have a working directory, try as relative path
         if (vFile == null && workingDirectory != null && !new File(cleanPath).isAbsolute()) {
             String absolutePath = new File(workingDirectory, cleanPath).getAbsolutePath().replace('\\', '/');
             vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
-            HarbourLogger.log("CompilerOutputFilter", "Working directory attempt: " + absolutePath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
         }
-        
+
         // If still not found, try with original path
         if (vFile == null) {
             String originalNormalized = filePath.replace('\\', '/');
             vFile = LocalFileSystem.getInstance().findFileByPath(originalNormalized);
-            HarbourLogger.log("CompilerOutputFilter", "Original path attempt: " + originalNormalized + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
-            
+
             if (vFile == null && workingDirectory != null && !new File(filePath).isAbsolute()) {
                 String absolutePath = new File(workingDirectory, filePath).getAbsolutePath().replace('\\', '/');
                 vFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
-                HarbourLogger.log("CompilerOutputFilter", "Final working directory attempt: " + absolutePath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
             }
         }
-        
+
         // If still not found, try looking in .hbmk directory (temp build directory)
         if (vFile == null && workingDirectory != null) {
-            // Extract just the filename from the path
             String fileName = new File(filePath).getName();
-            
-            // Try in .hbmk directory (where debug files like harbour_debug.prg are placed)
+
             String hbmkPath = new File(workingDirectory, ".hbmk/" + fileName).getAbsolutePath().replace('\\', '/');
             vFile = LocalFileSystem.getInstance().findFileByPath(hbmkPath);
-            HarbourLogger.log("CompilerOutputFilter", ".hbmk directory attempt: " + hbmkPath + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
-            
-            // Also try without leading dot
+
             if (vFile == null) {
                 String hbmkPathNoDot = new File(workingDirectory, "hbmk/" + fileName).getAbsolutePath().replace('\\', '/');
                 vFile = LocalFileSystem.getInstance().findFileByPath(hbmkPathNoDot);
-                HarbourLogger.log("CompilerOutputFilter", "hbmk directory attempt: " + hbmkPathNoDot + " -> " + (vFile != null ? "FOUND" : "NOT FOUND"));
             }
         }
-        
+
         // Don't perform synchronous refresh under read lock - it causes deadlocks
         // The file system will be refreshed asynchronously if needed
-        
-        HarbourLogger.log("CompilerOutputFilter", "findFile result: " + (vFile != null ? vFile.getPath() : "null"));
+
+        if (vFile == null) {
+            HarbourLogger.log("CompilerOutputFilter", "findFile: not found: " + filePath);
+        }
         return vFile;
     }
     
@@ -611,45 +581,35 @@ public class HarbourCompilerOutputFilter implements Filter {
         HyperlinkInfo hyperlinkInfo = new HyperlinkInfo() {
             @Override
             public void navigate(Project project) {
-                HarbourLogger.log("CompilerOutputFilter", "createWarningFunctionResult.navigate called - filePath: " + filePath + ", functionLineNumber: " + functionLineNumber);
-                
                 // Find the file directly (no complex search needed)
                 VirtualFile vFile = findFile(filePath);
                 if (vFile != null && vFile.exists()) {
-                    // Open the file at the function line number (user's simple solution)
-                    HarbourLogger.log("CompilerOutputFilter", "Opening file directly: " + vFile.getPath() + " at line " + functionLineNumber);
                     new OpenFileHyperlinkInfo(project, vFile, functionLineNumber - 1).navigate(project);
                 } else {
                     // Enhanced fallback logic for debug mode files
-                    HarbourLogger.log("CompilerOutputFilter", "File not found directly, trying enhanced resolution");
                     String fileName = new java.io.File(filePath).getName();
-                    
-                    // Try multiple fallback paths for debug mode
+
                     String[] fallbackPaths = {
-                        filePath,  // Original path
-                        fileName,  // Just filename
-                        ".hbmk/" + fileName,  // Debug directory
-                        "hbmk/" + fileName   // Without leading dot
+                        filePath,
+                        fileName,
+                        ".hbmk/" + fileName,
+                        "hbmk/" + fileName
                     };
-                    
+
                     VirtualFile foundFile = null;
                     for (String path : fallbackPaths) {
                         if (workingDirectory != null) {
                             String absolutePath = new java.io.File(workingDirectory, path).getAbsolutePath().replace('\\', '/');
                             foundFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
-                            HarbourLogger.log("CompilerOutputFilter", "Trying fallback path: " + absolutePath + " -> " + (foundFile != null ? "FOUND" : "NOT FOUND"));
                             if (foundFile != null && foundFile.exists()) {
                                 break;
                             }
                         }
                     }
-                    
+
                     if (foundFile != null) {
-                        HarbourLogger.log("CompilerOutputFilter", "Found file via fallback: " + foundFile.getPath() + " at line " + functionLineNumber);
                         new OpenFileHyperlinkInfo(project, foundFile, functionLineNumber - 1).navigate(project);
                     } else {
-                        // Final fallback: open search dialog
-                        HarbourLogger.log("CompilerOutputFilter", "File not found anywhere, opening search dialog");
                         String searchName = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
                         logFunctionNotFound(searchName);
                     }
@@ -810,11 +770,7 @@ public class HarbourCompilerOutputFilter implements Filter {
      * In this case there is multiple files matching this condition, so in that case pls open the prefilled find dialog"
      */
     private void handleFileNotInProject(String functionName, int lineNumber) {
-        HarbourLogger.log("CompilerOutputFilter", "handleFileNotInProject called - functionName: " + functionName + ", lineNumber: " + lineNumber + ", workingDirectory: " + workingDirectory);
-        
         if (workingDirectory == null) {
-            // No working directory - just open search dialog
-            HarbourLogger.log("CompilerOutputFilter", "No working directory - opening search dialog");
             logFunctionNotFound(functionName);
             return;
         }
