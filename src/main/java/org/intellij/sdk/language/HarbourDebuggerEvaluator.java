@@ -19,87 +19,149 @@ public class HarbourDebuggerEvaluator extends XDebuggerEvaluator {
     }
 
     @Override
-    public void evaluate(@NotNull String expression, @NotNull XEvaluationCallback callback, @Nullable XSourcePosition expressionPosition) {
-        HarbourLogger.log("HarbourDebuggerEvaluator", "Evaluating expression: " + expression);
+    public void evaluate(@NotNull String expression, @NotNull XEvaluationCallback callback,
+                         @Nullable XSourcePosition expressionPosition) {
+        HarbourLogger.log("HarbourDebuggerEvaluator",
+            "Evaluating expression: " + expression);
 
         // Execute evaluation on background thread
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                // Check if expression is a simple variable name first
-                String result = evaluateVariable(expression);
-                if (result != null) {
-                    // Found as variable, return its value
+                // Check if expression matches a variable or object:property
+                HarbourDebuggerValue found = findVariable(expression);
+                if (found != null) {
                     ApplicationManager.getApplication().invokeLater(() -> {
-                        HarbourDebuggerValue value = new HarbourDebuggerValue(expression, "Unknown", result);
-                        callback.evaluated(value);
+                        HarbourDebuggerValue result = new HarbourDebuggerValue(
+                            expression, found.getType(), found.getValue());
+                        callback.evaluated(result);
                     });
                     return;
                 }
 
-                // If not a simple variable, send evaluation command to debugger
+                // If not found locally, send evaluation command to debugger
                 String evaluationResult = evaluateExpression(expression);
-                
+
                 ApplicationManager.getApplication().invokeLater(() -> {
                     if (evaluationResult != null) {
-                        // Create a value object with the result
-                        HarbourDebuggerValue value = new HarbourDebuggerValue(expression, "Expression", evaluationResult);
+                        HarbourDebuggerValue value = new HarbourDebuggerValue(
+                            expression, "Expression", evaluationResult);
                         callback.evaluated(value);
                     } else {
-                        callback.errorOccurred("Cannot evaluate expression: " + expression);
+                        callback.errorOccurred(
+                            "Cannot evaluate expression: " + expression);
                     }
                 });
             } catch (Exception e) {
                 HarbourLogger.logStackTrace("HarbourDebuggerEvaluator", e);
-                HarbourLogger.log("HarbourDebuggerEvaluator", "Error evaluating expression: " + expression + " - " + e.getMessage());
+                HarbourLogger.log("HarbourDebuggerEvaluator",
+                    "Error evaluating expression: " + expression +
+                    " - " + e.getMessage());
                 ApplicationManager.getApplication().invokeLater(() -> {
-                    callback.errorOccurred("Error evaluating expression: " + e.getMessage());
+                    callback.errorOccurred(
+                        "Error evaluating expression: " + e.getMessage());
                 });
             }
         });
     }
 
     /**
-     * Check if expression is a simple variable and return its current value
+     * Find a variable or object property by expression.
+     * Supports simple variables (e.g. "bew") and object:property notation
+     * (e.g. "bew:LGNACH" or nested "obj:prop:subprop").
+     * Harbour is case-insensitive so all lookups are case-insensitive.
      */
-    private String evaluateVariable(String expression) {
-        // Clean the expression (remove spaces, etc.)
+    private HarbourDebuggerValue findVariable(String expression) {
         String cleanExpression = expression.trim();
-
-        // Get current variables from debug process
         var variables = debugProcess.getVariables();
 
         HarbourLogger.log("HarbourDebuggerEvaluator",
-            "Looking for variable '" + cleanExpression + "' in " + variables.size() + " variables");
+            "Looking for '" + cleanExpression + "' in " +
+            variables.size() + " variables");
 
-        // Look for exact variable match in all scopes (LOCALS, STATICS, PRIVATES, PUBLICS)
+        // Check for object:property notation
+        if (cleanExpression.contains(":")) {
+            return findObjectProperty(cleanExpression, variables);
+        }
+
+        // Simple variable lookup (case-insensitive)
         for (var entry : variables.entrySet()) {
             HarbourDebuggerValue value = entry.getValue();
-            String varName = value.getName();
-            if (cleanExpression.equals(varName)) {
+            if (cleanExpression.equalsIgnoreCase(value.getName())) {
                 HarbourLogger.log("HarbourDebuggerEvaluator",
-                    "Found variable (exact match): " + cleanExpression + " = " + value.getValue() +
-                    " (key: " + entry.getKey() + ")");
-                return value.getValue();
+                    "Found variable: " + cleanExpression + " = " +
+                    value.getValue() + " (" + value.getType() + ")");
+                return value;
             }
         }
 
-        // Look for case-insensitive match (Harbour is case-insensitive)
-        for (var entry : variables.entrySet()) {
-            HarbourDebuggerValue value = entry.getValue();
-            String varName = value.getName();
-            if (cleanExpression.equalsIgnoreCase(varName)) {
-                HarbourLogger.log("HarbourDebuggerEvaluator",
-                    "Found variable (case-insensitive): " + cleanExpression + " = " + value.getValue() +
-                    " (key: " + entry.getKey() + ")");
-                return value.getValue();
-            }
-        }
-
-        // Log available variables for debugging
         HarbourLogger.log("HarbourDebuggerEvaluator",
-            "Variable '" + cleanExpression + "' not found. Available: " + variables.keySet());
+            "Variable '" + cleanExpression +
+            "' not found. Available: " + variables.keySet());
+        return null;
+    }
 
-        return null; // Not found as simple variable
+    /**
+     * Resolve object:property expressions by walking the children tree.
+     * E.g. "bew:LGNACH" -> find variable BEW, then child LGNACH.
+     */
+    private HarbourDebuggerValue findObjectProperty(String expression,
+            java.util.Map<String, HarbourDebuggerValue> variables) {
+        String[] parts = expression.split(":");
+        if (parts.length < 2) {
+            return null;
+        }
+
+        // Find the base object variable (case-insensitive)
+        String baseName = parts[0].trim();
+        HarbourDebuggerValue current = null;
+        for (var entry : variables.entrySet()) {
+            if (baseName.equalsIgnoreCase(entry.getValue().getName())) {
+                current = entry.getValue();
+                break;
+            }
+        }
+
+        if (current == null) {
+            HarbourLogger.log("HarbourDebuggerEvaluator",
+                "Base object '" + baseName + "' not found");
+            return null;
+        }
+
+        // Walk the property chain through children
+        for (int i = 1; i < parts.length; i++) {
+            String propName = parts[i].trim();
+            java.util.List<HarbourDebuggerValue> children =
+                current.getChildren();
+
+            if (children == null || children.isEmpty()) {
+                HarbourLogger.log("HarbourDebuggerEvaluator",
+                    "Object '" + current.getName() +
+                    "' has no loaded children, cannot resolve '" +
+                    propName + "'");
+                return null;
+            }
+
+            HarbourDebuggerValue found = null;
+            for (HarbourDebuggerValue child : children) {
+                if (propName.equalsIgnoreCase(child.getName())) {
+                    found = child;
+                    break;
+                }
+            }
+
+            if (found == null) {
+                HarbourLogger.log("HarbourDebuggerEvaluator",
+                    "Property '" + propName + "' not found in '" +
+                    current.getName() + "'");
+                return null;
+            }
+            current = found;
+        }
+
+        HarbourLogger.log("HarbourDebuggerEvaluator",
+            "Resolved " + expression + " = " + current.getValue() +
+            " (" + current.getType() + ")");
+        return current;
     }
 
     /**
@@ -153,14 +215,14 @@ public class HarbourDebuggerEvaluator extends XDebuggerEvaluator {
             return null;
         }
 
-        // Find word boundaries (letters, numbers, underscore for Harbour variables)
+        // Find word boundaries including ':' for object:property access
         int start = offset;
         int end = offset;
 
         // Move start backwards to find beginning of word
         while (start > 0) {
             char ch = text.charAt(start - 1);
-            if (Character.isLetterOrDigit(ch) || ch == '_') {
+            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == ':') {
                 start--;
             } else {
                 break;
@@ -170,11 +232,20 @@ public class HarbourDebuggerEvaluator extends XDebuggerEvaluator {
         // Move end forwards to find end of word
         while (end < text.length()) {
             char ch = text.charAt(end);
-            if (Character.isLetterOrDigit(ch) || ch == '_') {
+            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == ':') {
                 end++;
             } else {
                 break;
             }
+        }
+
+        // Trim trailing colons (e.g. "bew:" without property)
+        while (end > start && text.charAt(end - 1) == ':') {
+            end--;
+        }
+        // Trim leading colons
+        while (start < end && text.charAt(start) == ':') {
+            start++;
         }
 
         if (start == end) {
