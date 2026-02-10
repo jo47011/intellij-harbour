@@ -133,21 +133,24 @@ public class HarbourCompilerOutputFilter implements Filter {
                               ", warningLine: " + warningLineNumber + ", functionName: " + functionName +
                               ", functionLine: " + functionLineNumber);
 
-            // Create two hyperlinks: one for the file reference and one for the function reference
-            // According to user's request: "just open myinit.prg at line 20 when I click on Main(20)"
-            
-            // First create hyperlink for the file reference (line number from warning)
-            int fileStart = warningWithFunctionMatcher.start(1);
-            int fileEnd = warningWithFunctionMatcher.end(3) + 1; // Include closing parenthesis
-            Result fileResult = createResult(line, entireLength, filePath, warningLineNumber, fileStart, fileEnd);
-            
-            // Then create hyperlink for the function reference (line number from function)
-            int functionStart = warningWithFunctionMatcher.start(4);
-            int functionEnd = warningWithFunctionMatcher.end(5) + 1; // Include closing parenthesis
-            Result functionResult = createWarningFunctionResult(line, entireLength, filePath, functionLineNumber, functionStart, functionEnd);
-            
-            // Return the function result as it's what the user specifically requested
-            result = functionResult;
+            // Create two hyperlinks: file reference and function reference
+            int lineStartInEntireText = entireLength - line.length();
+
+            // Hyperlink for the file reference: .\email.prg(284)
+            int fileStart = lineStartInEntireText + warningWithFunctionMatcher.start(1);
+            int fileEnd = lineStartInEntireText + warningWithFunctionMatcher.end(3) + 1;
+            HyperlinkInfo fileLink = createHyperlinkInfo(filePath, warningLineNumber);
+
+            // Hyperlink for the function reference: WINEMAIL(175)
+            int funcStart = lineStartInEntireText + warningWithFunctionMatcher.start(4);
+            int funcEnd = lineStartInEntireText + warningWithFunctionMatcher.end(5) + 1;
+            HyperlinkInfo funcLink = createWarningFunctionHyperlink(filePath, functionLineNumber);
+
+            // Return both hyperlinks as a combined result
+            java.util.List<ResultItem> items = new java.util.ArrayList<>();
+            items.add(new ResultItem(fileStart, fileEnd, fileLink));
+            items.add(new ResultItem(funcStart, funcEnd, funcLink));
+            result = new Result(items);
         }
         // Check for function pattern with file reference "1: FUNCTION in filepath(line)" (HIGH PRIORITY)
         else if (functionMatcher.find()) {
@@ -309,6 +312,57 @@ public class HarbourCompilerOutputFilter implements Filter {
         return new Result(hyperlinkStart, hyperlinkEnd, hyperlinkInfo, null);
     }
     
+    /**
+     * Create a HyperlinkInfo for a file reference (reuses createResult logic without
+     * wrapping in a Result, for use with multi-item results).
+     */
+    private HyperlinkInfo createHyperlinkInfo(String filePath, int lineNumber) {
+        VirtualFile vFile = findFile(filePath);
+        if (vFile != null) {
+            String expectedFileName = new File(filePath).getName().toLowerCase();
+            String actualFileName = vFile.getName().toLowerCase();
+            if (expectedFileName.equals(actualFileName)) {
+                return new OpenFileHyperlinkInfo(project, vFile, lineNumber - 1);
+            }
+        }
+        return createFileNotInProjectHyperlink(filePath, lineNumber);
+    }
+
+    /**
+     * Create a HyperlinkInfo for a warning function reference that opens the file
+     * at the function's line number.
+     */
+    private HyperlinkInfo createWarningFunctionHyperlink(String filePath, int functionLineNumber) {
+        return new HyperlinkInfo() {
+            @Override
+            public void navigate(Project project) {
+                VirtualFile vFile = findFile(filePath);
+                if (vFile != null && vFile.exists()) {
+                    new OpenFileHyperlinkInfo(project, vFile, functionLineNumber - 1).navigate(project);
+                } else {
+                    String fileName = new java.io.File(filePath).getName();
+                    String[] fallbackPaths = { filePath, fileName, ".hbmk/" + fileName, "hbmk/" + fileName };
+                    VirtualFile foundFile = null;
+                    for (String path : fallbackPaths) {
+                        if (workingDirectory != null) {
+                            String absolutePath = new java.io.File(workingDirectory, path)
+                                .getAbsolutePath().replace('\\', '/');
+                            foundFile = LocalFileSystem.getInstance().findFileByPath(absolutePath);
+                            if (foundFile != null && foundFile.exists()) break;
+                        }
+                    }
+                    if (foundFile != null) {
+                        new OpenFileHyperlinkInfo(project, foundFile, functionLineNumber - 1).navigate(project);
+                    } else {
+                        String searchName = fileName.contains(".")
+                            ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+                        logFunctionNotFound(searchName);
+                    }
+                }
+            }
+        };
+    }
+
     /**
      * Create a hyperlink for files not in project that uses enhanced search logic.
      */
