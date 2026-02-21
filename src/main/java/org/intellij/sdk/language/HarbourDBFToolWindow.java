@@ -534,7 +534,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     HarbourLogger.log("HarbourDBFToolWindow", "*** Updated status to show " + workareas.size() + " workarea(s)");
 
                     // Auto-select program's current workarea on first load
-                    if (!currentRecordWasSelected && autoSelectOnFirstLoad) {
+                    if (!currentRecordWasSelected && autoSelectOnFirstLoad && liveConnection != null) {
                         autoSelectOnFirstLoad = false;  // Only auto-select once
                         // Auto-select the program's currently selected workarea (from SELECT())
                         // Fall back to first workarea if none is selected
