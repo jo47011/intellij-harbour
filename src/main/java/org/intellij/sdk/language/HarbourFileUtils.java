@@ -144,7 +144,8 @@ public class HarbourFileUtils {
     }
 
     /**
-     * Check if a file should be excluded from navigation based on settings
+     * Check if a file should be excluded from navigation based on settings.
+     * Supports wildcard patterns (* and ?) in directory exclusion patterns.
      *
      * @param project The project
      * @param file The virtual file to check
@@ -155,11 +156,95 @@ public class HarbourFileUtils {
             return false;
         }
 
-        String filename = file.getName();
         HarbourSettings settings = HarbourSettings.getInstance(project);
-        Set<String> excludedFiles = settings.getExcludedFiles();
 
-        return excludedFiles.contains(filename);
+        // Check excluded file names
+        String filename = file.getName();
+        Set<String> excludedFiles = settings.getExcludedFiles();
+        if (excludedFiles.contains(filename)) {
+            return true;
+        }
+
+        // Check excluded directory patterns (with wildcard support)
+        return isPathExcludedByDirPatterns(file.getPath(), settings.getExcludedDirectoryPatterns());
+    }
+
+    /**
+     * Check if a file path is excluded by directory patterns.
+     * Supports wildcard patterns: * matches any sequence, ? matches single char.
+     * Matching is case-insensitive against each path component (directory name).
+     */
+    public static boolean isPathExcludedByDirPatterns(String path, List<String> patterns) {
+        if (path == null || patterns == null || patterns.isEmpty()) {
+            return false;
+        }
+
+        // Split path into components using both / and \ as separators
+        String[] components = path.split("[/\\\\]");
+
+        for (String pattern : patterns) {
+            if (pattern == null || pattern.isEmpty()) {
+                continue;
+            }
+            String p = pattern.trim();
+            if (p.isEmpty()) {
+                continue;
+            }
+            for (String component : components) {
+                if (component.isEmpty()) {
+                    continue;
+                }
+                if (matchesWildcard(component, p)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Simple case-insensitive wildcard matching.
+     * * matches any sequence of characters, ? matches exactly one character.
+     */
+    static boolean matchesWildcard(String text, String pattern) {
+        return matchesWildcardImpl(
+            text.toLowerCase(), 0,
+            pattern.toLowerCase(), 0
+        );
+    }
+
+    private static boolean matchesWildcardImpl(String text, int ti, String pattern, int pi) {
+        while (pi < pattern.length()) {
+            char pc = pattern.charAt(pi);
+            if (pc == '*') {
+                // Skip consecutive *
+                while (pi < pattern.length() && pattern.charAt(pi) == '*') {
+                    pi++;
+                }
+                if (pi == pattern.length()) {
+                    return true; // trailing * matches everything
+                }
+                for (int i = ti; i <= text.length(); i++) {
+                    if (matchesWildcardImpl(text, i, pattern, pi)) {
+                        return true;
+                    }
+                }
+                return false;
+            } else if (pc == '?') {
+                if (ti >= text.length()) {
+                    return false;
+                }
+                ti++;
+                pi++;
+            } else {
+                if (ti >= text.length() || text.charAt(ti) != pc) {
+                    return false;
+                }
+                ti++;
+                pi++;
+            }
+        }
+        return ti == text.length();
     }
 
     /**

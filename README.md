@@ -447,11 +447,17 @@ Customize syntax highlighting: **Settings** → **Editor** → **Color Scheme** 
 
 ## Known Issues
 
-- **Ctrl+hover** should not show tooltip
+- **Ctrl-hover** should not show tooltip or navigate, only ctrl-click should.
 - **Ctrl-click**: Internal function navigation may jump to function definition instead of showing a declaration dialog
   if the file w/ the function definition misses some include file or if the list of usages is very long.
   Subsequent click on function declaration itself work.
 - most function/procedure features do not work yet for truncated keywords func/proce.
+- **PyCharm indexing non-Harbour files (e.g. .dbf/.dbt):** The plugin's directory exclusion
+  settings (Settings > Tools > Harbour > Excluded Files) only affect Harbour-specific features
+  (navigation, completion, references). PyCharm's built-in indexer may still scan excluded
+  directories for its own purposes (search, VCS, etc.). To fully exclude directories from
+  PyCharm's indexer, right-click the directory in the Project view and select
+  "Mark Directory as > Excluded".
 
 ## VS Code Users
 

@@ -534,7 +534,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     HarbourLogger.log("HarbourDBFToolWindow", "*** Updated status to show " + workareas.size() + " workarea(s)");
 
                     // Auto-select program's current workarea on first load
-                    if (!currentRecordWasSelected && autoSelectOnFirstLoad) {
+                    if (!currentRecordWasSelected && autoSelectOnFirstLoad && liveConnection != null) {
                         autoSelectOnFirstLoad = false;  // Only auto-select once
                         // Auto-select the program's currently selected workarea (from SELECT())
                         // Fall back to first workarea if none is selected
@@ -1827,7 +1827,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                         }
                         
                         // 2. For string values (type C or M), remove surrounding quotes
-                        if ((fieldType.equals("C") || fieldType.equals("M")) && 
+                        if ((fieldType.equals("C") || fieldType.equals("M")) &&
+                            fieldValue.length() >= 2 &&
                             fieldValue.startsWith("\"") && fieldValue.endsWith("\"")) {
                             fieldValue = fieldValue.substring(1, fieldValue.length() - 1);
                         }

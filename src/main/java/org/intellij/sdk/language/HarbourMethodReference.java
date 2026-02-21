@@ -180,6 +180,9 @@ public class HarbourMethodReference extends PsiReferenceBase<PsiElement> impleme
                     Pattern.CASE_INSENSITIVE);
 
             for (VirtualFile virtualFile : virtualFiles) {
+                if (HarbourFileUtils.isFileExcluded(project, virtualFile)) {
+                    continue;
+                }
                 try {
                     PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
                     if (psiFile == null) continue;

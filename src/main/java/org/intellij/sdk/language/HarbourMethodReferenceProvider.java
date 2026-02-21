@@ -17,11 +17,10 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
 
     @Override
     public PsiReference @NotNull [] getReferencesByElement(@NotNull PsiElement element, @NotNull ProcessingContext context) {
-        HarbourLogger.log(COMPONENT, "Getting references for: " + element.getText() + ", class: " + element.getClass().getName());
-        
+        HarbourLogger.trace(COMPONENT, "Getting references for: " + element.getText() + ", class: " + element.getClass().getName());
+
         // CRITICAL FIX: Skip comment elements completely
         if (element instanceof PsiComment || element.getClass().getName().contains("Comment")) {
-            HarbourLogger.log(COMPONENT, "SKIPPING COMMENT ELEMENT: " + element.getText());
             return PsiReference.EMPTY_ARRAY;
         }
 
@@ -33,7 +32,7 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
 
             if (parenIndex > 0) {
                 String methodName = text.substring(0, parenIndex);
-                HarbourLogger.log(COMPONENT, "Found function call: " + methodName);
+                HarbourLogger.trace(COMPONENT, "Found function call: " + methodName);
 
                 return new PsiReference[]{
                         new HarbourMethodReference(element, new TextRange(0, parenIndex))
@@ -48,18 +47,15 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
                 
                 // Skip keywords - they should never have references
                 if (isKeyword(text)) {
-                    HarbourLogger.log(COMPONENT, "KEYWORD DETECTED - SKIPPING: " + text);
                     return PsiReference.EMPTY_ARRAY;
                 }
-                
+
                 // Only create method references for actual method calls, not variables
                 if (isActualMethodCall(leafElement)) {
-                    HarbourLogger.log(COMPONENT, "Found method call identifier: " + element.getText());
+                    HarbourLogger.trace(COMPONENT, "Found method call identifier: " + element.getText());
                     return new PsiReference[]{
                             new HarbourMethodReference(element, new TextRange(0, element.getTextLength()))
                     };
-                } else {
-                    HarbourLogger.log(COMPONENT, "Skipping variable identifier: " + element.getText());
                 }
             }
         }
@@ -136,7 +132,7 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
             int doubleColonPos = lineText.indexOf("::");
             // If our element appears after ::, it's likely a field assignment, not a method reference
             if (doubleColonPos >= 0 && identifierPos > doubleColonPos) {
-                HarbourLogger.log(COMPONENT, "Found :: scope resolution, not a method reference: " + text);
+                HarbourLogger.trace(COMPONENT, "Found :: scope resolution, not a method reference: " + text);
                 return false;
             }
         }
@@ -163,12 +159,10 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
      */
     private boolean isKeyword(String text) {
         if (text == null || text.isEmpty()) {
-            HarbourLogger.log(COMPONENT, "isKeyword: null/empty text - returning false");
             return false;
         }
-        
+
         String upperText = text.toUpperCase();
-        HarbourLogger.log(COMPONENT, "isKeyword: checking '" + text + "' (uppercase: '" + upperText + "')");
         
         // Language structure keywords
         if (upperText.equals("IF") || upperText.equals("ELSE") || upperText.equals("ELSEIF") || 
@@ -177,7 +171,6 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
             upperText.equals("CASE") || upperText.equals("OTHERWISE") || upperText.equals("SWITCH") || 
             upperText.equals("ENDSWITCH") || upperText.equals("BEGIN") || upperText.equals("SEQUENCE") ||
             upperText.equals("RECOVER") || upperText.equals("USING") || upperText.equals("END")) {
-            HarbourLogger.log(COMPONENT, "isKeyword: LANGUAGE STRUCTURE keyword detected: " + upperText);
             return true;
         }
         
@@ -219,7 +212,6 @@ public class HarbourMethodReferenceProvider extends PsiReferenceProvider {
             return true;
         }
         
-        HarbourLogger.log(COMPONENT, "isKeyword: NOT A KEYWORD - returning false for: " + upperText);
         return false;
     }
 }

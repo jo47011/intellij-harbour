@@ -41,8 +41,6 @@ import java.util.regex.Pattern;
 public class HarbourExternalDocumentationHandler implements GotoDeclarationHandler {
     
     public HarbourExternalDocumentationHandler() {
-        String osName = System.getProperty("os.name");
-        HarbourLogger.log("DocHandler", "HarbourExternalDocumentationHandler initialized on " + osName);
     }
     // Using static variable since ThreadLocal wasn't working correctly
     private static volatile boolean IS_CLICK_MODE = false;
@@ -66,13 +64,11 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
                 LAST_CLICK_TIME = System.currentTimeMillis();
                 CALL_COUNTER.set(0);
                 CLICK_MODE_LOCKED = true; // Lock to prevent premature reset during processing
-                HarbourLogger.log("DocHandler", "Click mode set to: " + isClick + " (locked: " + CLICK_MODE_LOCKED + ")");
             } else if (!CLICK_MODE_LOCKED) {
                 // Only reset if not locked during active processing
                 IS_CLICK_MODE = false;
-                HarbourLogger.log("DocHandler", "Click mode set to: " + isClick + " (locked: " + CLICK_MODE_LOCKED + ")");
             } else {
-                HarbourLogger.log("DocHandler", "Click mode reset blocked - system is locked during processing");
+                HarbourLogger.trace("DocHandler", "Click mode reset blocked - system is locked during processing");
             }
         }
     }
@@ -84,7 +80,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             if (IS_CLICK_MODE) {
                 long timeSinceClick = System.currentTimeMillis() - LAST_CLICK_TIME;
                 if (timeSinceClick > 5000) { // 5 second safety timeout
-                    HarbourLogger.log("DocHandler", "SAFETY: Click mode auto-expired after " + timeSinceClick + "ms");
                     IS_CLICK_MODE = false;
                     CLICK_MODE_LOCKED = false;
                 }
@@ -98,7 +93,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         synchronized (CLICK_MODE_LOCK) {
             IS_CLICK_MODE = false;
             CLICK_MODE_LOCKED = false;
-            HarbourLogger.log("DocHandler", "Click mode safely reset (unlocked)");
         }
     }
     
@@ -111,7 +105,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             
             long timeSinceClick = System.currentTimeMillis() - LAST_CLICK_TIME;
             if (timeSinceClick > 2000) { // 2 second timeout for click events
-                HarbourLogger.log("DocHandler", "Click mode expired after " + timeSinceClick + "ms - auto-resetting");
                 IS_CLICK_MODE = false;
                 CLICK_MODE_LOCKED = false;
                 return false;
@@ -123,8 +116,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
 
     @Override
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
-        // Count calls
-        int count = CALL_COUNTER.incrementAndGet();
+        CALL_COUNTER.incrementAndGet();
 
         // Ensure mouse listener is registered on first call
         if (!MOUSE_LISTENER_REGISTERED && element != null) {
@@ -132,20 +124,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         }
         
 
-        // Log this call for debugging
-        String osName = System.getProperty("os.name");
-        long timeSinceClick = System.currentTimeMillis() - LAST_CLICK_TIME;
-        boolean isRecentClick = timeSinceClick < 500;
-        
-        HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER START === (count: " + count +
-                ", clickMode: " + IS_CLICK_MODE + 
-                ", timeSinceClick: " + timeSinceClick + "ms" +
-                ", isRecentClick: " + isRecentClick +
-                ", element: " + (element != null ? element.getText() : "null") + 
-                ") on " + osName);
-
         if (element == null) {
-            HarbourLogger.log("DocHandler", "=== EARLY EXIT === Element is null, returning null");
             return null;
         }
         
@@ -153,31 +132,22 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // Check if this is a Harbour file
         PsiFile containingFile = element.getContainingFile();
         if (!(containingFile instanceof HarbourFile)) {
-            HarbourLogger.log("DocHandler", "=== EARLY EXIT === Not a Harbour file, returning null");
             return null;
         }
 
         // Handle string literals (includes)
         if (element instanceof LeafPsiElement &&
                 ((LeafPsiElement) element).getElementType() == HarbourTypes.STRING_LITERAL) {
-            String includeFileName = element.getText().replace("\"", "").replace("'", "");
-            HarbourLogger.log("DocHandler", "Processing STRING_LITERAL for possible include: " + includeFileName);
-
             // Check if we're in an include context - look at the entire line for #include
             String lineText = getLineText(element);
-            HarbourLogger.log("DocHandler", "Line text: " + lineText);
 
             if (lineText != null && (lineText.contains("#include") || lineText.contains("#INCLUDE"))) {
-                HarbourLogger.log("DocHandler", "Found #include directive in line: " + lineText);
-
                 // If it's an actual click, let the include reference handler handle it
                 if (IS_CLICK_MODE) {
-                    HarbourLogger.log("DocHandler", "Click mode active for include file, delegating to include handler");
                     return null;
                 }
 
-                // CRITICAL FIX: Return empty array to prevent tooltips on hover
-                HarbourLogger.log("DocHandler", "Include file hover - returning empty array to prevent popup");
+                // Return empty array to prevent tooltips on hover
                 return PsiElement.EMPTY_ARRAY;
             }
         }
@@ -185,31 +155,23 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // Check if this is an identifier
         if (!(element instanceof LeafPsiElement) ||
                 ((LeafPsiElement) element).getElementType() != HarbourTypes.IDENT) {
-            HarbourLogger.log("DocHandler", "Not an IDENT element: " +
-                    (element instanceof LeafPsiElement ? ((LeafPsiElement) element).getElementType() : "not LeafPsiElement"));
             return null;
         }
 
         String functionName = element.getText();
-        HarbourLogger.log("DocHandler", "Processing identifier: " + functionName);
 
         // Check if this is part of a function call
         if (!isFunctionCall(((LeafPsiElement) element))) {
             // Check if this is a function declaration
             if (isFunctionDeclaration(((LeafPsiElement) element))) {
-                HarbourLogger.log("DocHandler", "Function declaration detected: " + functionName + ", letting normal handlers take over");
-                // Return null to let normal IntelliJ handlers (Find Usages, etc.) take over
                 return null;
             }
-            HarbourLogger.log("DocHandler", "Not a function call: " + functionName);
             return null;
         }
 
         // First check if this is a class method call (e.g., User():new())
         boolean isClassMethod = isClassMethodCall((LeafPsiElement) element);
         if (isClassMethod) {
-            HarbourLogger.log("DocHandler", "Detected as class method call: " + functionName + ", not handling");
-            // Don't interfere with class methods - let the class method handlers work
             return null;
         }
 
@@ -220,35 +182,19 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         boolean isInternal = classificationService.isInternalFunction(functionName);
 
         if (isInternal) {
-            HarbourLogger.log("DocHandler", "=== EARLY EXIT === Internal function detected: " + functionName + ", returning null");
-            // Don't interfere with internal functions - let the normal handlers work
             return null;
         }
-
-        // It's an external function
-        HarbourLogger.log("DocHandler", "External function detected: " + functionName + 
-                         ", clickMode=" + IS_CLICK_MODE + 
-                         ", count=" + count + 
-                         ", timeSinceClick=" + timeSinceClick + "ms");
 
         // Check if we're in click mode - only open browser on actual clicks, not hover
         boolean shouldOpenBrowser = shouldHandleAsClick();
         
         if (shouldOpenBrowser) {
-            HarbourLogger.log("DocHandler", "CLICK MODE - Opening documentation for external function: " + functionName);
+            HarbourLogger.log("DocHandler", "Opening documentation for: " + functionName);
             openExternalDocumentation(project, functionName);
-            
-            // Use safe reset to prevent race conditions with other handlers
             resetClickMode();
-            
-            // Return empty array to prevent normal navigation after opening browser
-            HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Click handled, returning empty array for: " + functionName);
             return PsiElement.EMPTY_ARRAY;
         } else {
-            HarbourLogger.log("DocHandler", "HOVER MODE - Not opening browser for external function: " + functionName);
-            
-            // CRITICAL FIX: Return empty array to prevent popups on hover
-            HarbourLogger.log("DocHandler", "=== EXTERNAL HANDLER END === Returning empty array to prevent hover popup for: " + functionName);
+            // Return empty array to prevent popups on hover
             return PsiElement.EMPTY_ARRAY;
         }
     }
@@ -260,7 +206,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // Check if parent is a function call
         PsiElement parent = element.getParent();
         if (parent instanceof FunctionCallImpl) {
-            HarbourLogger.log("DocHandler", "Direct function call identified via parent: " + element.getText());
             return true;
         }
 
@@ -272,7 +217,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
 
         boolean isFunction = sibling != null && sibling.getText().startsWith("(");
         if (isFunction) {
-            HarbourLogger.log("DocHandler", "Function call identified by parenthesis: " + element.getText());
             return true;
         }
         
@@ -303,7 +247,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             // Look for Class() pattern before the colon
             int closeParenPos = beforeElement.lastIndexOf(')');
             if (closeParenPos > 0 && beforeElement.indexOf('(') > 0) {
-                HarbourLogger.log("DocHandler", "Detected class method: " + elementText + " after colon");
                 return true;
             }
         }
@@ -312,13 +255,11 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         String afterElement = lineText.substring(pos + elementText.length()).trim();
         if (afterElement.startsWith("()") &&
                 (afterElement.length() > 2 && (afterElement.charAt(2) == ':' || afterElement.charAt(2) == '.'))) {
-            HarbourLogger.log("DocHandler", "Detected class: " + elementText + " before colon");
             return true;
         }
 
         // Generic check: any method after colon and parentheses pattern
         if (beforeElement.endsWith(":") && beforeElement.contains("(") && beforeElement.contains(")")) {
-            HarbourLogger.log("DocHandler", "Found class method pattern for: " + elementText);
             return true;
         }
 
@@ -395,7 +336,6 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             for (HarbourFunctionDeclaration decl : declarations) {
                 String declName = decl.getName();
                 if (declName != null && functionName.equalsIgnoreCase(declName)) {
-                    HarbourLogger.log("DocHandler", "Found function declaration: " + declName + " in " + virtualFile.getName());
                     return true;
                 }
             }
@@ -410,20 +350,15 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
 
             Matcher matcher = functionPattern.matcher(fileContent);
             if (matcher.find()) {
-                HarbourLogger.log("DocHandler", "Found text-based declaration for: " + functionName +
-                        " type: " + matcher.group(1) + " in " + virtualFile.getName());
                 return true;
             }
         }
 
         // Also check if it's a standard function
         if (HarbourStandardFunctionCache.isStandardFunction(functionName)) {
-            HarbourLogger.log("DocHandler", "Standard function detected: " + functionName);
-            // For UI purposes, treat standard functions as external
             return false;
         }
 
-        HarbourLogger.log("DocHandler", "No internal declarations found for: " + functionName);
         return false;
     }
 
@@ -431,22 +366,14 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
      * Opens documentation in a browser
      */
     private void openExternalDocumentation(Project project, String functionName) {
-        HarbourLogger.log("DocHandler", "openExternalDocumentation called for: " + functionName + 
-                         " in project: " + (project != null ? project.getName() : "null"));
-        
         HarbourSettings settings = HarbourSettings.getInstance(project);
-        HarbourLogger.log("DocHandler", "Settings instance: " + (settings != null ? "found" : "null"));
-        
         if (settings == null) {
-            HarbourLogger.log("DocHandler", "ERROR: HarbourSettings instance is null");
+            HarbourLogger.warning("DocHandler", "HarbourSettings instance is null");
             return;
         }
-        
+
         String baseUrl = settings.getDocumentationBaseUrl();
-        HarbourLogger.log("DocHandler", "Base URL from settings: '" + baseUrl + "'");
-        
         if (baseUrl == null || baseUrl.isEmpty()) {
-            HarbourLogger.log("DocHandler", "ERROR: Documentation base URL not configured - using default");
             baseUrl = "https://harbour.github.io/doc/clc53.html";
         }
 
@@ -455,70 +382,42 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         }
 
         String docUrl = baseUrl + functionName;
-        HarbourLogger.log("DocHandler", "Final URL to open: " + docUrl);
 
         // Check if we've recently opened this URL to prevent duplicates
         long currentTime = System.currentTimeMillis();
         Long lastOpenTime = recentlyOpenedUrls.get(docUrl);
-        
+
         if (lastOpenTime != null && (currentTime - lastOpenTime) < DUPLICATE_PREVENTION_WINDOW_MS) {
-            HarbourLogger.log("DocHandler", "Skipping duplicate URL opening: " + docUrl + 
-                            " (opened " + (currentTime - lastOpenTime) + "ms ago)");
             return;
         }
 
         // Clean up old entries from the cache (older than 10 seconds)
-        recentlyOpenedUrls.entrySet().removeIf(entry -> 
+        recentlyOpenedUrls.entrySet().removeIf(entry ->
             (currentTime - entry.getValue()) > 10000);
 
         // Check if a browser is configured before attempting to open
         WebBrowserManager browserManager = WebBrowserManager.getInstance();
         boolean hasBrowsers = !browserManager.getActiveBrowsers().isEmpty();
-        
-        HarbourLogger.log("DocHandler", "Browser check - has browsers: " + hasBrowsers + 
-                         ", active browsers: " + browserManager.getActiveBrowsers().size());
-        
-        // Show notification if no browsers configured
+
         if (!hasBrowsers) {
-            HarbourLogger.log("DocHandler", "No browsers configured, showing notification for external function: " + functionName);
+            HarbourLogger.warning("DocHandler", "No browsers configured for: " + functionName);
             showBrowserConfigurationNotification(project, functionName, docUrl, "No browsers configured");
             return;
         }
-        
-        boolean browserLaunchFailed = false;
-        String errorMessage = null;
-        
+
         try {
-            // Add platform-specific logging
-            String osName = System.getProperty("os.name");
-            HarbourLogger.log("DocHandler", "OS detected: " + osName + " - attempting to open: " + docUrl);
-            
             BrowserUtil.browse(docUrl);
-            
-            // Record this URL opening to prevent duplicates
             recentlyOpenedUrls.put(docUrl, currentTime);
-            
-            HarbourLogger.log("DocHandler", "BrowserUtil.browse() called successfully for: " + docUrl);
         } catch (Exception e) {
-            browserLaunchFailed = true;
-            errorMessage = e.getMessage();
-            HarbourLogger.log("DocHandler", "ERROR opening browser: " + errorMessage);
-            HarbourLogger.log("DocHandler", "Exception stack trace: " + java.util.Arrays.toString(e.getStackTrace()));
+            HarbourLogger.error("DocHandler", "Failed to open browser for " + functionName + ": " + e.getMessage());
+            showBrowserConfigurationNotification(project, functionName, docUrl, e.getMessage());
         }
-        
-        // Always show notification for ALL external functions to test if it works
-        // This catches cases where BrowserUtil.browse() doesn't throw exception but browser still fails
-        HarbourLogger.log("DocHandler", "Showing notification for all external functions for testing: " + functionName);
-        String message = errorMessage != null ? errorMessage : "Browser configuration test - please verify browser opens correctly";
-        showBrowserConfigurationNotification(project, functionName, docUrl, message);
     }
     
     /**
      * Show a user-friendly notification when browser opening fails, with instructions to configure browser settings.
      */
     private void showBrowserConfigurationNotification(Project project, String functionName, String docUrl, String errorMessage) {
-        HarbourLogger.log("DocHandler", "showBrowserConfigurationNotification called for function: " + functionName);
-        
         String title = "Documentation Access";
         String content = String.format(
             "Documentation for function '%s'.<br/>" +
@@ -526,10 +425,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             "URL: <a href=\"%s\">%s</a>",
             functionName, docUrl, docUrl
         );
-        
-        HarbourLogger.log("DocHandler", "Creating notification with title: " + title);
-        HarbourLogger.log("DocHandler", "Notification content: " + content);
-        
+
         try {
             // Create notification with action to open settings
             Notification notification = NotificationGroupManager.getInstance()
@@ -561,11 +457,8 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
             });
         
             notification.notify(project);
-            
-            HarbourLogger.log("DocHandler", "Notification displayed successfully for function: " + functionName);
         } catch (Exception e) {
-            HarbourLogger.log("DocHandler", "ERROR creating/showing notification: " + e.getMessage());
-            HarbourLogger.log("DocHandler", "Notification exception: " + java.util.Arrays.toString(e.getStackTrace()));
+            HarbourLogger.error("DocHandler", "Notification failed: " + e.getMessage());
         }
     }
     
@@ -584,10 +477,7 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
         // Check if the line contains FUNCTION or PROCEDURE declaration
         String functionName = element.getText();
         Pattern pattern = Pattern.compile("(?i)\\b(FUNCTION|PROCEDURE)\\s+" + Pattern.quote(functionName) + "\\b");
-        boolean isDeclaration = pattern.matcher(lineText).find();
-        
-        HarbourLogger.log("DocHandler", "Checking if declaration for " + functionName + ": " + isDeclaration);
-        return isDeclaration;
+        return pattern.matcher(lineText).find();
     }
 
     /**
@@ -606,9 +496,8 @@ public class HarbourExternalDocumentationHandler implements GotoDeclarationHandl
                 .addEditorMouseMotionListener(listener, project);
             
             MOUSE_LISTENER_REGISTERED = true;
-            HarbourLogger.log("DocHandler", "Mouse listener registered successfully");
         } catch (Exception e) {
-            HarbourLogger.log("DocHandler", "Failed to register mouse listener: " + e.getMessage());
+            HarbourLogger.error("DocHandler", "Failed to register mouse listener: " + e.getMessage());
         }
     }
 }

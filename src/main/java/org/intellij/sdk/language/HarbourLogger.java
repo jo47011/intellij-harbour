@@ -26,8 +26,9 @@ public class HarbourLogger {
     
     // Log levels for console filtering
     public enum LogLevel {
+        TRACE,    // Discarded entirely (not written to disk) - use for per-element spam
         DEBUG,    // Only to files/IntelliJ log
-        INFO,     // Only to files/IntelliJ log  
+        INFO,     // Only to files/IntelliJ log
         WARNING,  // To console + files/IntelliJ log
         ERROR     // To console + files/IntelliJ log
     }
@@ -84,6 +85,11 @@ public class HarbourLogger {
      * @param level Log level (only WARNING/ERROR go to console)
      */
     public static void log(Project project, String componentName, String message, LogLevel level) {
+        // TRACE level is completely discarded - no file I/O, no logging at all
+        if (level == LogLevel.TRACE) {
+            return;
+        }
+
         // Get the appropriate logger
         Logger logger = Logger.getInstance(componentName);
 
@@ -165,6 +171,18 @@ public class HarbourLogger {
                 Logger.getInstance(finalComponentName).warn("Failed to write to log file: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Log a trace message - completely discarded, no I/O at all.
+     * Use for per-element/per-line verbose logging that would otherwise flood log files.
+     *
+     * @param componentName Name of the component for IntelliJ logs
+     * @param message Message to log
+     */
+    public static void trace(String componentName, String message) {
+        // Intentionally a no-op. Kept as a method so logging calls remain in the code
+        // and can be re-enabled by changing the implementation if needed.
     }
 
     /**

@@ -319,7 +319,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         JPanel excludedDirPatternsPanel = new JPanel(new BorderLayout());
         excludedDirPatternsPanel.add(
-                new JLabel("Directory patterns to exclude from indexing (e.g. backup, temp, Copy):"),
+                new JLabel("Directory patterns to exclude from indexing (e.g. backup, temp, DAT-*, Copy):"),
                 BorderLayout.NORTH
         );
         excludedDirPatternsPanel.add(excludedDirPatternsDecorator.createPanel(), BorderLayout.CENTER);

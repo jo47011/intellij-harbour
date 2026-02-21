@@ -40,6 +40,20 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     private final Map<String, PsiElement> processedElements = new HashMap<>();
     private static final String[] INCLUDE_EXTENSIONS = {".ch", ".h", ".CH", ".H"};
     private static final String COMPONENT = "GoToDeclaration";
+    private static final int MAX_LOG_TEXT_LENGTH = 50;
+
+    /**
+     * Truncate text for logging to prevent massive log entries from pasted content.
+     */
+    private static String truncateForLog(String text) {
+        if (text == null) return "NULL";
+        // Replace newlines with \n for single-line log output
+        String singleLine = text.replace("\n", "\\n").replace("\r", "");
+        if (singleLine.length() <= MAX_LOG_TEXT_LENGTH) {
+            return singleLine;
+        }
+        return singleLine.substring(0, MAX_LOG_TEXT_LENGTH) + "...(" + text.length() + " chars)";
+    }
 
     /**
      * Constructor
@@ -202,8 +216,8 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     public PsiElement @Nullable [] getGotoDeclarationTargets(@Nullable PsiElement element, int offset, Editor editor) {
         long timestamp = System.currentTimeMillis();
         
-        HarbourLogger.log(COMPONENT, ">>>>>>> HANDLER ENTRY POINT [" + timestamp + "] ELEMENT: '" + 
-                (element != null ? element.getText() : "NULL") + "' <<<<<<<");
+        HarbourLogger.log(COMPONENT, ">>>>>>> HANDLER ENTRY POINT [" + timestamp + "] ELEMENT: '" +
+                truncateForLog(element != null ? element.getText() : null) + "' <<<<<<<");
         
         processedElements.clear();
         
@@ -227,7 +241,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
 
         String osName = System.getProperty("os.name");
-        HarbourLogger.log(COMPONENT, "MAIN HANDLER: Starting getGotoDeclarationTargets for '" + element.getText() + 
+        HarbourLogger.log(COMPONENT, "MAIN HANDLER: Starting getGotoDeclarationTargets for '" + truncateForLog(element.getText()) +
                 "' class: " + element.getClass().getName() + " on " + osName);
 
         // Check if this is in a Harbour file
@@ -255,7 +269,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
             if (nextSibling != null) {
                 // Found the function/procedure name, use that instead
-                HarbourLogger.log(COMPONENT, "Found identifier after keyword: " + nextSibling.getText());
+                HarbourLogger.log(COMPONENT, "Found identifier after keyword: " + truncateForLog(nextSibling.getText()));
                 element = nextSibling;
             }
         }
@@ -277,7 +291,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
             if (nextSibling != null) {
                 // Found the class name, use that instead
-                HarbourLogger.log(COMPONENT, "Found class name after CLASS keyword: " + nextSibling.getText());
+                HarbourLogger.log(COMPONENT, "Found class name after CLASS keyword: " + truncateForLog(nextSibling.getText()));
                 element = nextSibling;
             }
         }
@@ -299,7 +313,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
             if (nextSibling != null) {
                 // Found the method name, use that instead
-                HarbourLogger.log(COMPONENT, "Found method name after METHOD keyword: " + nextSibling.getText());
+                HarbourLogger.log(COMPONENT, "Found method name after METHOD keyword: " + truncateForLog(nextSibling.getText()));
                 element = nextSibling;
             }
         }
@@ -388,14 +402,14 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         
         PsiElement propertyAccessContext = checkPropertyAccessContext(leafElement);
         if (propertyAccessContext != null) {
-            HarbourLogger.log(COMPONENT, "DEBUG: Element is part of PropertyAccess: " + propertyAccessContext.getText());
+            HarbourLogger.log(COMPONENT, "DEBUG: Element is part of PropertyAccess: " + truncateForLog(propertyAccessContext.getText()));
             HarbourLogger.log(COMPONENT, "DEBUG: PropertyAccess context class: " + propertyAccessContext.getClass().getName());
-            
+
             // Determine if we're clicking on the object part or property part
             String fullText = propertyAccessContext.getText();
             int colonPos = fullText.indexOf(':');
-            
-            HarbourLogger.log(COMPONENT, "DEBUG: Full PropertyAccess text: '" + fullText + "', colon at: " + colonPos);
+
+            HarbourLogger.log(COMPONENT, "DEBUG: Full PropertyAccess text: '" + truncateForLog(fullText) + "', colon at: " + colonPos);
             
             if (colonPos > 0) {
                 String beforeColon = fullText.substring(0, colonPos);
@@ -977,6 +991,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     GlobalSearchScope.projectScope(project));
                     
                 for (VirtualFile vFile : allFiles) {
+                    if (HarbourFileUtils.isFileExcluded(project, vFile)) {
+                        continue;
+                    }
                     PsiFile psiFile = PsiManager.getInstance(project).findFile(vFile);
                     if (psiFile != null) {
                         String fileText = psiFile.getText();
@@ -1093,7 +1110,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         HarbourLogger.log(COMPONENT, "FINAL SEARCH RESULT: Found " + foundElements.size() + " elements for: " + identifierName);
         for (int i = 0; i < Math.min(foundElements.size(), 5); i++) {
             PsiElement elem = foundElements.get(i);
-            HarbourLogger.log(COMPONENT, "  Element " + i + ": " + elem.getText() + " in " + 
+            HarbourLogger.log(COMPONENT, "  Element " + i + ": " + truncateForLog(elem.getText()) + " in " +
                     (elem.getContainingFile() != null ? elem.getContainingFile().getName() : "unknown"));
         }
         
@@ -1172,7 +1189,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                         // Uses the enhanced isTextMatching method for proper METHOD handling
                         if (!isTextMatching(foundElement, identifierName)) {
                             HarbourLogger.log(COMPONENT, "Skipping element with non-matching text: " +
-                                    foundElement.getText() + " vs " + identifierName);
+                                    truncateForLog(foundElement.getText()) + " vs " + identifierName);
                             continue;
                         }
 
@@ -1218,7 +1235,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
 
                         // Determine if this is a function/procedure/method definition
                         if (containingFile.getName().equals("user.prg") && lineNumber == 136) {
-                            HarbourLogger.log(COMPONENT, "PRE-DEFINITION CHECK: About to check line 136 in user.prg -> Element: '" + foundElement.getText() + "' Context: '" + context + "'");
+                            HarbourLogger.log(COMPONENT, "PRE-DEFINITION CHECK: About to check line 136 in user.prg -> Element: '" + truncateForLog(foundElement.getText()) + "' Context: '" + context + "'");
                         }
                         boolean isDefinition = isDefinitionElement(foundElement, context);
                         if (containingFile.getName().equals("user.prg") && lineNumber == 136) {
@@ -1301,7 +1318,10 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                             HarbourLogger.log(COMPONENT, "Reached file limit in fallback search");
                             break;
                         }
-                        
+                        if (HarbourFileUtils.isFileExcluded(project, virtualFile)) {
+                            continue;
+                        }
+
                         try {
                             PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
                             if (psiFile != null) {
@@ -1710,7 +1730,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             int lineNumber = HarbourLogger.calculateLineNumber(element);
             if (lineNumber == 136) {
                 String lineText = getLineText(element.getContainingFile(), element);
-                HarbourLogger.log(COMPONENT, "isDefinitionElement CALLED: Line 136 in user.prg -> Element: '" + element.getText() + "' Context: '" + context + "' LineText: '" + lineText + "'");
+                HarbourLogger.log(COMPONENT, "isDefinitionElement CALLED: Line 136 in user.prg -> Element: '" + truncateForLog(element.getText()) + "' Context: '" + context + "' LineText: '" + truncateForLog(lineText) + "'");
             }
         }
         
@@ -2450,6 +2470,9 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
                     Pattern.CASE_INSENSITIVE);
 
             for (VirtualFile virtualFile : virtualFiles) {
+                if (HarbourFileUtils.isFileExcluded(project, virtualFile)) {
+                    continue;
+                }
                 try {
                     PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
                     if (psiFile == null) continue;
@@ -2538,12 +2561,12 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
     private String getElementContext(PsiElement element) {
         if (element instanceof HarbourFunctionDeclaration) {
             return "PROCEDURE '" + ((HarbourFunctionDeclaration)element).getName() + "' - context: '" +
-                    element.getText().split("\n")[0] + "'";
+                    truncateForLog(element.getText().split("\n")[0]) + "'";
         }
 
         // For function calls
         if (element instanceof FunctionCallImpl) {
-            return "Function call: " + element.getText();
+            return "Function call: " + truncateForLog(element.getText());
         }
 
         // For class declarations
@@ -2571,7 +2594,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             PsiElement parent = element.getParent();
             if (parent instanceof HarbourFunctionDeclaration) {
                 return "PROCEDURE '" + ((HarbourFunctionDeclaration)parent).getName() + "' - context: '" +
-                        parent.getText().split("\n")[0] + "'";
+                        truncateForLog(parent.getText().split("\n")[0]) + "'";
             }
 
             if (parent instanceof ClassDeclaration) {
@@ -2580,7 +2603,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
         }
 
         // Default
-        return element.getText();
+        return truncateForLog(element.getText());
     }
 
     /**
@@ -3185,7 +3208,7 @@ public class HarbourGoToDeclarationHandler implements GotoDeclarationHandler {
             return null;
         }
         
-        HarbourLogger.log(COMPONENT, "DEBUG-PA: Checking PropertyAccess context for: " + element.getText() + 
+        HarbourLogger.log(COMPONENT, "DEBUG-PA: Checking PropertyAccess context for: " + truncateForLog(element.getText()) +
                          " (class: " + element.getClass().getSimpleName() + ")");
         
         // Look at the parent and siblings to see if we're in a PropertyAccess pattern
