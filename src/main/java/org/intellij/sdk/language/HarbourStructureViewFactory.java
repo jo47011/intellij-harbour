@@ -50,7 +50,7 @@ public class HarbourStructureViewFactory implements PsiStructureViewFactory {
 
     // Register file editor manager listener to handle lifecycle events
     public static void registerDisposableListeners(Project project) {
-        project.getMessageBus().connect().subscribe(
+        project.getMessageBus().connect(project).subscribe(
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 new FileEditorManagerListener() {
                     @Override

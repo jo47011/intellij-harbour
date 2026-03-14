@@ -121,7 +121,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         this.breakpointHandler = new HarbourDebuggerBreakpointHandler(this);
         
         // Set up listener for proper breakpoint timing
-        project.getMessageBus().connect().subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
+        project.getMessageBus().connect(project).subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
             @Override
             public void processStarted(@NotNull XDebugProcess debugProcess) {
                 if (debugProcess == HarbourDebuggerRemoteProcess.this) {

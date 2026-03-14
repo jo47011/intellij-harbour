@@ -1512,7 +1512,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
          * Set up listener to automatically connect to debugging sessions
          */
         private void setupDebugSessionListener() {
-            project.getMessageBus().connect().subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
+            project.getMessageBus().connect(project).subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
                 @Override
                 public void processStarted(@NotNull XDebugProcess debugProcess) {
                     // Check if this is a Harbour debug process
