@@ -55,6 +55,7 @@ STATIC t_oDebugInfo
 STATIC s_lSocketEnabled := .T.  // Socket communication enabled for debugger breakpoints
 STATIC s_lThisProcessConnected := .F.  // Track if THIS process successfully connected to debugger
 STATIC s_aTracepoints := {}  // Array of {varName, lastValue} for data breakpoints
+STATIC s_lSkipNextStop := .F.  // Prevent double-stop when both SHOWLINE+ACTIVATE fire
 
 // Debug logging function - writes to .hbmk/debug.log
 STATIC PROCEDURE LogDebugInfo(cMessage)
@@ -628,29 +629,33 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
                   lNeedExit := .T.
+                  s_lSkipNextStop := .T.
                   LogDebugInfo("GO received - lRunning=.T., breakpoints=" + ;
                      AllTrim(Str(Len(oDebugInfo["aBreaks"]))))
-                  
+
                CASE tmp == "STEP"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
                   lNeedExit := .T.
-                  
+                  s_lSkipNextStop := .T.
+
                CASE tmp == "NEXT"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"]
                   lStopSent := .F.
                   lNeedExit := .T.
-                  
+                  s_lSkipNextStop := .T.
+
                CASE tmp == "OUT"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"] - 1
                   lStopSent := .F.
                   lNeedExit := .T.
+                  s_lSkipNextStop := .T.
                   
                CASE tmp == "EXIT"
                   oDebugInfo["lRunning"] := .T.
@@ -812,8 +817,11 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       
       // Check if we should stop
       IF oDebugInfo["lRunning"]
-         // Single step mode
-         IF oDebugInfo["lSingleStep"]
+         // After GO/STEP/NEXT/OUT, skip the next stop check to prevent
+         // double-stop when both SHOWLINE and ACTIVATE fire for same line
+         IF s_lSkipNextStop
+            s_lSkipNextStop := .F.
+         ELSEIF oDebugInfo["lSingleStep"]
             // Check step-over level restrictions
             IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] > 0 .AND. oDebugInfo["__dbgEntryLevel"] > oDebugInfo["maxLevel"]
                BREAK
