@@ -626,11 +626,13 @@ STATIC PROCEDURE CheckSocket(lStopSent)
             DO CASE
                CASE tmp == "GO"
                   oDebugInfo["lRunning"] := .T.
+                  oDebugInfo["lSingleStep"] := .F.
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
                   lNeedExit := .T.
                   s_lSkipNextStop := .T.
-                  LogDebugInfo("GO received - lRunning=.T., breakpoints=" + ;
+                  LogDebugInfo("GO received - lRunning=.T." + ;
+                     ", singleStep=.F., breaks=" + ;
                      AllTrim(Str(Len(oDebugInfo["aBreaks"]))))
 
                CASE tmp == "STEP"
@@ -817,24 +819,30 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       
       // Check if we should stop
       IF oDebugInfo["lRunning"]
-         // After GO/STEP/NEXT/OUT, skip the next stop check to prevent
+         // After GO/STEP/NEXT/OUT, skip the step check once to prevent
          // double-stop when both SHOWLINE and ACTIVATE fire for same line
-         IF s_lSkipNextStop
+         // NOTE: Breakpoints are ALWAYS checked regardless of skip flag
+         IF s_lSkipNextStop .AND. oDebugInfo["lSingleStep"]
+            // Skip only the step check (not breakpoints)
             s_lSkipNextStop := .F.
          ELSEIF oDebugInfo["lSingleStep"]
             // Check step-over level restrictions
-            IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] > 0 .AND. oDebugInfo["__dbgEntryLevel"] > oDebugInfo["maxLevel"]
+            IF !Empty(oDebugInfo["maxLevel"]) .AND. ;
+               oDebugInfo["maxLevel"] > 0 .AND. ;
+               oDebugInfo["__dbgEntryLevel"] > oDebugInfo["maxLevel"]
                BREAK
             ENDIF
-            
+
             oDebugInfo["lSingleStep"] := .F.
             oDebugInfo["lRunning"] := .F.
-            
+
             // Clear step-over state if back at same/higher level
-            IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] > 0 .AND. oDebugInfo["__dbgEntryLevel"] <= oDebugInfo["maxLevel"]
+            IF !Empty(oDebugInfo["maxLevel"]) .AND. ;
+               oDebugInfo["maxLevel"] > 0 .AND. ;
+               oDebugInfo["__dbgEntryLevel"] <= oDebugInfo["maxLevel"]
                oDebugInfo["maxLevel"] := NIL
             ENDIF
-            
+
             IF !lStopSent
                // Get current file and line
                cCurrentFile := ""
@@ -846,18 +854,25 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                ELSE
                   FOR i := 2 TO 5
                      cCurrentFile := ProcFile(i)
-                     IF !Empty(cCurrentFile) .AND. !("harbour_debug" $ Lower(cCurrentFile))
+                     IF !Empty(cCurrentFile) .AND. ;
+                        !("harbour_debug" $ Lower(cCurrentFile))
                         nCurrentLine := ProcLine(i)
                         EXIT
                      ENDIF
                   NEXT
                ENDIF
-               hb_inetSend(oDebugInfo["socket"], "STOP:step:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+               hb_inetSend(oDebugInfo["socket"], ;
+                  "STOP:step:" + cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)) + CRLF)
                lStopSent := .T.
             ENDIF
-            
-         // Check for breakpoints
-         ELSEIF InBreakpoint()
+         ENDIF
+
+         // Always clear skip flag (even if not consumed by step check)
+         s_lSkipNextStop := .F.
+
+         // Always check breakpoints (highest priority after step)
+         IF oDebugInfo["lRunning"] .AND. InBreakpoint()
             oDebugInfo["lRunning"] := .F.
             IF !lStopSent
                // Get current file and line
@@ -870,18 +885,23 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                ELSE
                   FOR i := 2 TO 5
                      cCurrentFile := ProcFile(i)
-                     IF !Empty(cCurrentFile) .AND. !("harbour_debug" $ Lower(cCurrentFile))
+                     IF !Empty(cCurrentFile) .AND. ;
+                        !("harbour_debug" $ Lower(cCurrentFile))
                         nCurrentLine := ProcLine(i)
                         EXIT
                      ENDIF
                   NEXT
                ENDIF
-               LogDebugInfo("Sending STOP:break:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
-               hb_inetSend(oDebugInfo["socket"], "STOP:break:" + cCurrentFile + ":" + ;
+               LogDebugInfo("Sending STOP:break:" + ;
+                  cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)))
+               hb_inetSend(oDebugInfo["socket"], ;
+                  "STOP:break:" + cCurrentFile + ":" + ;
                   AllTrim(Str(nCurrentLine)) + CRLF)
                lStopSent := .T.
             ELSE
-               LogDebugInfo("InBreakpoint returned .T. but lStopSent already .T. - skipping")
+               LogDebugInfo("InBreakpoint .T. but " + ;
+                  "lStopSent already .T. - skipping")
             ENDIF
          ENDIF
          
@@ -913,11 +933,10 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDIF
 
          // Check for tracepoints (data breakpoints - watch variable changes)
-         LogDebugInfo("Tracepoint check: lRunning=" + IIF(oDebugInfo["lRunning"], "T", "F") + ;
-                      ", s_aTracepoints len=" + AllTrim(Str(Len(s_aTracepoints))))
          IF oDebugInfo["lRunning"] .AND. !Empty(s_aTracepoints)
-            // Only check tracepoints if we're still running (not stopped by breakpoint/step)
-            LogDebugInfo("  -> Calling CheckTracepoints()")
+            // Only check tracepoints if we're still running
+            LogDebugInfo("Tracepoint check: calling " + ;
+               "CheckTracepoints()")
             IF CheckTracepoints()
                // Tracepoint hit - stop execution
                oDebugInfo["lRunning"] := .F.

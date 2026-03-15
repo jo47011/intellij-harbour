@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.1.48'
+version = '1.1.57'
 
 repositories {
     mavenCentral()
@@ -81,6 +81,7 @@ intellijPlatform {
     instrumentCode = false
 
     pluginConfiguration {
+        name.set("Harbour Language Support v${project.version}")
         version.set(project.version)
         ideaVersion {
             sinceBuild.set("233")
