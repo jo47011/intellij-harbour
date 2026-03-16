@@ -87,6 +87,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile boolean expectingStackForPosition = false;
     private volatile String lastStopFile = null;
     private volatile int lastStopLine = -1;
+    private volatile long lastStopTime = 0;
 
     // Track variable scope completion for synchronized UI update
     private final Set<String> receivedVariableScopes = Collections.synchronizedSet(new HashSet<>());
@@ -377,17 +378,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                 String file = parts[2];
                                 int line = Integer.parseInt(parts[3].trim());
                                 
-                                // Check if this is a breakpoint hit that needs condition evaluation
-                                if ("break".equals(reason)) {
-                                    // Store the conditional breakpoint info for later evaluation
+                                // Check if this is a conditional breakpoint
+                                if ("break".equals(reason) &&
+                                        hasConditionalBreakpoint(file, line)) {
                                     conditionalBreakpointFile = file;
                                     conditionalBreakpointLine = line;
-                                    // Handle the stop to collect variables first, then evaluate condition
-                                    handleStop(file, line);
-                                } else {
-                                    // Non-breakpoint stop (AltD, step, etc.)
-                                    handleStop(file, line);
                                 }
+                                handleStop(file, line);
                             } catch (NumberFormatException e) {
                                 HarbourLogger.log(project, "HarbourDebuggerRemoteProcess", "Invalid line number in STOP command: " + parts[3]);
                             }
@@ -823,6 +820,15 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     private void handleStop(String file, int line) {
+        // Duplicate STOP suppression: ignore same file:line within 100ms
+        long now = System.currentTimeMillis();
+        if (file.equals(lastStopFile) && line == lastStopLine &&
+                (now - lastStopTime) < 100) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Suppressing duplicate STOP for " + file + ":" + line);
+            return;
+        }
+
         currentFile = file;
         currentLine = line;
 
@@ -833,11 +839,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         abortVariableWait = false;
 
         // Set flags to track STACK and variable scope arrivals
-        expectingStackForPosition = true;
         waitingForVariables = true;
         receivedVariableScopes.clear();
         lastStopFile = file;
         lastStopLine = line;
+        lastStopTime = now;
 
         // Request stack trace for call stack panel AND position verification
         sendCommand("STACK");
@@ -848,19 +854,53 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         sendCommand("PRIVATES", "0");
         sendCommand("PUBLICS");
 
-        // Start timeout thread to show position if STACK doesn't arrive
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            try {
-                Thread.sleep(1000);  // Wait 1 second for STACK
-            } catch (InterruptedException e) {
-                // Interrupted, that's fine
-            }
-            // If we still haven't shown position, do it now with STOP data
-            if (expectingStackForPosition) {
-                expectingStackForPosition = false;
-                showPositionInUI(file, line);
-            }
-        });
+        // Check if this is a conditional breakpoint that needs evaluation
+        if (conditionalBreakpointFile != null &&
+                conditionalBreakpointLine >= 0) {
+            final String cbFile = conditionalBreakpointFile;
+            final int cbLine = conditionalBreakpointLine;
+            // Don't let STACK auto-trigger showPositionInUI
+            expectingStackForPosition = false;
+
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                // Wait for variables to arrive (needed for condition eval)
+                waitForVariables(2000);
+
+                boolean shouldStop =
+                    shouldStopAtConditionalBreakpoint(cbFile, cbLine);
+                conditionalBreakpointFile = null;
+                conditionalBreakpointLine = -1;
+
+                if (shouldStop) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Conditional BP met at " + cbFile + ":" + cbLine);
+                    showPositionInUI(file, line);
+                } else {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Conditional BP NOT met at " +
+                        cbFile + ":" + cbLine + ", continuing");
+                    updateDebuggerState(DebuggerState.RUNNING, false);
+                    sendCommand("GO");
+                }
+            });
+        } else {
+            // Normal (non-conditional) stop
+            expectingStackForPosition = true;
+
+            // Start timeout thread to show position if STACK doesn't arrive
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                try {
+                    Thread.sleep(1000);  // Wait 1 second for STACK
+                } catch (InterruptedException e) {
+                    // Interrupted, that's fine
+                }
+                // If we still haven't shown position, do it now with STOP data
+                if (expectingStackForPosition) {
+                    expectingStackForPosition = false;
+                    showPositionInUI(file, line);
+                }
+            });
+        }
 
         // Note: We'll show UI when STACK arrives (fast), but variables will load async
         // HarbourDebuggerStackFrame.computeChildren() will wait for variables if needed
@@ -2325,6 +2365,37 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
      */
     public DebuggerState getDebuggerState() {
         return debuggerState;
+    }
+
+    /**
+     * Quick check if a breakpoint at file:line has any condition or hit condition.
+     */
+    private boolean hasConditionalBreakpoint(String file, int line) {
+        if (breakpointHandler == null) return false;
+        for (var bp : breakpointHandler.getRegisteredBreakpoints()) {
+            if (bp.getSourcePosition() != null) {
+                String bpFile = bp.getSourcePosition().getFile().getName();
+                int bpLine = bp.getSourcePosition().getLine() + 1;
+                if (bpFile.equalsIgnoreCase(file) && bpLine == line) {
+                    HarbourDebuggerBreakpointProperties props =
+                        bp.getProperties();
+                    if (props != null &&
+                            (props.hasCondition() ||
+                             props.hasHitCondition())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Also check with path-stripped filename
+        String stripped = file;
+        int idx = Math.max(stripped.lastIndexOf('/'),
+                           stripped.lastIndexOf('\\'));
+        if (idx >= 0) stripped = stripped.substring(idx + 1);
+        if (!stripped.equals(file)) {
+            return hasConditionalBreakpoint(stripped, line);
+        }
+        return false;
     }
 
     /**

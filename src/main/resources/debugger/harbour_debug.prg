@@ -85,11 +85,19 @@ STATIC FUNCTION KeyboardFilter(nKey)
    // Check for Alt-D (K_ALT_D = 288)
    IF nKey == 288
       oDebugInfo := __DEBUGITEM()
-      IF oDebugInfo["socket"] != NIL
-         // Trigger debugger break
+      IF oDebugInfo["socket"] != NIL .AND. oDebugInfo["lRunning"]
          oDebugInfo["lRunning"] := .F.
-         LogDebugInfo("Alt-D intercepted - triggering debug break")
-         // Return 0 to consume the key (don't pass to application)
+         LogDebugInfo("Alt-D intercepted - sending STOP:AltD")
+         // Send STOP to IDE so it knows we're paused
+         IF Len(oDebugInfo["aStack"]) > 0
+            hb_inetSend(oDebugInfo["socket"], ;
+               "STOP:AltD:" + ;
+               ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE] + ;
+               ":" + ;
+               AllTrim(Str( ;
+               ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE])) + ;
+               CRLF)
+         ENDIF
          RETURN 0
       ENDIF
    ENDIF
@@ -381,10 +389,24 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       
       // Check socket and process commands if enabled
       IF s_lSocketEnabled
-         IF lAltDInvoked
+         IF lAltDInvoked .AND. ;
+            !Empty(oDebugInfo["socket"]) .AND. ;
+            oDebugInfo["lRunning"]
+            // Alt-D detected: send STOP immediately, then enter command loop
             oDebugInfo["lRunning"] := .F.
+            IF Len(oDebugInfo["aStack"]) > 0
+               hb_inetSend(oDebugInfo["socket"], ;
+                  "STOP:AltD:" + ;
+                  ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE] + ;
+                  ":" + ;
+                  AllTrim(Str( ;
+                  ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE])) + ;
+                  CRLF)
+            ENDIF
+            CheckSocket(.T.)
+         ELSE
+            CheckSocket(.F.)
          ENDIF
-         CheckSocket(.F.)
       ENDIF
       
    CASE nMode == HB_DBG_ACTIVATE
@@ -602,10 +624,9 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    
    // Main command loop - wait forever (timeout removed as requested)
    DO WHILE .T.
-      // Removed loop counter - debugger will wait forever
-      
-      
-      IF Empty(oDebugInfo["socket"]) .OR. hb_inetErrorCode(oDebugInfo["socket"]) != 0
+
+      IF Empty(oDebugInfo["socket"]) .OR. ;
+         hb_inetErrorCode(oDebugInfo["socket"]) != 0
          RemoveKeyboardFilter()
          oDebugInfo["socket"] := NIL
          oDebugInfo["lRunning"] := .T.
@@ -613,7 +634,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          oDebugInfo["maxLevel"] := NIL
          BREAK
       ENDIF
-      
+
       DO WHILE hb_inetDataReady(oDebugInfo["socket"]) == 1
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
          
@@ -1335,7 +1356,7 @@ STATIC FUNCTION InBreakpoint()
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL cFile := ""
    LOCAL nLine := 0
-   LOCAL cKey, i, aStack
+   LOCAL cKey, i, aStack, cBpKey
    LOCAL lResult := .F.
    LOCAL nBreakCount
 
@@ -1371,8 +1392,17 @@ STATIC FUNCTION InBreakpoint()
    // Check if this file:line has a breakpoint
    IF hb_HHasKey(oDebugInfo["aBreaks"], cKey)
       lResult := .T.
-      LogDebugInfo("InBreakpoint: HIT at " + cKey + " (breakpoints registered: " + ;
-         AllTrim(Str(nBreakCount)) + ")")
+      LogDebugInfo("InBreakpoint: HIT at " + cKey + ;
+         " (breaks=" + AllTrim(Str(nBreakCount)) + ")")
+   ELSEIF nBreakCount > 0
+      // Log near-misses: when file matches a breakpoint file
+      FOR EACH cBpKey IN hb_HKeys(oDebugInfo["aBreaks"])
+         IF cFile $ cBpKey
+            LogDebugInfo("InBreakpoint: MISS at " + ;
+               cKey + " (have " + cBpKey + ")")
+            EXIT
+         ENDIF
+      NEXT
    ENDIF
 
 RETURN lResult
