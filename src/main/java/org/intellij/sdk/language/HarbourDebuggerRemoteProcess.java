@@ -2571,10 +2571,24 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     String expectedValue = parts[1].trim();
                     return evaluateComparison(varName, expectedValue, "<");
                 }
+            } else if (condition.contains("=")) {
+                // Single = is Harbour's equality operator (checked last
+                // after ==, !=, >=, <= which all contain =)
+                String[] parts = condition.split("=", 2);
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    HarbourLogger.log(project, "HarbourDebugger",
+                        "EVAL DEBUG: Single '=' operator: '" +
+                        varName + "' = '" + expectedValue + "'");
+                    return evaluateComparison(
+                        varName, expectedValue, "==");
+                }
             }
-            
-            HarbourLogger.log(project, "HarbourDebugger", 
-                "Unsupported condition format: " + condition + " - defaulting to true");
+
+            HarbourLogger.log(project, "HarbourDebugger",
+                "Unsupported condition format: " + condition +
+                " - defaulting to true");
             return true;
             
         } catch (Exception e) {
