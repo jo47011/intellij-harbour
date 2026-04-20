@@ -135,5 +135,23 @@ public class OperatorSplitTest {
         for (String line : formatted.split("\n")) {
             assertTrue("Line should be <= 99 chars: " + line.length() + " chars", line.length() <= 99);
         }
+
+        // Idempotency: formatting the output again must produce the same result
+        String prev = formatted;
+        for (int pass = 2; pass <= 5; pass++) {
+            String reformatted = processor.formatHarbourCodeWithDefaults(prev, 99);
+            // Debug: show each pass
+            if (!prev.equals(reformatted)) {
+                System.out.println("=== PASS " + pass + " DIFFERS ===");
+                System.out.println("IN:");
+                for (String l : prev.split("\n"))
+                    System.out.printf("  (%3d) |%s|%n", l.length(), l);
+                System.out.println("OUT:");
+                for (String l : reformatted.split("\n"))
+                    System.out.printf("  (%3d) |%s|%n", l.length(), l);
+            }
+            assertEquals("Pass " + pass + " must be identical to previous pass", prev, reformatted);
+            prev = reformatted;
+        }
     }
 }

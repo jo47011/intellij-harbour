@@ -2739,6 +2739,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // This keeps as much of the GET clause as possible on the first line
         // Prefer 'when' over 'valid' since it usually comes later and keeps more together
         boolean preferGetClauseBreak = false;
+        boolean useSameIndentForContinuation = false;
         String contentLowerForGet = content.toLowerCase();
         if (contentLowerForGet.contains(" get ")) {
             // Look for valid/when keywords as preferred break points
@@ -2756,7 +2757,6 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
         // Also handle continuation lines: "valid ... when ..." should break before "when"
         // Use same indent level (not deeper) since valid/when are siblings in GET syntax
-        boolean useSameIndentForContinuation = false;
         if (!preferGetClauseBreak && contentLowerForGet.startsWith("valid ") && contentLowerForGet.contains(" when ")) {
             int whenPos = contentLowerForGet.indexOf(" when ");
             if (whenPos > 0 && whenPos <= maxPos) {
@@ -3024,6 +3024,42 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             if (lastLogical > 0 && lastLogical >= bestBreakPos) {
                 bestBreakPos = lastLogical;
                 log("Using logical operator break at " + lastLogical + " (over space at " + lastSpace + ")");
+            }
+        }
+
+        // Last resort: if NO break point found at all, scan full content for
+        // .and./.or. that starts within maxPos but extends past it, and break
+        // BEFORE the operator. This handles lines where a long string pushes
+        // the operator right to the boundary (e.g. GET/when with long Message).
+        if (bestBreakPos <= 0 && !preferGetClauseBreak && lastLogical <= 0) {
+            String scanLower = content.toLowerCase();
+            for (String op : new String[]{".and.", ".or."}) {
+                int pos = scanLower.indexOf(op);
+                while (pos >= 0) {
+                    int opEnd = pos + op.length();
+                    // Operator starts at or before maxPos but extends past it
+                    if (pos <= maxPos && opEnd > maxPos) {
+                        // Verify not inside a string
+                        boolean inStr = false;
+                        char strDlm = 0;
+                        for (int j = 0; j < pos; j++) {
+                            char c = content.charAt(j);
+                            if ((c == '"' || c == '\'') &&
+                                    (j == 0 || content.charAt(j - 1) != '\\')) {
+                                if (!inStr) { inStr = true; strDlm = c; }
+                                else if (c == strDlm) { inStr = false; }
+                            }
+                        }
+                        if (!inStr) {
+                            bestBreakPos = pos;
+                            log("Last resort: breaking before " + op +
+                                " at " + pos + " (extends past maxPos)");
+                            break;
+                        }
+                    }
+                    pos = scanLower.indexOf(op, pos + 1);
+                }
+                if (bestBreakPos > 0) break;
             }
         }
 
