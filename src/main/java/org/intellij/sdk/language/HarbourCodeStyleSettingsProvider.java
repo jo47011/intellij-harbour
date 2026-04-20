@@ -50,6 +50,7 @@ public class HarbourCodeStyleSettingsProvider extends CodeStyleSettingsProvider 
         protected void initTabs(CodeStyleSettings settings) {
             addIndentOptionsTab(settings);
             addTab(new HarbourWrappingAndBracesPanel(settings));
+            addTab(new HarbourSpacesPanel(settings));
             addTab(new HarbourFormattingPanel(settings));
         }
     }

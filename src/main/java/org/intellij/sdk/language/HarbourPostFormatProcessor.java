@@ -387,7 +387,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      * Public formatting method with default settings - for testing and CLI usage
      */
     public String formatHarbourCodeWithDefaults(String text, int lineBreakPosition) {
-        return formatHarbourCodeInternal(text, lineBreakPosition, 0, 0, 0, 0, 0, 0, true);
+        return formatHarbourCodeInternal(text, lineBreakPosition, 0, 0, 0, 0, 0, 0, true,
+                true, false, true, true, true, false, true);
     }
 
     /**
@@ -397,7 +398,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         return formatHarbourCodeInternal(text, lineBreakPosition,
                 settings.LOCAL_INDENT, settings.RETURN_INDENT, settings.DATA_INDENT,
                 settings.METHOD_INDENT, settings.MEMVAR_INDENT, settings.PRIVATE_INDENT,
-                settings.SEQUENCE_LIKE_NORMAL_CODE);
+                settings.SEQUENCE_LIKE_NORMAL_CODE,
+                settings.SPACE_AFTER_COMMA, settings.SPACE_BEFORE_COMMA,
+                settings.SPACE_AROUND_ADDITIVE_OPERATORS, settings.SPACE_AROUND_MULTIPLICATIVE_OPERATORS,
+                settings.SPACE_AROUND_COMPARISON_OPERATORS, settings.SPACE_AROUND_ASSIGNMENT_OPERATOR,
+                settings.SPACE_AROUND_LOGICAL_OPERATORS);
     }
 
     /**
@@ -405,12 +410,51 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private String formatHarbourCodeInternal(String text, int lineBreakPosition,
             int localIndent, int returnIndent, int dataIndent, int methodIndent,
-            int memvarIndent, int privateIndent, boolean sequenceLikeNormalCode) {
+            int memvarIndent, int privateIndent, boolean sequenceLikeNormalCode,
+            boolean spaceAfterComma, boolean spaceBeforeComma,
+            boolean spaceAroundAdditive, boolean spaceAroundMultiplicative,
+            boolean spaceAroundComparison, boolean spaceAroundAssignment,
+            boolean spaceAroundLogical) {
         // Normalize line endings - handle Windows CRLF by removing CR characters
         // This prevents off-by-one errors in indent calculation when lines end with \r
         boolean hadCRLF = text.contains("\r\n");
         String normalizedText = text.replace("\r\n", "\n").replace("\r", "\n");
-        String[] lines = normalizedText.split("\n", -1);
+        String[] rawLines = normalizedText.split("\n", -1);
+
+        // Pre-processing: apply spacing normalization to each line before joining/wrapping
+        // This ensures consistent line lengths for all subsequent decisions
+        boolean inPreBlockComment = false;
+        boolean inPreFmtOff = false;
+        String[] lines = new String[rawLines.length];
+        for (int li = 0; li < rawLines.length; li++) {
+            String rawLine = rawLines[li];
+            String trimmed = rawLine.trim();
+
+            // Track fmt:off/on
+            if (trimmed.toLowerCase().contains("fmt:off")) inPreFmtOff = true;
+            if (trimmed.toLowerCase().contains("fmt:on")) inPreFmtOff = false;
+
+            // Track block comments
+            if (trimmed.startsWith("/*")) inPreBlockComment = true;
+            if (trimmed.endsWith("*/")) { inPreBlockComment = false; lines[li] = rawLine; continue; }
+
+            // Skip spacing in comments, fmt:off blocks, and empty lines
+            if (inPreFmtOff || inPreBlockComment || trimmed.isEmpty() ||
+                trimmed.startsWith("//") || trimmed.startsWith("*")) {
+                lines[li] = rawLine;
+                continue;
+            }
+
+            // Preserve indent, normalize spacing in content only
+            int contentStart = rawLine.indexOf(trimmed);
+            String indent = contentStart > 0 ? rawLine.substring(0, contentStart) : "";
+            String normalizedContent = normalizeLineSpacing(trimmed,
+                spaceAfterComma, spaceBeforeComma,
+                spaceAroundAdditive, spaceAroundMultiplicative,
+                spaceAroundComparison, spaceAroundAssignment, spaceAroundLogical);
+            lines[li] = indent + normalizedContent;
+        }
+
         StringBuilder result = new StringBuilder(text.length());
 
         int indentLevel = 0;
@@ -1376,8 +1420,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
             }
 
-            // Processed line with proper indent
-            String processedLine = newIndent + processedContent.toString();
+            // Processed line with proper indent — also normalize spacing for consistency
+            // (pre-processing handles input lines, this handles wrapping output)
+            String contentStr = processedContent.toString();
+            if (!inFmtOffBlock && !contentStr.trim().startsWith("//") &&
+                !contentStr.trim().startsWith("/*") && !contentStr.trim().startsWith("*")) {
+                contentStr = normalizeLineSpacing(contentStr,
+                    spaceAfterComma, spaceBeforeComma,
+                    spaceAroundAdditive, spaceAroundMultiplicative,
+                    spaceAroundComparison, spaceAroundAssignment, spaceAroundLogical);
+            }
+            String processedLine = newIndent + contentStr;
 
             // EARLY CHECK: If this line has manual continuation OR is part of a continuation block, preserve it
             String checkTrimmed = processedLine.trim();
@@ -1644,13 +1697,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     shouldKeepManualContinuation = true;
                     log("Keeping manual continuation - has inline comment");
                 } else {
-                    // Check if line (without comment) fits
-                    String lineForCheck = processedLine.trim();
-                    if (lineForCheck.length() <= lineBreakPosition) {
+                    // Check if full line (with indent) fits within the limit
+                    if (processedLine.length() <= lineBreakPosition) {
                         shouldKeepManualContinuation = true;
-                        log("Keeping manual continuation - line fits: " + lineForCheck.length() + " <= " + lineBreakPosition);
+                        log("Keeping manual continuation - line fits: " + processedLine.length() + " <= " + lineBreakPosition);
                     } else {
-                        log("NOT keeping manual continuation - line too long: " + lineForCheck.length() + " > " + lineBreakPosition);
+                        log("NOT keeping manual continuation - line too long: " + processedLine.length() + " > " + lineBreakPosition);
                     }
                 }
 
@@ -1813,8 +1865,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         // Check if this line already has a line continuation semicolon
-        // If it does, don't break it further as it's already been manually formatted
-        if (line.trim().endsWith(";")) {
+        // If it does and fits within the limit, don't break it further
+        if (line.trim().endsWith(";") && line.length() <= lineBreakPosition) {
             result.add(line);
             return result;
         }
@@ -2703,12 +2755,15 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
         }
         // Also handle continuation lines: "valid ... when ..." should break before "when"
+        // Use same indent level (not deeper) since valid/when are siblings in GET syntax
+        boolean useSameIndentForContinuation = false;
         if (!preferGetClauseBreak && contentLowerForGet.startsWith("valid ") && contentLowerForGet.contains(" when ")) {
             int whenPos = contentLowerForGet.indexOf(" when ");
             if (whenPos > 0 && whenPos <= maxPos) {
                 log("GET clause continuation: preferring break before 'when' at position " + whenPos);
                 bestBreakPos = whenPos + 1;
                 preferGetClauseBreak = true;
+                useSameIndentForContinuation = true;
             }
         }
 
@@ -3374,7 +3429,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 remaining = remaining.substring(1);
             }
 
-            String continuationIndent = indent + " ".repeat(indentSize);
+            // For GET clause siblings (valid/when), use same indent; otherwise add indentSize
+            String continuationIndent = useSameIndentForContinuation
+                ? indent : indent + " ".repeat(indentSize);
 
             // Check if the remaining line is still too long
             if (continuationIndent.length() + remaining.length() > maxLen) {
@@ -3904,6 +3961,336 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // }
 
         return result;
+    }
+
+    /**
+     * Normalize spacing in a single line of code content (without leading indent).
+     * Handles commas and operators while respecting strings, comments, and Harbour-specific syntax.
+     *
+     * Protected operators that must NEVER get spaces added:
+     * - -> (alias operator: TABLE->Field)
+     * - : (send operator: obj:method)
+     * - := when spaceAroundAssignment is false
+     * - Unary minus/plus (prefix operators)
+     */
+    private String normalizeLineSpacing(String content,
+            boolean spaceAfterComma, boolean spaceBeforeComma,
+            boolean spaceAroundAdditive, boolean spaceAroundMultiplicative,
+            boolean spaceAroundComparison, boolean spaceAroundAssignment,
+            boolean spaceAroundLogical) {
+
+        if (content.isEmpty()) return content;
+
+        StringBuilder result = new StringBuilder(content.length() + 32);
+        boolean inString = false;
+        char stringDelim = 0;
+        int len = content.length();
+
+        for (int i = 0; i < len; i++) {
+            char c = content.charAt(i);
+
+            // Track string state — toggle on matching quote (not escaped)
+            if ((c == '"' || c == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
+                if (!inString) {
+                    inString = true;
+                    stringDelim = c;
+                } else if (c == stringDelim) {
+                    inString = false;
+                }
+                result.append(c);
+                continue;
+            }
+
+            // Inside string — pass through unchanged
+            if (inString) {
+                result.append(c);
+                continue;
+            }
+
+            // Inline comment — pass through rest of line unchanged
+            if (c == '/' && i + 1 < len && content.charAt(i + 1) == '/') {
+                result.append(content.substring(i));
+                break;
+            }
+
+            // --- Comma handling ---
+            if (c == ',') {
+                if (spaceBeforeComma) {
+                    ensureSpaceBefore(result);
+                } else {
+                    trimTrailingSpaces(result);
+                }
+                result.append(',');
+                if (spaceAfterComma) {
+                    // Skip existing spaces after comma, we'll add exactly one
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    // Don't add space if next is end of line, semicolon, or comment
+                    if (i + 1 < len && content.charAt(i + 1) != ';' && content.charAt(i + 1) != '/') {
+                        result.append(' ');
+                    }
+                } else {
+                    // Remove spaces after comma
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                }
+                continue;
+            }
+
+            // --- Logical operators: .and. .or. .not. ---
+            if (c == '.' && spaceAroundLogical) {
+                String rest = content.substring(i).toLowerCase();
+                String op = null;
+                if (rest.startsWith(".and.")) op = ".and.";
+                else if (rest.startsWith(".or.")) op = ".or.";
+                else if (rest.startsWith(".not.")) op = ".not.";
+
+                if (op != null) {
+                    // Preserve original case
+                    String originalOp = content.substring(i, i + op.length());
+                    ensureSpaceBefore(result);
+                    result.append(originalOp);
+                    i += op.length() - 1;
+                    // Ensure space after (skip existing spaces) — but not before ;
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    continue;
+                }
+            }
+
+            // --- Assignment operator := ---
+            if (c == ':' && i + 1 < len && content.charAt(i + 1) == '=') {
+                if (spaceAroundAssignment) {
+                    ensureSpaceBefore(result);
+                    result.append(":=");
+                    i++; // skip =
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                } else {
+                    trimTrailingSpaces(result);
+                    result.append(":=");
+                    i++; // skip =
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                }
+                continue;
+            }
+
+            // --- Protect -> (alias operator) and : (send operator) ---
+            if (c == '-' && i + 1 < len && content.charAt(i + 1) == '>') {
+                result.append("->");
+                i++; // skip >
+                continue;
+            }
+            if (c == ':' && (i + 1 >= len || content.charAt(i + 1) != '=')) {
+                // This is : (send operator) — pass through, no spacing
+                result.append(c);
+                continue;
+            }
+
+            // --- Comparison operators: == != <= >= < > ---
+            if (spaceAroundComparison) {
+                // ==
+                if (c == '=' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append("==");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // != (Harbour also uses <> but handle ! separately)
+                if (c == '!' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append("!=");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // <=
+                if (c == '<' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append("<=");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // >=
+                if (c == '>' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append(">=");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // <> (Harbour not-equal)
+                if (c == '<' && i + 1 < len && content.charAt(i + 1) == '>') {
+                    ensureSpaceBefore(result);
+                    result.append("<>");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // Standalone < or > (not part of -> or <> or <= or >=)
+                if (c == '<' || c == '>') {
+                    // < already handled <= and <> above, so this is standalone
+                    ensureSpaceBefore(result);
+                    result.append(c);
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    continue;
+                }
+            }
+
+            // --- Multiplicative operators: * / % ---
+            if (spaceAroundMultiplicative && (c == '*' || c == '/' || c == '%')) {
+                // Protect compound assignment: *= /= %=
+                if (i + 1 < len && content.charAt(i + 1) == '=') {
+                    if (spaceAroundAssignment) {
+                        ensureSpaceBefore(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                        if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    } else {
+                        trimTrailingSpaces(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    }
+                    continue;
+                }
+                // Don't touch ** (power operator) — treat as single unit
+                if (c == '*' && i + 1 < len && content.charAt(i + 1) == '*') {
+                    ensureSpaceBefore(result);
+                    result.append("**");
+                    i++;
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    continue;
+                }
+                // Don't touch // (comment start)
+                if (c == '/' && i + 1 < len && content.charAt(i + 1) == '/') {
+                    result.append(content.substring(i));
+                    return result.toString();
+                }
+                ensureSpaceBefore(result);
+                result.append(c);
+                while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                if (i + 1 < len) result.append(' ');
+                continue;
+            }
+
+            // --- Additive operators: + - ---
+            if (spaceAroundAdditive && (c == '+' || c == '-')) {
+                // Protect -> (already handled above, but double-check)
+                if (c == '-' && i + 1 < len && content.charAt(i + 1) == '>') {
+                    result.append("->");
+                    i++;
+                    continue;
+                }
+                // Protect ++ and -- (increment/decrement)
+                if (c == '+' && i + 1 < len && content.charAt(i + 1) == '+') {
+                    result.append("++");
+                    i++;
+                    continue;
+                }
+                if (c == '-' && i + 1 < len && content.charAt(i + 1) == '-') {
+                    result.append("--");
+                    i++;
+                    continue;
+                }
+                // Protect compound assignment: += -=
+                if (i + 1 < len && content.charAt(i + 1) == '=') {
+                    if (spaceAroundAssignment) {
+                        ensureSpaceBefore(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                        if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    } else {
+                        trimTrailingSpaces(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    }
+                    continue;
+                }
+                // Detect if this is a unary operator (prefix) vs binary
+                // Unary: after ( , := = < > ! + - * / % [ { ; or at start of content
+                boolean isUnary = isUnaryContext(result, content, i);
+                if (isUnary) {
+                    // Unary — no space before, just append
+                    result.append(c);
+                    continue;
+                }
+                // Check for string continuation +; pattern — don't add space after +
+                if (c == '+' && i + 1 < len && content.charAt(i + 1) == ';') {
+                    result.append(c);
+                    continue;
+                }
+                // Binary operator — space around
+                ensureSpaceBefore(result);
+                result.append(c);
+                while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                if (i + 1 < len) result.append(' ');
+                continue;
+            }
+
+            // --- Default: pass through ---
+            result.append(c);
+        }
+
+        return result.toString();
+    }
+
+    /** Ensure the result ends with exactly one space (add if missing, don't double) */
+    private void ensureSpaceBefore(StringBuilder sb) {
+        if (sb.length() > 0 && sb.charAt(sb.length() - 1) != ' ') {
+            sb.append(' ');
+        }
+    }
+
+    /** Remove trailing spaces from StringBuilder */
+    private void trimTrailingSpaces(StringBuilder sb) {
+        while (sb.length() > 0 && sb.charAt(sb.length() - 1) == ' ') {
+            sb.setLength(sb.length() - 1);
+        }
+    }
+
+    /** Skip spaces in content after position i, add one space to result if needed (not before ;) */
+    private void skipSpacesAndAdd(StringBuilder result, String content, int i, int len) {
+        // Find next non-space char
+        int next = i + 1;
+        while (next < len && content.charAt(next) == ' ') next++;
+        if (next < len && content.charAt(next) != ';') result.append(' ');
+    }
+
+    /** Skip spaces after position i in content, return new i */
+    private int skipSpacesAfter(String content, int i, int len) {
+        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+        return i;
+    }
+
+    /**
+     * Determine if +/- at position i is a unary (prefix) operator.
+     * Unary if preceded by: ( , := = < > ! + - * / % [ { ; or nothing.
+     */
+    private boolean isUnaryContext(StringBuilder resultSoFar, String content, int i) {
+        // At start of content
+        if (resultSoFar.length() == 0) return true;
+
+        // Find last non-space char in result
+        int pos = resultSoFar.length() - 1;
+        while (pos >= 0 && resultSoFar.charAt(pos) == ' ') pos--;
+        if (pos < 0) return true;
+
+        char prev = resultSoFar.charAt(pos);
+        // After these chars, +/- is unary
+        return prev == '(' || prev == ',' || prev == '=' || prev == '<' || prev == '>' ||
+               prev == '!' || prev == '+' || prev == '-' || prev == '*' || prev == '/' ||
+               prev == '%' || prev == '[' || prev == '{' || prev == ';';
     }
 
     /**
