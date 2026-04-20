@@ -1360,15 +1360,28 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Get the object variable from our map
         HarbourDebuggerValue objectVar = variables.get(objectKey);
         
+        // If not found directly, it might be an array element (e.g. LOGINS[1])
+        if (objectVar == null && objectName.contains("[")) {
+            int bracketIndex = objectName.indexOf("[");
+            String parentName = objectName.substring(0, bracketIndex);
+            String parentKey = scope + "." + parentName;
+
+            HarbourDebuggerValue parentVar = variables.get(parentKey);
+            if (parentVar != null) {
+                String indices = objectName.substring(bracketIndex);
+                objectVar = findNestedArray(parentVar, indices);
+                if (objectVar != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Found object in array element: " + objectName);
+                }
+            }
+        }
+
         if (objectVar == null) {
-            // Log all available keys for debugging
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Object variable not found: " + objectKey);
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Available keys in variables map: " + variables.keySet());
-            
-            // Maybe the response arrived after variables were cleared, keep the object for next time
-            // Store a placeholder if needed
             return;
         }
         
@@ -1525,8 +1538,27 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         elementValue.setArrayInfo(scope, arrayName + "[" + index + "]", arraySize);
                         elementValue.setDebugProcess(this);
                     } catch (Exception e) {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess",
                             "Failed to parse nested array size from: " + value);
+                    }
+                }
+
+                // If element is an object, set it up for expansion
+                if ("O".equals(type)) {
+                    elementValue.setObjectInfo(scope, arrayName + "[" + index + "]");
+                    elementValue.setDebugProcess(this);
+                }
+
+                // If element is a hash, set it up for expansion
+                if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(5, value.length() - 1);
+                        int hashSize = Integer.parseInt(sizeStr);
+                        elementValue.setHashInfo(scope, arrayName + "[" + index + "]", hashSize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                            "Failed to parse nested hash size from: " + value);
                     }
                 }
                 
@@ -3470,8 +3502,37 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         }
     }
     
+    /**
+     * Send INVOKE command and wait for response.
+     * Reuses the EXPRESSION response handler.
+     */
+    public String requestInvoke(String command) {
+        lastExpressionCommand = "INVOKE:" + command;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
+            "Requesting method invoke: " + command);
+
+        CompletableFuture<String> future = new CompletableFuture<>();
+        pendingExpressions.put(lastExpressionCommand, future);
+
+        sendCommand("INVOKE", command);
+
+        try {
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Method invoke timed out: " + command);
+            pendingExpressions.remove(lastExpressionCommand);
+            return "Evaluation timed out";
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Method invoke failed: " + e.getMessage());
+            pendingExpressions.remove(lastExpressionCommand);
+            return "Evaluation failed: " + e.getMessage();
+        }
+    }
+
     private void handleExpressionResult(String response) {
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
             "Received expression result: " + response);
         
         // Parse EXPRESSION:stack_level:type:value
