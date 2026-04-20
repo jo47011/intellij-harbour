@@ -1539,9 +1539,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Trigger UI update - this needs to be done through the debug session
         // The array variable should now have its children populated
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
             "Array " + arrayKey + " now has " + arrayVar.getChildren().size() + " elements loaded");
-        
+
+        // Complete pending synchronous future if this matches
+        if (pendingArrayLoadFuture != null && arrayKey.equals(pendingArrayLoadKey)) {
+            pendingArrayLoadFuture.complete(true);
+        }
+
         // Update the UI with the loaded children
         arrayVar.updateChildren();
     }
@@ -3293,14 +3298,118 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
      * @param count The number of elements to retrieve
      */
     public void requestArrayElements(String scope, String arrayName, int start, int count) {
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
             "Requesting array elements for " + scope + "." + arrayName + " [" + start + ".." + (start+count-1) + "]");
-        
+
         // Send command to debugger to get array elements
         // Format: ARRAY:scope:name:start:count
         sendCommand("ARRAY", scope + ":" + arrayName + ":" + start + ":" + count);
     }
-    
+
+    // Pending future for synchronous array element requests
+    private volatile CompletableFuture<Boolean> pendingArrayLoadFuture = null;
+    private volatile String pendingArrayLoadKey = null;
+
+    /**
+     * Synchronously request array elements for a variable and wait for them.
+     * Used by the evaluator to resolve expressions like "Logins[1]".
+     * @param arrayValue The HarbourDebuggerValue representing the array
+     * @return The loaded children list, or empty list on failure
+     */
+    public java.util.List<HarbourDebuggerValue> requestArrayElementsSync(
+            HarbourDebuggerValue arrayValue) {
+        String scope = null;
+        String arrayName = null;
+        int arraySize = 0;
+
+        // Extract scope and array name from the value's stored info
+        // We need to find this value in our variables map to get the key
+        for (var entry : variables.entrySet()) {
+            if (entry.getValue() == arrayValue) {
+                String key = entry.getKey();
+                int dotIndex = key.indexOf('.');
+                if (dotIndex > 0) {
+                    scope = key.substring(0, dotIndex);
+                    arrayName = key.substring(dotIndex + 1);
+                }
+                break;
+            }
+        }
+
+        // Fallback: check children of other variables (nested arrays)
+        if (scope == null) {
+            for (var entry : variables.entrySet()) {
+                HarbourDebuggerValue parent = entry.getValue();
+                if (parent.getChildren() != null) {
+                    for (HarbourDebuggerValue child : parent.getChildren()) {
+                        if (child == arrayValue) {
+                            String key = entry.getKey();
+                            int dotIndex = key.indexOf('.');
+                            if (dotIndex > 0) {
+                                scope = key.substring(0, dotIndex);
+                                // For nested array, build path
+                                String parentName = key.substring(dotIndex + 1);
+                                int childIdx = parent.getChildren().indexOf(child) + 1;
+                                arrayName = parentName + "[" + childIdx + "]";
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (scope != null) break;
+            }
+        }
+
+        if (scope == null || arrayName == null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Cannot determine scope/name for array sync request");
+            return java.util.Collections.emptyList();
+        }
+
+        // Parse array size from value string like "Array(5)"
+        String valueStr = arrayValue.getValue();
+        if (valueStr != null && valueStr.startsWith("Array(") &&
+                valueStr.endsWith(")")) {
+            try {
+                arraySize = Integer.parseInt(
+                    valueStr.substring(6, valueStr.length() - 1));
+            } catch (NumberFormatException e) {
+                arraySize = 100;
+            }
+        } else {
+            arraySize = 100;
+        }
+
+        String arrayKey = scope + "." + arrayName;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
+            "Synchronous array request for " + arrayKey +
+            " (size=" + arraySize + ")");
+
+        // Set up future before sending command
+        pendingArrayLoadKey = arrayKey;
+        pendingArrayLoadFuture = new CompletableFuture<>();
+
+        // Send the request
+        int maxElements = Math.min(arraySize, 100);
+        sendCommand("ARRAY", scope + ":" + arrayName + ":" + 1 + ":" + maxElements);
+
+        // Wait for response
+        try {
+            pendingArrayLoadFuture.get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Sync array request timed out or failed for " + arrayKey +
+                ": " + e.getMessage());
+        } finally {
+            pendingArrayLoadFuture = null;
+            pendingArrayLoadKey = null;
+        }
+
+        // Return children (may have been populated by handleArrayElements)
+        java.util.List<HarbourDebuggerValue> children = arrayValue.getChildren();
+        return children != null ? children : java.util.Collections.emptyList();
+    }
+
     /**
      * Request hash elements for a specific hash variable
      * @param scope The variable scope (LOCALS, STATICS, etc.)
