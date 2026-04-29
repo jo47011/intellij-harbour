@@ -145,8 +145,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             }
         });
         
-        // Create debug connection
-        this.connection = new HarbourDebuggerConnection(debugPort);
+        // Create debug connection with charset from settings (handles DBF umlauts etc.)
+        this.connection = new HarbourDebuggerConnection(debugPort,
+                HarbourSettings.getInstance(project).getResolvedDebuggerCharset(project));
         
         // Create live DBF connection for workarea monitoring
         this.liveDBFConnection = new HarbourLiveDBFConnection(project, connection);
