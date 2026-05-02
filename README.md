@@ -283,6 +283,12 @@ During debugging, the plugin provides a Database View tool window that shows all
 - Jump to specific record numbers
 - View indexes and schema information
 - Refresh data to see updates
+- Reorder attributes in the **Current Record** view to keep the fields you care about
+  on top:
+    - Drag a row with the left mouse button and drop it on another row
+    - Right-click a row for **Move to Top**, **Move to Bottom**, or **Reset Order**
+    - The custom order is remembered per workarea for the current session and is
+      cleared on disconnect
 
 The Database View automatically updates when you step through code that opens, closes, or modifies database records.
 

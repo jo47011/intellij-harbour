@@ -170,7 +170,14 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             }
         }
         private final java.util.Map<String, WorkareaCache> dataCache = new java.util.HashMap<>();
-        
+
+        // User-defined row order for Record view, per workarea alias (session-only).
+        // When present, overrides natural order so the user can pin relevant attributes to the top.
+        private final java.util.Map<String, List<String>> recordRowOrder = new java.util.HashMap<>();
+
+        // Drag-and-drop state for reordering rows in Record view
+        private int dragSourceRow = -1;
+
         // Track what we're currently waiting for
         private String waitingForWorkarea = null;
         private String waitingForDataType = null;
@@ -248,6 +255,8 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     }
                 }
             });
+
+            installRowReorderHandlers();
 
             // Create status label
             statusLabel = new JLabel("No debugging session active");
@@ -427,6 +436,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
             
             // Clear cache and pending requests when connecting to new session
             dataCache.clear();
+            recordRowOrder.clear();
             waitingForWorkarea = null;
             waitingForDataType = null;
             pendingRequests.clear();
@@ -474,6 +484,7 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                 
                 // Clear cache, waiting state, and pending requests
                 dataCache.clear();
+                recordRowOrder.clear();
                 waitingForWorkarea = null;
                 waitingForDataType = null;
                 pendingRequests.clear();
@@ -1266,9 +1277,204 @@ public class HarbourDBFToolWindow implements ToolWindowFactory {
                     int cmp = valA.compareToIgnoreCase(valB);
                     return ascending ? cmp : -cmp;
                 });
+            } else if ("Record".equals(currentViewType) && currentWorkarea != null
+                    && recordRowOrder.containsKey(currentWorkarea) && !resultData.isEmpty()) {
+                // Apply user-defined row order; rows missing from the saved order keep
+                // their original (relative) position by getting a max-int rank
+                List<String> order = recordRowOrder.get(currentWorkarea);
+                Map<String, Integer> rank = new HashMap<>();
+                for (int i = 0; i < order.size(); i++) {
+                    rank.put(order.get(i), i);
+                }
+                resultData.sort((a, b) -> {
+                    String nameA = (a.length > 0 && a[0] != null) ? a[0] : "";
+                    String nameB = (b.length > 0 && b[0] != null) ? b[0] : "";
+                    int posA = rank.getOrDefault(nameA, Integer.MAX_VALUE);
+                    int posB = rank.getOrDefault(nameB, Integer.MAX_VALUE);
+                    return Integer.compare(posA, posB);
+                });
             }
 
             tableModel.setData(resultData);
+        }
+
+        /**
+         * Build the canonical full-attribute order for the current workarea.
+         * Starts from the saved custom order (if any), then appends any names from
+         * unfilteredData that are not yet covered. Returns a fresh, mutable list.
+         */
+        private List<String> buildFullOrder() {
+            List<String> all = new ArrayList<>();
+            List<String> saved = recordRowOrder.get(currentWorkarea);
+            if (saved != null) {
+                all.addAll(saved);
+            }
+            if (unfilteredData != null) {
+                for (String[] row : unfilteredData) {
+                    String name = (row.length > 0 && row[0] != null) ? row[0] : "";
+                    if (!name.isEmpty() && !all.contains(name)) {
+                        all.add(name);
+                    }
+                }
+            }
+            return all;
+        }
+
+        /**
+         * Move the given attribute name to the top of the custom order, then re-render.
+         */
+        private void moveAttributeToTop(@NotNull String name) {
+            if (currentWorkarea == null || name.isEmpty()) return;
+            List<String> order = buildFullOrder();
+            order.remove(name);
+            order.add(0, name);
+            recordRowOrder.put(currentWorkarea, order);
+            resetSortAndApply();
+        }
+
+        /**
+         * Move the given attribute name to the bottom of the custom order, then re-render.
+         */
+        private void moveAttributeToBottom(@NotNull String name) {
+            if (currentWorkarea == null || name.isEmpty()) return;
+            List<String> order = buildFullOrder();
+            order.remove(name);
+            order.add(name);
+            recordRowOrder.put(currentWorkarea, order);
+            resetSortAndApply();
+        }
+
+        /**
+         * Insert sourceName immediately before targetName in the custom order, then re-render.
+         */
+        private void moveAttributeBefore(@NotNull String sourceName, @NotNull String targetName) {
+            if (currentWorkarea == null || sourceName.isEmpty() || targetName.isEmpty()) return;
+            if (sourceName.equals(targetName)) return;
+            List<String> order = buildFullOrder();
+            order.remove(sourceName);
+            int targetIdx = order.indexOf(targetName);
+            if (targetIdx < 0) {
+                order.add(sourceName);
+            } else {
+                order.add(targetIdx, sourceName);
+            }
+            recordRowOrder.put(currentWorkarea, order);
+            resetSortAndApply();
+        }
+
+        /**
+         * Drop any custom order for the current workarea and re-render.
+         */
+        private void resetRowOrder() {
+            if (currentWorkarea == null) return;
+            recordRowOrder.remove(currentWorkarea);
+            resetSortAndApply();
+        }
+
+        /**
+         * Reset column-sort state (custom order only kicks in when no column sort is active),
+         * then re-apply filters so the table redraws.
+         */
+        private void resetSortAndApply() {
+            sortColumnsByName = false;
+            sortColumnsByValue = false;
+            tableModel.resetSortState();
+            applyFilters();
+        }
+
+        /**
+         * Return the attribute name (Property column) for the given visible row,
+         * or null if the row index is out of range.
+         */
+        private String attributeNameAt(int viewRow) {
+            if (viewRow < 0 || viewRow >= detailsTable.getRowCount()) return null;
+            Object v = detailsTable.getValueAt(viewRow, 0);
+            return v == null ? null : v.toString();
+        }
+
+        /**
+         * True when row reordering (drag/drop and context menu) is meaningful:
+         * only the Record view operates on a stable per-attribute name list.
+         */
+        private boolean isRecordView() {
+            return "Record".equals(currentViewType);
+        }
+
+        /**
+         * Install drag-and-drop and right-click handlers on the details table so the
+         * user can reorder attribute rows in the Record view.
+         */
+        private void installRowReorderHandlers() {
+            JPopupMenu rowMenu = new JPopupMenu();
+            JMenuItem topItem = new JMenuItem("Move to Top");
+            JMenuItem bottomItem = new JMenuItem("Move to Bottom");
+            JMenuItem resetItem = new JMenuItem("Reset Order");
+            rowMenu.add(topItem);
+            rowMenu.add(bottomItem);
+            rowMenu.addSeparator();
+            rowMenu.add(resetItem);
+
+            topItem.addActionListener(e -> {
+                String name = attributeNameAt(detailsTable.getSelectedRow());
+                if (name != null) moveAttributeToTop(name);
+            });
+            bottomItem.addActionListener(e -> {
+                String name = attributeNameAt(detailsTable.getSelectedRow());
+                if (name != null) moveAttributeToBottom(name);
+            });
+            resetItem.addActionListener(e -> resetRowOrder());
+
+            java.awt.event.MouseAdapter handler = new java.awt.event.MouseAdapter() {
+                @Override
+                public void mousePressed(java.awt.event.MouseEvent e) {
+                    if (!isRecordView()) return;
+                    int row = detailsTable.rowAtPoint(e.getPoint());
+                    if (row >= 0) {
+                        detailsTable.setRowSelectionInterval(row, row);
+                    }
+                    if (e.isPopupTrigger() && row >= 0) {
+                        rowMenu.show(detailsTable, e.getX(), e.getY());
+                        return;
+                    }
+                    if (SwingUtilities.isLeftMouseButton(e) && row >= 0) {
+                        dragSourceRow = row;
+                    }
+                }
+
+                @Override
+                public void mouseDragged(java.awt.event.MouseEvent e) {
+                    if (!isRecordView() || dragSourceRow < 0) return;
+                    detailsTable.setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                }
+
+                @Override
+                public void mouseReleased(java.awt.event.MouseEvent e) {
+                    detailsTable.setCursor(Cursor.getDefaultCursor());
+                    if (e.isPopupTrigger()) {
+                        int row = detailsTable.rowAtPoint(e.getPoint());
+                        if (isRecordView() && row >= 0) {
+                            detailsTable.setRowSelectionInterval(row, row);
+                            rowMenu.show(detailsTable, e.getX(), e.getY());
+                        }
+                        dragSourceRow = -1;
+                        return;
+                    }
+                    if (!isRecordView() || dragSourceRow < 0) {
+                        dragSourceRow = -1;
+                        return;
+                    }
+                    int targetRow = detailsTable.rowAtPoint(e.getPoint());
+                    int source = dragSourceRow;
+                    dragSourceRow = -1;
+                    if (targetRow < 0 || targetRow == source) return;
+                    String sourceName = attributeNameAt(source);
+                    String targetName = attributeNameAt(targetRow);
+                    if (sourceName == null || targetName == null) return;
+                    moveAttributeBefore(sourceName, targetName);
+                }
+            };
+            detailsTable.addMouseListener(handler);
+            detailsTable.addMouseMotionListener(handler);
         }
 
         /**
