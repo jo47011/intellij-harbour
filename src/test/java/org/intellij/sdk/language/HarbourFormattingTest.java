@@ -239,8 +239,12 @@ public class HarbourFormattingTest {
 
     private boolean formatAndCompileFile(Path filePath, HarbourPostFormatProcessor processor,
                                           boolean skipCompilation, String testDir) throws Exception {
-        // Read original content
-        String originalContent = new String(Files.readAllBytes(filePath));
+        // Read original content. Harbour sources are typically ISO-8859-1 (CP1252-compatible);
+        // round-tripping through the JVM default charset (often UTF-8) corrupts umlauts and
+        // changes file size/charset. Use ISO-8859-1 to preserve every byte.
+        java.nio.charset.Charset cs = java.nio.charset.StandardCharsets.ISO_8859_1;
+        byte[] originalBytes = Files.readAllBytes(filePath);
+        String originalContent = new String(originalBytes, cs);
 
         // FIRST: Check if original file compiles (unless compilation is skipped)
         // If it doesn't, skip this file - it needs includes we don't have
@@ -262,11 +266,11 @@ public class HarbourFormattingTest {
         if (changed) {
             // Create backup
             Path backupPath = Paths.get(filePath.toString() + ".bak");
-            Files.write(backupPath, originalContent.getBytes());
+            Files.write(backupPath, originalBytes);
             System.out.println("Backup created: " + backupPath);
 
             // Write formatted content
-            Files.write(filePath, formattedContent.getBytes());
+            Files.write(filePath, formattedContent.getBytes(cs));
             System.out.println("Formatted content written");
         }
 
