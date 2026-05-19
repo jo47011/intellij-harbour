@@ -331,8 +331,8 @@ The plugin automatically provides clickable stack traces for runtime errors in t
 
 ### Custom ErrorBlock Integration
 
-If your project uses a custom ErrorBlock handler, you can still get clickable stack traces by
-calling `printDebugStackTrace()` from your error handler:
+If your project uses a custom ErrorBlock handler, you can still get clickable stack traces — and
+the root cause of the error — by calling `printDebugStackTrace(oError)` from your error handler:
 
 ```harbour
 // Your custom error handling
@@ -341,9 +341,9 @@ ErrorBlock({|oError| MyCustomHandler(oError)})
 FUNCTION MyCustomHandler(oError)
    // Your custom error logic here
 
-   // Generate PyCharm-compatible stack trace when running in PyCharm
+   // Generate PyCharm-compatible stack trace with root cause when running in PyCharm
    #ifdef DBG_PORT
-      printDebugStackTrace()
+      printDebugStackTrace(oError)
    #endif
 
    // Continue with your error handling
@@ -352,11 +352,62 @@ RETURN NIL
 
 **Key points:**
 
-- Add `printDebugStackTrace()` to your custom error handler
+- Pass `oError` so the PyCharm log shows the labeled root cause (Fehler / Operation / Filename /
+  Code / SubSystem). The parameter is optional for backward compatibility — omitting it logs only
+  the stack trace.
+- **Call site matters for stack depth.** `printDebugStackTrace` captures whatever is on the
+  Harbour stack at the moment of the call — frames called *after* it are not yet on the stack.
+  For the deepest visible chain, call it at the *bottom* of your error chain. Example: if your
+  handler chain is `ErrorBlock → DefError → Fehler → Trouble → PrintStackTrace`, put the call
+  inside `PrintStackTrace` so all five frames are captured.
 - Use `#ifdef DBG_PORT` to conditionally include it (works for both debug and run modes in PyCharm)
 - This generates clickable stack traces in PyCharm console
 - Works alongside your existing error handling logic
 - The code compiles cleanly outside PyCharm (the function call is skipped)
+
+**Charset:** the plugin auto-detects the log charset in this order:
+
+1. **UTF-8** — if your Harbour app converts via `hb_StrToUTF8()` before letting the runtime write
+2. **Project Encoding** — `File | Settings | Editor | File Encodings | Project Encoding`
+   (the *Project Encoding* dropdown — **not** "Default encoding for properties files", which
+   only applies to `.properties` files)
+3. **ISO-8859-1** — universal fallback (every byte maps 1:1 to a character)
+
+If umlauts still look broken (e.g. `Grenzwert berschritten` with the `ü` missing or replaced by
+`�`) and you see the *same* breakage when your Harbour app prints `oError:Description` to its
+own console, the issue is on the Harbour side — the byte for `ü` is already gone (or invalid)
+in the string the runtime returns. Setup we normally recommend:
+
+```harbour
+REQUEST HB_CODEPAGE_DEWIN     // German Windows (CP1252)
+REQUEST HB_LANG_DE
+HB_CDPSELECT( "DEWIN" )
+HB_LangSelect( "DE" )
+hb_setTermCP( "DEWIN" )
+```
+
+(Use `DE850` for OEM/DOS-style consoles, or another codepage matching your environment.)
+
+**Diagnostic snippet** — dump the actual bytes of the description so you can tell what your
+Harbour binary is producing:
+
+```harbour
+LOCAL i, cDesc := oError:Description
+? "Description bytes (" + LTrim(Str(Len(cDesc))) + ") for: [" + cDesc + "]"
+FOR i := 1 TO Len(cDesc)
+   ?? StrZero(Asc(SubStr(cDesc, i, 1)), 3) + " "
+NEXT
+```
+
+If you see `252` (0xFC for `ü` in CP1252/ISO-8859-1) the byte is there and our plugin's
+auto-detect will decode it correctly. If you see only ASCII codes (`< 128`) where the umlaut
+should be, the byte has been dropped earlier — that is the Harbour build / lang module / CDP
+issue and no plugin-side decoding can recover it.
+
+**Pass your own stack frames** as the second argument: `printDebugStackTrace(oError,
+cExtraStack)`. When supplied, *cExtraStack* **replaces** our internal stack walk — no
+duplication. Format each frame as `  Stack: NAME(line) in file.prg\r\n` so PyCharm can make it
+clickable. Omit the argument to let us call `ProcName/ProcLine` ourselves.
 
 ## Code Helpers
 

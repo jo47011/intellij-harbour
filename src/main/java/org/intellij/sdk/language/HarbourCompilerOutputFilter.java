@@ -34,9 +34,15 @@ public class HarbourCompilerOutputFilter implements Filter {
     // Pattern to match function names in stack traces: "FUNCTION_NAME in filepath(line)"
     private static final Pattern FUNCTION_PATTERN = Pattern.compile("(\\d+):\\s+(\\w+)\\s+in\\s+([^\\s]+)\\((\\d+)\\)");
     
-    // Pattern to match runtime error function references: "at FUNCTION_NAME(line)" or "Stack: FUNCTION_NAME(line) in filename"
-    // Allow $ and other chars in function names for Windows compatibility (e.g. __TESTSIMPLEINIT$)
-    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile("at\\s+([\\w$]+)\\((\\d+)\\)|Stack:\\s+([\\w$]+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
+    // Pattern to match runtime error function references:
+    //   "at FUNCTION_NAME(line)"                         — legacy "at"-prefix format
+    //   "Stack: FUNCTION_NAME(line) in filename"         — legacy auto-monitor format
+    //   "  FUNCTION_NAME(line) in filename"              — current format (whitespace-indented)
+    // Allow $ in function names for Windows compatibility (e.g. __TESTSIMPLEINIT$).
+    // Optional (...) prefix matches Harbour block-frame indicators like (b)INIT_HB so they are clickable too.
+    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile(
+        "at\\s+(?:\\([^)]*\\))?([\\w$]+)\\((\\d+)\\)" +
+        "|(?:Stack:|^)\\s+(?:\\([^)]*\\))?([\\w$]+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
     
     // Pattern to match runtime stacktrace file references: "at filename.prg(line)"
     private static final Pattern RUNTIME_FILE_PATTERN = Pattern.compile("at\\s+([^\\s]+\\.prg)\\((\\d+)\\)");

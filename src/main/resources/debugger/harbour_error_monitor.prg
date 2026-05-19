@@ -40,14 +40,20 @@ STATIC FUNCTION MonitorAndPassError(oError, bOriginalHandler)
    s_lInRecursion := .T.
    
    // Capture stack trace immediately - this is the earliest point!
+   // Use the same labeled German format as harbour_error_handler.prg for consistency.
    cStackTrace := "[" + DToS(Date()) + " " + Time() + "]" + CRLF
-   cStackTrace += "RUNTIME ERROR: " + oError:description + CRLF
-   cStackTrace += "Error " + oError:subSystem + "/" + LTrim(Str(oError:genCode)) + ": " + oError:operation + CRLF + CRLF
+   cStackTrace += "RUNTIME ERROR" + CRLF
+   cStackTrace += "  Fehler   : " + IIF(ValType(oError:description) == "C", oError:description, "") + CRLF
+   cStackTrace += "  Operation: " + IIF(ValType(oError:operation) == "C", oError:operation, "") + CRLF
+   cStackTrace += "  Filename : " + IIF(ValType(oError:fileName) == "C", oError:fileName, "") + CRLF
+   cStackTrace += "  Code     : " + LTrim(Str(oError:genCode)) + CRLF
+   cStackTrace += "  SubSystem: " + IIF(ValType(oError:subSystem) == "C", oError:subSystem, "") + CRLF
+   cStackTrace += CRLF
    cStackTrace += "Stack trace:" + CRLF
    
    // Collect stack trace starting from the error point
    DO WHILE !Empty(ProcName(i))
-      cStackTrace += "Stack: " + Trim(ProcName(i)) + "(" + LTrim(Str(ProcLine(i))) + ")"
+      cStackTrace += "  " + Trim(ProcName(i)) + "(" + LTrim(Str(ProcLine(i))) + ")"
       IF !Empty(ProcFile(i))
          cStackTrace += " in " + ProcFile(i)
       ENDIF
@@ -69,6 +75,8 @@ STATIC FUNCTION MonitorAndPassError(oError, bOriginalHandler)
    ENDIF
    
    IF hFile != -1
+      // Write in the runtime's native codepage; PyCharm decodes using the
+      // project's configured charset (set via File | Settings | File Encodings).
       FWrite(hFile, cStackTrace)
       FWrite(hFile, Replicate("-", 70) + CRLF + CRLF)
       FClose(hFile)
