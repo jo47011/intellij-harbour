@@ -69,8 +69,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile boolean shutdownRequested = false;
     
     // Command throttling settings - ZERO DELAY for absolute maximum speed
-    private static final long MIN_COMMAND_INTERVAL = 0;   // No delay between commands 
+    private static final long MIN_COMMAND_INTERVAL = 0;   // No delay between commands
     private static final long NEXT_COMMAND_DELAY = 0;     // No extra delay for NEXT commands
+    // Timeout for synchronous debug-variable/expression evaluation requests
+    // (expression eval, method invoke, array element loading)
+    private static final int EVAL_TIMEOUT_SECONDS = 60;
     
     // Debugger state management - prevents rapid command execution
     public enum DebuggerState {
@@ -3428,7 +3431,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
 
         // Wait for response
         try {
-            pendingArrayLoadFuture.get(5, TimeUnit.SECONDS);
+            pendingArrayLoadFuture.get(EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Sync array request timed out or failed for " + arrayKey +
@@ -3489,9 +3492,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         try {
             // Wait for response with timeout
-            return future.get(5, TimeUnit.SECONDS);
+            return future.get(EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Expression evaluation timed out: " + command);
             pendingExpressions.remove(command);
             return "Evaluation timed out";
@@ -3518,7 +3521,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         sendCommand("INVOKE", command);
 
         try {
-            return future.get(5, TimeUnit.SECONDS);
+            return future.get(EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Method invoke timed out: " + command);

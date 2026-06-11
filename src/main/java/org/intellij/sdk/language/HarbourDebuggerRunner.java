@@ -76,7 +76,14 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
         // Create a holder for the execution result
         final ExecutionResult[] executionResultHolder = new ExecutionResult[1];
         
-        XDebugSession debugSession = debuggerManager.startSession(env, new XDebugProcessStarter() {
+        // Use startSessionAndShowTab(...) instead of startSession(...) +
+        // debugSession.getRunContentDescriptor(). The latter calls the deprecated
+        // XDebugSession.getRunContentDescriptor(), which logs an IDE error
+        // ("[Split debugger] RunContentDescriptor should not be used in split mode")
+        // on newer IntelliJ versions running in split mode and surfaces as a popup.
+        // Letting the platform build/show the run tab avoids touching that getter.
+        debuggerManager.startSessionAndShowTab(config.getName(), env.getContentToReuse(),
+                new XDebugProcessStarter() {
             @Override
             @NotNull
             public XDebugProcess start(@NotNull XDebugSession session) throws ExecutionException {
@@ -111,9 +118,12 @@ public class HarbourDebuggerRunner extends GenericProgramRunner {
         // The real solution is in HarbourDebuggerRemoteProcess.doGetProcessHandler() returning null
         // This causes IntelliJ to use DefaultDebugProcessHandler instead of the actual process handler
         // which prevents XDebugSessionImpl from attaching problematic ProcessListeners
-        HarbourLogger.log(project, "HarbourDebugger", 
+        HarbourLogger.log(project, "HarbourDebugger",
             "Using proper remote debugging pattern - doGetProcessHandler() returns null");
 
-        return debugSession.getRunContentDescriptor();
+        // The run tab is already shown by startSessionAndShowTab() above, so return
+        // null here to avoid showing a second tab and to avoid calling the deprecated
+        // XDebugSession.getRunContentDescriptor().
+        return null;
     }
 }
