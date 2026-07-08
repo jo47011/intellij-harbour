@@ -2788,8 +2788,16 @@ STATIC PROCEDURE SendExpression(cParams)
                  ValType(aStack[nStackIndex, HB_DBG_CS_LOCALS]) == "A" .AND. ;
                  Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
    
-   // If no locals metadata, try to build it at runtime
-   IF !lHasLocals .AND. nStackIndex > 0 .AND. nStackIndex <= Len(aStack)
+   // If no locals metadata, try to build it at runtime.
+   // Skip this when vmStack (VM-provided, with the REAL names) already has
+   // locals: the runtime enumeration below can only invent placeholder names
+   // (FOO/BAR/LOCALn), which never match the user's real local names, so
+   // expressions like len(callername) stay unresolved. When vmStack has real
+   // locals we let the vmStack fallback further down do the replacement.
+   IF !lHasLocals .AND. nStackIndex > 0 .AND. nStackIndex <= Len(aStack) .AND. ;
+      !( vmStack != NIL .AND. Len(vmStack) > 0 .AND. ;
+         vmStack[1, HB_DBG_CS_LOCALS] != NIL .AND. ;
+         Len(vmStack[1, HB_DBG_CS_LOCALS]) > 0 )
       LogDebugInfo("No locals metadata, attempting to enumerate at runtime")
       
       // Initialize locals array if needed
