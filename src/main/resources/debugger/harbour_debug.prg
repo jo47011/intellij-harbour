@@ -84,11 +84,19 @@ STATIC FUNCTION KeyboardFilter(nKey)
    // Check for Alt-D (K_ALT_D = 288)
    IF nKey == 288
       oDebugInfo := __DEBUGITEM()
-      IF oDebugInfo["socket"] != NIL
-         // Trigger debugger break
+      IF oDebugInfo["socket"] != NIL .AND. oDebugInfo["lRunning"]
          oDebugInfo["lRunning"] := .F.
-         LogDebugInfo("Alt-D intercepted - triggering debug break")
-         // Return 0 to consume the key (don't pass to application)
+         LogDebugInfo("Alt-D intercepted - sending STOP:AltD")
+         // Send STOP to IDE so it knows we're paused
+         IF Len(oDebugInfo["aStack"]) > 0
+            hb_inetSend(oDebugInfo["socket"], ;
+               "STOP:AltD:" + ;
+               ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE] + ;
+               ":" + ;
+               AllTrim(Str( ;
+               ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE])) + ;
+               CRLF)
+         ENDIF
          RETURN 0
       ENDIF
    ENDIF
@@ -207,6 +215,12 @@ STATIC FUNCTION IdleSocketCheck()
             CASE Left(tmp, 1) == "+" .OR. Left(tmp, 1) == "-"
                SetBreakpoint(tmp)
                LogDebugInfo("Breakpoint set in idle: " + tmp)
+
+            CASE Left(tmp, 6) == "INVOKE"
+               IF ":" $ tmp
+                  InvokeMethod(SubStr(tmp, 8))
+               ENDIF
+               LogDebugInfo("INVOKE received in idle")
 
             CASE Left(tmp, 4) == "EVAL" .OR. Left(tmp, 10) == "EXPRESSION"
                IF ":" $ tmp
@@ -380,10 +394,24 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       
       // Check socket and process commands if enabled
       IF s_lSocketEnabled
-         IF lAltDInvoked
+         IF lAltDInvoked .AND. ;
+            !Empty(oDebugInfo["socket"]) .AND. ;
+            oDebugInfo["lRunning"]
+            // Alt-D detected: send STOP immediately, then enter command loop
             oDebugInfo["lRunning"] := .F.
+            IF Len(oDebugInfo["aStack"]) > 0
+               hb_inetSend(oDebugInfo["socket"], ;
+                  "STOP:AltD:" + ;
+                  ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE] + ;
+                  ":" + ;
+                  AllTrim(Str( ;
+                  ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE])) + ;
+                  CRLF)
+            ENDIF
+            CheckSocket(.T.)
+         ELSE
+            CheckSocket(.F.)
          ENDIF
-         CheckSocket(.F.)
       ENDIF
       
    CASE nMode == HB_DBG_ACTIVATE
@@ -601,10 +629,9 @@ STATIC PROCEDURE CheckSocket(lStopSent)
    
    // Main command loop - wait forever (timeout removed as requested)
    DO WHILE .T.
-      // Removed loop counter - debugger will wait forever
-      
-      
-      IF Empty(oDebugInfo["socket"]) .OR. hb_inetErrorCode(oDebugInfo["socket"]) != 0
+
+      IF Empty(oDebugInfo["socket"]) .OR. ;
+         hb_inetErrorCode(oDebugInfo["socket"]) != 0
          RemoveKeyboardFilter()
          oDebugInfo["socket"] := NIL
          oDebugInfo["lRunning"] := .T.
@@ -612,7 +639,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          oDebugInfo["maxLevel"] := NIL
          BREAK
       ENDIF
-      
+
       DO WHILE hb_inetDataReady(oDebugInfo["socket"]) == 1
          tmp := hb_inetRecvLine(oDebugInfo["socket"])
          
@@ -628,23 +655,24 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
                   lNeedExit := .T.
-                  LogDebugInfo("GO received - lRunning=.T., breakpoints=" + ;
+                  LogDebugInfo("GO received - lRunning=.T." + ;
+                     ", breaks=" + ;
                      AllTrim(Str(Len(oDebugInfo["aBreaks"]))))
-                  
+
                CASE tmp == "STEP"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := NIL
                   lStopSent := .F.
                   lNeedExit := .T.
-                  
+
                CASE tmp == "NEXT"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
                   oDebugInfo["maxLevel"] := oDebugInfo["__dbgEntryLevel"]
                   lStopSent := .F.
                   lNeedExit := .T.
-                  
+
                CASE tmp == "OUT"
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["lSingleStep"] := .T.
@@ -779,6 +807,12 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                      SendObjectProperties(SubStr(tmp, 8))  // OBJECT: = 7 chars, so 8 gets after colon
                   ENDIF
                   
+               CASE Left(tmp, 6) == "INVOKE"
+                  // INVOKE command - call method on a variable
+                  IF ":" $ tmp
+                     InvokeMethod(SubStr(tmp, 8))  // INVOKE: = 7
+                  ENDIF
+
                CASE Left(tmp, 4) == "EVAL" .OR. Left(tmp, 10) == "EXPRESSION"
                   // EVAL/EXPRESSION command for evaluating expressions
                   IF ":" $ tmp
@@ -788,7 +822,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                         SendExpression(SubStr(tmp, 12))  // EXPRESSION: = 11 chars
                      ENDIF
                   ENDIF
-                  
+
                CASE Left(tmp, 4) == "AREA"
                   // AREA commands for specific workarea details
                   IF ":" $ tmp
@@ -815,18 +849,22 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          // Single step mode
          IF oDebugInfo["lSingleStep"]
             // Check step-over level restrictions
-            IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] > 0 .AND. oDebugInfo["__dbgEntryLevel"] > oDebugInfo["maxLevel"]
+            IF !Empty(oDebugInfo["maxLevel"]) .AND. ;
+               oDebugInfo["maxLevel"] > 0 .AND. ;
+               oDebugInfo["__dbgEntryLevel"] > oDebugInfo["maxLevel"]
                BREAK
             ENDIF
-            
+
             oDebugInfo["lSingleStep"] := .F.
             oDebugInfo["lRunning"] := .F.
-            
+
             // Clear step-over state if back at same/higher level
-            IF !Empty(oDebugInfo["maxLevel"]) .AND. oDebugInfo["maxLevel"] > 0 .AND. oDebugInfo["__dbgEntryLevel"] <= oDebugInfo["maxLevel"]
+            IF !Empty(oDebugInfo["maxLevel"]) .AND. ;
+               oDebugInfo["maxLevel"] > 0 .AND. ;
+               oDebugInfo["__dbgEntryLevel"] <= oDebugInfo["maxLevel"]
                oDebugInfo["maxLevel"] := NIL
             ENDIF
-            
+
             IF !lStopSent
                // Get current file and line
                cCurrentFile := ""
@@ -838,16 +876,19 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                ELSE
                   FOR i := 2 TO 5
                      cCurrentFile := ProcFile(i)
-                     IF !Empty(cCurrentFile) .AND. !("harbour_debug" $ Lower(cCurrentFile))
+                     IF !Empty(cCurrentFile) .AND. ;
+                        !("harbour_debug" $ Lower(cCurrentFile))
                         nCurrentLine := ProcLine(i)
                         EXIT
                      ENDIF
                   NEXT
                ENDIF
-               hb_inetSend(oDebugInfo["socket"], "STOP:step:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)) + CRLF)
+               hb_inetSend(oDebugInfo["socket"], ;
+                  "STOP:step:" + cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)) + CRLF)
                lStopSent := .T.
             ENDIF
-            
+
          // Check for breakpoints
          ELSEIF InBreakpoint()
             oDebugInfo["lRunning"] := .F.
@@ -862,18 +903,23 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                ELSE
                   FOR i := 2 TO 5
                      cCurrentFile := ProcFile(i)
-                     IF !Empty(cCurrentFile) .AND. !("harbour_debug" $ Lower(cCurrentFile))
+                     IF !Empty(cCurrentFile) .AND. ;
+                        !("harbour_debug" $ Lower(cCurrentFile))
                         nCurrentLine := ProcLine(i)
                         EXIT
                      ENDIF
                   NEXT
                ENDIF
-               LogDebugInfo("Sending STOP:break:" + cCurrentFile + ":" + AllTrim(Str(nCurrentLine)))
-               hb_inetSend(oDebugInfo["socket"], "STOP:break:" + cCurrentFile + ":" + ;
+               LogDebugInfo("Sending STOP:break:" + ;
+                  cCurrentFile + ":" + ;
+                  AllTrim(Str(nCurrentLine)))
+               hb_inetSend(oDebugInfo["socket"], ;
+                  "STOP:break:" + cCurrentFile + ":" + ;
                   AllTrim(Str(nCurrentLine)) + CRLF)
                lStopSent := .T.
             ELSE
-               LogDebugInfo("InBreakpoint returned .T. but lStopSent already .T. - skipping")
+               LogDebugInfo("InBreakpoint .T. but " + ;
+                  "lStopSent already .T. - skipping")
             ENDIF
          ENDIF
          
@@ -905,11 +951,10 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDIF
 
          // Check for tracepoints (data breakpoints - watch variable changes)
-         LogDebugInfo("Tracepoint check: lRunning=" + IIF(oDebugInfo["lRunning"], "T", "F") + ;
-                      ", s_aTracepoints len=" + AllTrim(Str(Len(s_aTracepoints))))
          IF oDebugInfo["lRunning"] .AND. !Empty(s_aTracepoints)
-            // Only check tracepoints if we're still running (not stopped by breakpoint/step)
-            LogDebugInfo("  -> Calling CheckTracepoints()")
+            // Only check tracepoints if we're still running
+            LogDebugInfo("Tracepoint check: calling " + ;
+               "CheckTracepoints()")
             IF CheckTracepoints()
                // Tracepoint hit - stop execution
                oDebugInfo["lRunning"] := .F.
@@ -1308,7 +1353,7 @@ STATIC FUNCTION InBreakpoint()
    LOCAL oDebugInfo := __DEBUGITEM()
    LOCAL cFile := ""
    LOCAL nLine := 0
-   LOCAL cKey, i, aStack
+   LOCAL cKey, i, aStack, cBpKey
    LOCAL lResult := .F.
    LOCAL nBreakCount
 
@@ -1344,8 +1389,17 @@ STATIC FUNCTION InBreakpoint()
    // Check if this file:line has a breakpoint
    IF hb_HHasKey(oDebugInfo["aBreaks"], cKey)
       lResult := .T.
-      LogDebugInfo("InBreakpoint: HIT at " + cKey + " (breakpoints registered: " + ;
-         AllTrim(Str(nBreakCount)) + ")")
+      LogDebugInfo("InBreakpoint: HIT at " + cKey + ;
+         " (breaks=" + AllTrim(Str(nBreakCount)) + ")")
+   ELSEIF nBreakCount > 0
+      // Log near-misses: when file matches a breakpoint file
+      FOR EACH cBpKey IN hb_HKeys(oDebugInfo["aBreaks"])
+         IF cFile $ cBpKey
+            LogDebugInfo("InBreakpoint: MISS at " + ;
+               cKey + " (have " + cBpKey + ")")
+            EXIT
+         ENDIF
+      NEXT
    ENDIF
 
 RETURN lResult
@@ -1712,6 +1766,7 @@ STATIC PROCEDURE SendObjectProperties(cParams)
    LOCAL nStackIndex
    LOCAL tmp, vName, nPrivates, nPublics
    LOCAL aProperties, cPropName
+   LOCAL cBaseName, nBracketPos, cRemaining, nClBracket, nArrayIdx
    
    oDebugInfo := __DEBUGITEM()
    vmStack := oDebugInfo["vmStack"]
@@ -1788,7 +1843,97 @@ STATIC PROCEDURE SendObjectProperties(cParams)
          ENDIF
       NEXT
    ENDCASE
-   
+
+   // If not found and name contains array index (e.g. LOGINS[1]),
+   // resolve the base array variable and navigate to the element
+   IF xObject == NIL .AND. "[" $ cObjectName
+      nBracketPos := At("[", cObjectName)
+      IF nBracketPos > 1
+         cBaseName := Upper(Left(cObjectName, nBracketPos - 1))
+         LogDebugInfo("Object array access: base=" + cBaseName + ;
+            " from " + cObjectName)
+
+         // Find the base array variable in the same scope
+         DO CASE
+         CASE cScope == "LOCALS"
+            IF vmStack != NIL .AND. Len(vmStack) > 0
+               nStackIndex := 1
+               IF Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+                  FOR i := 1 TO Len(vmStack[nStackIndex, ;
+                        HB_DBG_CS_LOCALS])
+                     tmp := vmStack[nStackIndex, ;
+                        HB_DBG_CS_LOCALS, i]
+                     IF Upper(tmp[HB_DBG_VAR_NAME]) == cBaseName
+                        xObject := __dbgVMVarLGet( ;
+                           __dbgProcLevel() - ;
+                           tmp[HB_DBG_VAR_FRAME], ;
+                           tmp[HB_DBG_VAR_INDEX])
+                        EXIT
+                     ENDIF
+                  NEXT
+               ENDIF
+            ENDIF
+            IF xObject == NIL .AND. aStack != NIL .AND. ;
+                  Len(aStack) > 0
+               IF Len(aStack[1, HB_DBG_CS_LOCALS]) > 0
+                  FOR i := 1 TO Len(aStack[1, HB_DBG_CS_LOCALS])
+                     tmp := aStack[1, HB_DBG_CS_LOCALS, i]
+                     IF Upper(tmp[HB_DBG_VAR_NAME]) == cBaseName
+                        xObject := __dbgVMVarLGet( ;
+                           __dbgProcLevel() - ;
+                           tmp[HB_DBG_VAR_FRAME], ;
+                           tmp[HB_DBG_VAR_INDEX])
+                        EXIT
+                     ENDIF
+                  NEXT
+               ENDIF
+            ENDIF
+         CASE cScope == "PRIVATES"
+            nPrivates := __mvDbgInfo(HB_MV_PRIVATE)
+            FOR tmp := 1 TO nPrivates
+               vName := __mvDbgInfo(HB_MV_PRIVATE, tmp, @xValue)
+               IF Upper(vName) == cBaseName
+                  xObject := xValue
+                  EXIT
+               ENDIF
+            NEXT
+         CASE cScope == "PUBLICS"
+            nPublics := __mvDbgInfo(HB_MV_PUBLIC)
+            FOR tmp := 1 TO nPublics
+               vName := __mvDbgInfo(HB_MV_PUBLIC, tmp, @xValue)
+               IF Upper(vName) == cBaseName
+                  xObject := xValue
+                  EXIT
+               ENDIF
+            NEXT
+         ENDCASE
+
+         // Navigate array indices to reach the object element
+         IF xObject != NIL .AND. ValType(xObject) == "A"
+            cRemaining := SubStr(cObjectName, nBracketPos)
+            DO WHILE Left(cRemaining, 1) == "[" .AND. ;
+                  ValType(xObject) == "A"
+               nClBracket := At("]", cRemaining)
+               IF nClBracket < 3
+                  xObject := NIL
+                  EXIT
+               ENDIF
+               nArrayIdx := Val(SubStr(cRemaining, 2, ;
+                  nClBracket - 2))
+               IF nArrayIdx >= 1 .AND. nArrayIdx <= Len(xObject)
+                  xObject := xObject[nArrayIdx]
+               ELSE
+                  xObject := NIL
+                  EXIT
+               ENDIF
+               cRemaining := SubStr(cRemaining, nClBracket + 1)
+            ENDDO
+            LogDebugInfo("Resolved array element: type=" + ;
+               ValType(xObject))
+         ENDIF
+      ENDIF
+   ENDIF
+
    // Send object properties
    hb_inetSend(oDebugInfo["socket"], "OBJECT" + CRLF)
    hb_inetSend(oDebugInfo["socket"], cScope + ":" + cObjectName + CRLF)
@@ -1852,6 +1997,203 @@ STATIC PROCEDURE SendObjectProperties(cParams)
    ENDIF
    
    hb_inetSend(oDebugInfo["socket"], "END_OBJECT" + CRLF)
+RETURN
+
+// Invoke a method on a variable and return the result
+// Format: scope:varName:method (colons in method name were
+// sent as semicolons by Java, restored here)
+STATIC PROCEDURE InvokeMethod(cParams)
+   LOCAL oDebugInfo := __DEBUGITEM()
+   LOCAL vmStack := oDebugInfo["vmStack"]
+   LOCAL aStack := oDebugInfo["aStack"]
+   LOCAL cScope, cVarName, cMethod
+   LOCAL xObject, xResult, cType, cValue
+   LOCAL nStackIndex, i, tmp, vName, xValue
+   LOCAL nPrivates, nPublics
+   LOCAL bError, oErr
+   LOCAL nBracketPos, cBaseName, cRemaining
+   LOCAL nClBracket, nArrayIdx
+
+   // Parse params: scope:varName:method
+   // Restore semicolons to colons in method part
+   cParams := StrTran(cParams, ";", ":")
+
+   // Split: first part = scope, second = varName, rest = method
+   i := At(":", cParams)
+   IF i == 0
+      LogDebugInfo("INVOKE: invalid params: " + cParams)
+      RETURN
+   ENDIF
+   cScope := Left(cParams, i - 1)
+   cParams := SubStr(cParams, i + 1)
+
+   i := At(":", cParams)
+   IF i == 0
+      LogDebugInfo("INVOKE: missing method: " + cParams)
+      RETURN
+   ENDIF
+   cVarName := Left(cParams, i - 1)
+   cMethod := SubStr(cParams, i + 1)
+
+   // Strip parentheses from method name
+   IF Right(cMethod, 2) == "()"
+      cMethod := Left(cMethod, Len(cMethod) - 2)
+   ENDIF
+
+   LogDebugInfo("INVOKE: scope=" + cScope + " var=" + cVarName + ;
+      " method=" + cMethod)
+
+   // Find the variable using same logic as SendObjectProperties
+   xObject := NIL
+   DO CASE
+   CASE cScope == "LOCALS"
+      IF vmStack != NIL .AND. Len(vmStack) > 0
+         nStackIndex := 1
+         IF Len(vmStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
+            FOR i := 1 TO Len(vmStack[nStackIndex, ;
+                  HB_DBG_CS_LOCALS])
+               tmp := vmStack[nStackIndex, HB_DBG_CS_LOCALS, i]
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == Upper(cVarName)
+                  xObject := __dbgVMVarLGet( ;
+                     __dbgProcLevel() - ;
+                     tmp[HB_DBG_VAR_FRAME], ;
+                     tmp[HB_DBG_VAR_INDEX])
+                  EXIT
+               ENDIF
+            NEXT
+         ENDIF
+      ENDIF
+      IF xObject == NIL .AND. aStack != NIL .AND. Len(aStack) > 0
+         IF Len(aStack[1, HB_DBG_CS_LOCALS]) > 0
+            FOR i := 1 TO Len(aStack[1, HB_DBG_CS_LOCALS])
+               tmp := aStack[1, HB_DBG_CS_LOCALS, i]
+               IF Upper(tmp[HB_DBG_VAR_NAME]) == Upper(cVarName)
+                  xObject := __dbgVMVarLGet( ;
+                     __dbgProcLevel() - ;
+                     tmp[HB_DBG_VAR_FRAME], ;
+                     tmp[HB_DBG_VAR_INDEX])
+                  EXIT
+               ENDIF
+            NEXT
+         ENDIF
+      ENDIF
+   CASE cScope == "PRIVATES"
+      nPrivates := __mvDbgInfo(HB_MV_PRIVATE)
+      FOR i := 1 TO nPrivates
+         vName := __mvDbgInfo(HB_MV_PRIVATE, i, @xValue)
+         IF Upper(vName) == Upper(cVarName)
+            xObject := xValue
+            EXIT
+         ENDIF
+      NEXT
+   CASE cScope == "PUBLICS"
+      nPublics := __mvDbgInfo(HB_MV_PUBLIC)
+      FOR i := 1 TO nPublics
+         vName := __mvDbgInfo(HB_MV_PUBLIC, i, @xValue)
+         IF Upper(vName) == Upper(cVarName)
+            xObject := xValue
+            EXIT
+         ENDIF
+      NEXT
+   ENDCASE
+
+   // Handle array element access (e.g. LOGINS[1])
+   IF xObject == NIL .AND. "[" $ cVarName
+      nBracketPos := At("[", cVarName)
+      IF nBracketPos > 1
+         cBaseName := Upper(Left(cVarName, nBracketPos - 1))
+         // Re-lookup base variable (reuse same scope logic)
+         DO CASE
+         CASE cScope == "LOCALS"
+            IF vmStack != NIL .AND. Len(vmStack) > 0
+               IF Len(vmStack[1, HB_DBG_CS_LOCALS]) > 0
+                  FOR i := 1 TO Len(vmStack[1, ;
+                        HB_DBG_CS_LOCALS])
+                     tmp := vmStack[1, HB_DBG_CS_LOCALS, i]
+                     IF Upper(tmp[HB_DBG_VAR_NAME]) == cBaseName
+                        xObject := __dbgVMVarLGet( ;
+                           __dbgProcLevel() - ;
+                           tmp[HB_DBG_VAR_FRAME], ;
+                           tmp[HB_DBG_VAR_INDEX])
+                        EXIT
+                     ENDIF
+                  NEXT
+               ENDIF
+            ENDIF
+         CASE cScope == "PRIVATES"
+            nPrivates := __mvDbgInfo(HB_MV_PRIVATE)
+            FOR i := 1 TO nPrivates
+               vName := __mvDbgInfo(HB_MV_PRIVATE, i, @xValue)
+               IF Upper(vName) == cBaseName
+                  xObject := xValue
+                  EXIT
+               ENDIF
+            NEXT
+         CASE cScope == "PUBLICS"
+            nPublics := __mvDbgInfo(HB_MV_PUBLIC)
+            FOR i := 1 TO nPublics
+               vName := __mvDbgInfo(HB_MV_PUBLIC, i, @xValue)
+               IF Upper(vName) == cBaseName
+                  xObject := xValue
+                  EXIT
+               ENDIF
+            NEXT
+         ENDCASE
+         // Navigate array indices
+         IF xObject != NIL .AND. ValType(xObject) == "A"
+            cRemaining := SubStr(cVarName, nBracketPos)
+            DO WHILE Left(cRemaining, 1) == "[" .AND. ;
+                  ValType(xObject) == "A"
+               nClBracket := At("]", cRemaining)
+               IF nClBracket < 3
+                  xObject := NIL
+                  EXIT
+               ENDIF
+               nArrayIdx := Val(SubStr(cRemaining, 2, ;
+                  nClBracket - 2))
+               IF nArrayIdx >= 1 .AND. nArrayIdx <= Len(xObject)
+                  xObject := xObject[nArrayIdx]
+               ELSE
+                  xObject := NIL
+                  EXIT
+               ENDIF
+               cRemaining := SubStr(cRemaining, nClBracket + 1)
+            ENDDO
+         ENDIF
+      ENDIF
+   ENDIF
+
+   IF xObject == NIL
+      LogDebugInfo("INVOKE: variable not found: " + cVarName)
+      hb_inetSend(oDebugInfo["socket"], ;
+         "EXPRESSION:1:E:Variable not found: " + cVarName + CRLF)
+      RETURN
+   ENDIF
+
+   // Call the method on the object
+   bError := ErrorBlock({|e| oErr := e, Break(e)})
+   oDebugInfo["lInternalRun"] := .T.
+   BEGIN SEQUENCE
+      xResult := __objSendMsg(xObject, cMethod)
+   RECOVER
+      xResult := oErr
+   END SEQUENCE
+   oDebugInfo["lInternalRun"] := .F.
+   ErrorBlock(bError)
+
+   // Format and send result
+   IF ValType(xResult) == "O" .AND. xResult:ClassName() == "ERROR"
+      cType := "E"
+      cValue := xResult:Description
+      LogDebugInfo("INVOKE error: " + cValue)
+   ELSE
+      cType := ValType(xResult)
+      cValue := FormatValue(xResult)
+      LogDebugInfo("INVOKE result: " + cType + ":" + cValue)
+   ENDIF
+
+   hb_inetSend(oDebugInfo["socket"], "EXPRESSION:1:" + ;
+      cType + ":" + cValue + CRLF)
 RETURN
 
 // Send list of all open workareas
@@ -2294,7 +2636,8 @@ STATIC PROCEDURE SendExpression(cParams)
    LOCAL cVarName, xValue, lFound := .F.
    LOCAL lHasLocals, lMacroWorked
    LOCAL nBracketStart, nBracketEnd, cVarPart, cKeyPart
-   
+   LOCAL vmStack := oDebugInfo["vmStack"]
+
    // Debug log entry
    LogDebugInfo("SendExpression called with: " + cParams)
    LogDebugInfo("  Current proc level: " + AllTrim(Str(__dbgProcLevel())))
@@ -2445,8 +2788,16 @@ STATIC PROCEDURE SendExpression(cParams)
                  ValType(aStack[nStackIndex, HB_DBG_CS_LOCALS]) == "A" .AND. ;
                  Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]) > 0
    
-   // If no locals metadata, try to build it at runtime
-   IF !lHasLocals .AND. nStackIndex > 0 .AND. nStackIndex <= Len(aStack)
+   // If no locals metadata, try to build it at runtime.
+   // Skip this when vmStack (VM-provided, with the REAL names) already has
+   // locals: the runtime enumeration below can only invent placeholder names
+   // (FOO/BAR/LOCALn), which never match the user's real local names, so
+   // expressions like len(callername) stay unresolved. When vmStack has real
+   // locals we let the vmStack fallback further down do the replacement.
+   IF !lHasLocals .AND. nStackIndex > 0 .AND. nStackIndex <= Len(aStack) .AND. ;
+      !( vmStack != NIL .AND. Len(vmStack) > 0 .AND. ;
+         vmStack[1, HB_DBG_CS_LOCALS] != NIL .AND. ;
+         Len(vmStack[1, HB_DBG_CS_LOCALS]) > 0 )
       LogDebugInfo("No locals metadata, attempting to enumerate at runtime")
       
       // Initialize locals array if needed
@@ -2522,20 +2873,57 @@ STATIC PROCEDURE SendExpression(cParams)
       LogDebugInfo("Replacing " + AllTrim(Str(Len(aStack[nStackIndex, HB_DBG_CS_LOCALS]))) + " locals")
       FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_LOCALS])
          tmp := aStack[nStackIndex, HB_DBG_CS_LOCALS, i]
-         cExpression := ReplaceExpression(cExpression, @aDbg, tmp[HB_DBG_VAR_NAME], ;
-                       __dbgVMVarLGet(__dbgProcLevel() - tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX]))
+         cExpression := ReplaceExpression(cExpression, @aDbg, ;
+            tmp[HB_DBG_VAR_NAME], ;
+            __dbgVMVarLGet(__dbgProcLevel() - ;
+               tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX]))
       NEXT
-      
+
       // 2. Replace procedure statics
       IF Len(aStack[nStackIndex]) >= HB_DBG_CS_STATICS .AND. ;
          ValType(aStack[nStackIndex, HB_DBG_CS_STATICS]) == "A"
-         
+
          LogDebugInfo("Replacing " + AllTrim(Str(Len(aStack[nStackIndex, HB_DBG_CS_STATICS]))) + " proc statics")
          FOR i := 1 TO Len(aStack[nStackIndex, HB_DBG_CS_STATICS])
             tmp := aStack[nStackIndex, HB_DBG_CS_STATICS, i]
-            cExpression := ReplaceExpression(cExpression, @aDbg, tmp[HB_DBG_VAR_NAME], ;
-                          __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], tmp[HB_DBG_VAR_INDEX]))
+            cExpression := ReplaceExpression(cExpression, @aDbg, ;
+               tmp[HB_DBG_VAR_NAME], ;
+               __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], ;
+                  tmp[HB_DBG_VAR_INDEX]))
          NEXT
+      ENDIF
+   ELSE
+      // Fallback: use vmStack locals (VM-provided, more reliable)
+      IF vmStack != NIL .AND. Len(vmStack) > 0
+         IF vmStack[1, HB_DBG_CS_LOCALS] != NIL .AND. ;
+               Len(vmStack[1, HB_DBG_CS_LOCALS]) > 0
+            LogDebugInfo("Using vmStack fallback: " + ;
+               AllTrim(Str(Len(vmStack[1, ;
+                  HB_DBG_CS_LOCALS]))) + " locals")
+            FOR i := 1 TO Len(vmStack[1, HB_DBG_CS_LOCALS])
+               tmp := vmStack[1, HB_DBG_CS_LOCALS, i]
+               cExpression := ReplaceExpression(cExpression, ;
+                  @aDbg, tmp[HB_DBG_VAR_NAME], ;
+                  __dbgVMVarLGet(__dbgProcLevel() - ;
+                     tmp[HB_DBG_VAR_FRAME], ;
+                     tmp[HB_DBG_VAR_INDEX]))
+            NEXT
+            lHasLocals := .T.
+         ENDIF
+         // Also try statics from vmStack
+         IF vmStack[1, HB_DBG_CS_STATICS] != NIL .AND. ;
+               Len(vmStack[1, HB_DBG_CS_STATICS]) > 0
+            LogDebugInfo("Using vmStack statics: " + ;
+               AllTrim(Str(Len(vmStack[1, ;
+                  HB_DBG_CS_STATICS]))) + " statics")
+            FOR i := 1 TO Len(vmStack[1, HB_DBG_CS_STATICS])
+               tmp := vmStack[1, HB_DBG_CS_STATICS, i]
+               cExpression := ReplaceExpression(cExpression, ;
+                  @aDbg, tmp[HB_DBG_VAR_NAME], ;
+                  __dbgVMVarSGet(tmp[HB_DBG_VAR_FRAME], ;
+                     tmp[HB_DBG_VAR_INDEX]))
+            NEXT
+         ENDIF
       ENDIF
    ENDIF
    

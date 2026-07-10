@@ -5,6 +5,7 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.charset.Charset;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +21,7 @@ public class HarbourDebuggerConnection {
     private static final String CRLF = "\r\n";
     
     private final int port;
+    private final Charset charset;
     private ServerSocket serverSocket;
     private Socket clientSocket;
     private BufferedReader reader;
@@ -29,10 +31,17 @@ public class HarbourDebuggerConnection {
     private volatile boolean waitingForConnection = false;
     private final BlockingQueue<String> commandQueue = new LinkedBlockingQueue<>();
     private Consumer<String> messageHandler;
-    
+
     public HarbourDebuggerConnection(int port) {
+        this(port, Charset.forName("windows-1252"));
+    }
+
+    public HarbourDebuggerConnection(int port, Charset charset) {
         this.port = port > 0 ? port : DEFAULT_PORT;
-        HarbourLogger.log("HarbourDebuggerConnection", "Created debugger connection on port " + this.port);
+        this.charset = charset != null ? charset : Charset.forName("windows-1252");
+        HarbourLogger.log("HarbourDebuggerConnection",
+                "Created debugger connection on port " + this.port
+                        + " with charset " + this.charset.name());
     }
     
     /**
@@ -104,9 +113,11 @@ public class HarbourDebuggerConnection {
                 throw e; // Re-throw to be handled by outer catch block
             }
 
-            // Setup streams
-            reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-            writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+            // Setup streams using the configured debugger charset (defaults to windows-1252).
+            // Harbour's debug agent sends raw bytes from DBF / runtime in the program's native
+            // codepage; using the JVM default would mangle umlauts and other high-bit chars.
+            reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), charset));
+            writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream(), charset), true);
 
             // Enable TCP keep-alive to prevent connection drop during long pauses
             clientSocket.setKeepAlive(true);
@@ -215,9 +226,11 @@ public class HarbourDebuggerConnection {
                 throw e; // Re-throw to be handled by outer catch block
             }
             
-            // Setup streams
-            reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-            writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+            // Setup streams using the configured debugger charset (defaults to windows-1252).
+            // Harbour's debug agent sends raw bytes from DBF / runtime in the program's native
+            // codepage; using the JVM default would mangle umlauts and other high-bit chars.
+            reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), charset));
+            writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream(), charset), true);
 
             // Enable TCP keep-alive to prevent connection drop during long pauses
             clientSocket.setKeepAlive(true);

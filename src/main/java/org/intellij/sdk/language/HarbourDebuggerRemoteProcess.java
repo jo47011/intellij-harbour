@@ -69,8 +69,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile boolean shutdownRequested = false;
     
     // Command throttling settings - ZERO DELAY for absolute maximum speed
-    private static final long MIN_COMMAND_INTERVAL = 0;   // No delay between commands 
+    private static final long MIN_COMMAND_INTERVAL = 0;   // No delay between commands
     private static final long NEXT_COMMAND_DELAY = 0;     // No extra delay for NEXT commands
+    // Timeout for synchronous debug-variable/expression evaluation requests
+    // (expression eval, method invoke, array element loading)
+    private static final int EVAL_TIMEOUT_SECONDS = 60;
     
     // Debugger state management - prevents rapid command execution
     public enum DebuggerState {
@@ -87,6 +90,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile boolean expectingStackForPosition = false;
     private volatile String lastStopFile = null;
     private volatile int lastStopLine = -1;
+    private volatile long lastStopTime = 0;
 
     // Track variable scope completion for synchronized UI update
     private final Set<String> receivedVariableScopes = Collections.synchronizedSet(new HashSet<>());
@@ -121,7 +125,7 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         this.breakpointHandler = new HarbourDebuggerBreakpointHandler(this);
         
         // Set up listener for proper breakpoint timing
-        project.getMessageBus().connect().subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
+        project.getMessageBus().connect(project).subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
             @Override
             public void processStarted(@NotNull XDebugProcess debugProcess) {
                 if (debugProcess == HarbourDebuggerRemoteProcess.this) {
@@ -144,8 +148,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
             }
         });
         
-        // Create debug connection
-        this.connection = new HarbourDebuggerConnection(debugPort);
+        // Create debug connection with charset from settings (handles DBF umlauts etc.)
+        this.connection = new HarbourDebuggerConnection(debugPort,
+                HarbourSettings.getInstance(project).getResolvedDebuggerCharset(project));
         
         // Create live DBF connection for workarea monitoring
         this.liveDBFConnection = new HarbourLiveDBFConnection(project, connection);
@@ -377,17 +382,13 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                                 String file = parts[2];
                                 int line = Integer.parseInt(parts[3].trim());
                                 
-                                // Check if this is a breakpoint hit that needs condition evaluation
-                                if ("break".equals(reason)) {
-                                    // Store the conditional breakpoint info for later evaluation
+                                // Check if this is a conditional breakpoint
+                                if ("break".equals(reason) &&
+                                        hasConditionalBreakpoint(file, line)) {
                                     conditionalBreakpointFile = file;
                                     conditionalBreakpointLine = line;
-                                    // Handle the stop to collect variables first, then evaluate condition
-                                    handleStop(file, line);
-                                } else {
-                                    // Non-breakpoint stop (AltD, step, etc.)
-                                    handleStop(file, line);
                                 }
+                                handleStop(file, line);
                             } catch (NumberFormatException e) {
                                 HarbourLogger.log(project, "HarbourDebuggerRemoteProcess", "Invalid line number in STOP command: " + parts[3]);
                             }
@@ -823,6 +824,15 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
     
     private void handleStop(String file, int line) {
+        // Duplicate STOP suppression: ignore same file:line within 100ms
+        long now = System.currentTimeMillis();
+        if (file.equals(lastStopFile) && line == lastStopLine &&
+                (now - lastStopTime) < 100) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Suppressing duplicate STOP for " + file + ":" + line);
+            return;
+        }
+
         currentFile = file;
         currentLine = line;
 
@@ -833,11 +843,11 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         abortVariableWait = false;
 
         // Set flags to track STACK and variable scope arrivals
-        expectingStackForPosition = true;
         waitingForVariables = true;
         receivedVariableScopes.clear();
         lastStopFile = file;
         lastStopLine = line;
+        lastStopTime = now;
 
         // Request stack trace for call stack panel AND position verification
         sendCommand("STACK");
@@ -848,19 +858,53 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         sendCommand("PRIVATES", "0");
         sendCommand("PUBLICS");
 
-        // Start timeout thread to show position if STACK doesn't arrive
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            try {
-                Thread.sleep(1000);  // Wait 1 second for STACK
-            } catch (InterruptedException e) {
-                // Interrupted, that's fine
-            }
-            // If we still haven't shown position, do it now with STOP data
-            if (expectingStackForPosition) {
-                expectingStackForPosition = false;
-                showPositionInUI(file, line);
-            }
-        });
+        // Check if this is a conditional breakpoint that needs evaluation
+        if (conditionalBreakpointFile != null &&
+                conditionalBreakpointLine >= 0) {
+            final String cbFile = conditionalBreakpointFile;
+            final int cbLine = conditionalBreakpointLine;
+            // Don't let STACK auto-trigger showPositionInUI
+            expectingStackForPosition = false;
+
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                // Wait for variables to arrive (needed for condition eval)
+                waitForVariables(2000);
+
+                boolean shouldStop =
+                    shouldStopAtConditionalBreakpoint(cbFile, cbLine);
+                conditionalBreakpointFile = null;
+                conditionalBreakpointLine = -1;
+
+                if (shouldStop) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Conditional BP met at " + cbFile + ":" + cbLine);
+                    showPositionInUI(file, line);
+                } else {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Conditional BP NOT met at " +
+                        cbFile + ":" + cbLine + ", continuing");
+                    updateDebuggerState(DebuggerState.RUNNING, false);
+                    sendCommand("GO");
+                }
+            });
+        } else {
+            // Normal (non-conditional) stop
+            expectingStackForPosition = true;
+
+            // Start timeout thread to show position if STACK doesn't arrive
+            ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                try {
+                    Thread.sleep(1000);  // Wait 1 second for STACK
+                } catch (InterruptedException e) {
+                    // Interrupted, that's fine
+                }
+                // If we still haven't shown position, do it now with STOP data
+                if (expectingStackForPosition) {
+                    expectingStackForPosition = false;
+                    showPositionInUI(file, line);
+                }
+            });
+        }
 
         // Note: We'll show UI when STACK arrives (fast), but variables will load async
         // HarbourDebuggerStackFrame.computeChildren() will wait for variables if needed
@@ -1320,15 +1364,28 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         // Get the object variable from our map
         HarbourDebuggerValue objectVar = variables.get(objectKey);
         
+        // If not found directly, it might be an array element (e.g. LOGINS[1])
+        if (objectVar == null && objectName.contains("[")) {
+            int bracketIndex = objectName.indexOf("[");
+            String parentName = objectName.substring(0, bracketIndex);
+            String parentKey = scope + "." + parentName;
+
+            HarbourDebuggerValue parentVar = variables.get(parentKey);
+            if (parentVar != null) {
+                String indices = objectName.substring(bracketIndex);
+                objectVar = findNestedArray(parentVar, indices);
+                if (objectVar != null) {
+                    HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Found object in array element: " + objectName);
+                }
+            }
+        }
+
         if (objectVar == null) {
-            // Log all available keys for debugging
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Object variable not found: " + objectKey);
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Available keys in variables map: " + variables.keySet());
-            
-            // Maybe the response arrived after variables were cleared, keep the object for next time
-            // Store a placeholder if needed
             return;
         }
         
@@ -1485,8 +1542,27 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                         elementValue.setArrayInfo(scope, arrayName + "[" + index + "]", arraySize);
                         elementValue.setDebugProcess(this);
                     } catch (Exception e) {
-                        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess",
                             "Failed to parse nested array size from: " + value);
+                    }
+                }
+
+                // If element is an object, set it up for expansion
+                if ("O".equals(type)) {
+                    elementValue.setObjectInfo(scope, arrayName + "[" + index + "]");
+                    elementValue.setDebugProcess(this);
+                }
+
+                // If element is a hash, set it up for expansion
+                if ("H".equals(type) && value.startsWith("Hash(") && value.endsWith(")")) {
+                    try {
+                        String sizeStr = value.substring(5, value.length() - 1);
+                        int hashSize = Integer.parseInt(sizeStr);
+                        elementValue.setHashInfo(scope, arrayName + "[" + index + "]", hashSize);
+                        elementValue.setDebugProcess(this);
+                    } catch (Exception e) {
+                        HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                            "Failed to parse nested hash size from: " + value);
                     }
                 }
                 
@@ -1499,9 +1575,14 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         // Trigger UI update - this needs to be done through the debug session
         // The array variable should now have its children populated
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
             "Array " + arrayKey + " now has " + arrayVar.getChildren().size() + " elements loaded");
-        
+
+        // Complete pending synchronous future if this matches
+        if (pendingArrayLoadFuture != null && arrayKey.equals(pendingArrayLoadKey)) {
+            pendingArrayLoadFuture.complete(true);
+        }
+
         // Update the UI with the loaded children
         arrayVar.updateChildren();
     }
@@ -2328,6 +2409,37 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     }
 
     /**
+     * Quick check if a breakpoint at file:line has any condition or hit condition.
+     */
+    private boolean hasConditionalBreakpoint(String file, int line) {
+        if (breakpointHandler == null) return false;
+        for (var bp : breakpointHandler.getRegisteredBreakpoints()) {
+            if (bp.getSourcePosition() != null) {
+                String bpFile = bp.getSourcePosition().getFile().getName();
+                int bpLine = bp.getSourcePosition().getLine() + 1;
+                if (bpFile.equalsIgnoreCase(file) && bpLine == line) {
+                    HarbourDebuggerBreakpointProperties props =
+                        bp.getProperties();
+                    if (props != null &&
+                            (props.hasCondition() ||
+                             props.hasHitCondition())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Also check with path-stripped filename
+        String stripped = file;
+        int idx = Math.max(stripped.lastIndexOf('/'),
+                           stripped.lastIndexOf('\\'));
+        if (idx >= 0) stripped = stripped.substring(idx + 1);
+        if (!stripped.equals(file)) {
+            return hasConditionalBreakpoint(stripped, line);
+        }
+        return false;
+    }
+
+    /**
      * Check if we should stop at a conditional breakpoint by evaluating its condition
      */
     private boolean shouldStopAtConditionalBreakpoint(String file, int line) {
@@ -2500,10 +2612,24 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
                     String expectedValue = parts[1].trim();
                     return evaluateComparison(varName, expectedValue, "<");
                 }
+            } else if (condition.contains("=")) {
+                // Single = is Harbour's equality operator (checked last
+                // after ==, !=, >=, <= which all contain =)
+                String[] parts = condition.split("=", 2);
+                if (parts.length == 2) {
+                    String varName = parts[0].trim();
+                    String expectedValue = parts[1].trim();
+                    HarbourLogger.log(project, "HarbourDebugger",
+                        "EVAL DEBUG: Single '=' operator: '" +
+                        varName + "' = '" + expectedValue + "'");
+                    return evaluateComparison(
+                        varName, expectedValue, "==");
+                }
             }
-            
-            HarbourLogger.log(project, "HarbourDebugger", 
-                "Unsupported condition format: " + condition + " - defaulting to true");
+
+            HarbourLogger.log(project, "HarbourDebugger",
+                "Unsupported condition format: " + condition +
+                " - defaulting to true");
             return true;
             
         } catch (Exception e) {
@@ -3208,14 +3334,118 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
      * @param count The number of elements to retrieve
      */
     public void requestArrayElements(String scope, String arrayName, int start, int count) {
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
             "Requesting array elements for " + scope + "." + arrayName + " [" + start + ".." + (start+count-1) + "]");
-        
+
         // Send command to debugger to get array elements
         // Format: ARRAY:scope:name:start:count
         sendCommand("ARRAY", scope + ":" + arrayName + ":" + start + ":" + count);
     }
-    
+
+    // Pending future for synchronous array element requests
+    private volatile CompletableFuture<Boolean> pendingArrayLoadFuture = null;
+    private volatile String pendingArrayLoadKey = null;
+
+    /**
+     * Synchronously request array elements for a variable and wait for them.
+     * Used by the evaluator to resolve expressions like "Logins[1]".
+     * @param arrayValue The HarbourDebuggerValue representing the array
+     * @return The loaded children list, or empty list on failure
+     */
+    public java.util.List<HarbourDebuggerValue> requestArrayElementsSync(
+            HarbourDebuggerValue arrayValue) {
+        String scope = null;
+        String arrayName = null;
+        int arraySize = 0;
+
+        // Extract scope and array name from the value's stored info
+        // We need to find this value in our variables map to get the key
+        for (var entry : variables.entrySet()) {
+            if (entry.getValue() == arrayValue) {
+                String key = entry.getKey();
+                int dotIndex = key.indexOf('.');
+                if (dotIndex > 0) {
+                    scope = key.substring(0, dotIndex);
+                    arrayName = key.substring(dotIndex + 1);
+                }
+                break;
+            }
+        }
+
+        // Fallback: check children of other variables (nested arrays)
+        if (scope == null) {
+            for (var entry : variables.entrySet()) {
+                HarbourDebuggerValue parent = entry.getValue();
+                if (parent.getChildren() != null) {
+                    for (HarbourDebuggerValue child : parent.getChildren()) {
+                        if (child == arrayValue) {
+                            String key = entry.getKey();
+                            int dotIndex = key.indexOf('.');
+                            if (dotIndex > 0) {
+                                scope = key.substring(0, dotIndex);
+                                // For nested array, build path
+                                String parentName = key.substring(dotIndex + 1);
+                                int childIdx = parent.getChildren().indexOf(child) + 1;
+                                arrayName = parentName + "[" + childIdx + "]";
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (scope != null) break;
+            }
+        }
+
+        if (scope == null || arrayName == null) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Cannot determine scope/name for array sync request");
+            return java.util.Collections.emptyList();
+        }
+
+        // Parse array size from value string like "Array(5)"
+        String valueStr = arrayValue.getValue();
+        if (valueStr != null && valueStr.startsWith("Array(") &&
+                valueStr.endsWith(")")) {
+            try {
+                arraySize = Integer.parseInt(
+                    valueStr.substring(6, valueStr.length() - 1));
+            } catch (NumberFormatException e) {
+                arraySize = 100;
+            }
+        } else {
+            arraySize = 100;
+        }
+
+        String arrayKey = scope + "." + arrayName;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
+            "Synchronous array request for " + arrayKey +
+            " (size=" + arraySize + ")");
+
+        // Set up future before sending command
+        pendingArrayLoadKey = arrayKey;
+        pendingArrayLoadFuture = new CompletableFuture<>();
+
+        // Send the request
+        int maxElements = Math.min(arraySize, 100);
+        sendCommand("ARRAY", scope + ":" + arrayName + ":" + 1 + ":" + maxElements);
+
+        // Wait for response
+        try {
+            pendingArrayLoadFuture.get(EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Sync array request timed out or failed for " + arrayKey +
+                ": " + e.getMessage());
+        } finally {
+            pendingArrayLoadFuture = null;
+            pendingArrayLoadKey = null;
+        }
+
+        // Return children (may have been populated by handleArrayElements)
+        java.util.List<HarbourDebuggerValue> children = arrayValue.getChildren();
+        return children != null ? children : java.util.Collections.emptyList();
+    }
+
     /**
      * Request hash elements for a specific hash variable
      * @param scope The variable scope (LOCALS, STATICS, etc.)
@@ -3262,9 +3492,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         
         try {
             // Wait for response with timeout
-            return future.get(5, TimeUnit.SECONDS);
+            return future.get(EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
                 "Expression evaluation timed out: " + command);
             pendingExpressions.remove(command);
             return "Evaluation timed out";
@@ -3276,8 +3506,37 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         }
     }
     
+    /**
+     * Send INVOKE command and wait for response.
+     * Reuses the EXPRESSION response handler.
+     */
+    public String requestInvoke(String command) {
+        lastExpressionCommand = "INVOKE:" + command;
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
+            "Requesting method invoke: " + command);
+
+        CompletableFuture<String> future = new CompletableFuture<>();
+        pendingExpressions.put(lastExpressionCommand, future);
+
+        sendCommand("INVOKE", command);
+
+        try {
+            return future.get(EVAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Method invoke timed out: " + command);
+            pendingExpressions.remove(lastExpressionCommand);
+            return "Evaluation timed out";
+        } catch (Exception e) {
+            HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                "Method invoke failed: " + e.getMessage());
+            pendingExpressions.remove(lastExpressionCommand);
+            return "Evaluation failed: " + e.getMessage();
+        }
+    }
+
     private void handleExpressionResult(String response) {
-        HarbourLogger.log("HarbourDebuggerRemoteProcess", 
+        HarbourLogger.log("HarbourDebuggerRemoteProcess",
             "Received expression result: " + response);
         
         // Parse EXPRESSION:stack_level:type:value

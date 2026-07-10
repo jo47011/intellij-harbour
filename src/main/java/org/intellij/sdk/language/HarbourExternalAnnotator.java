@@ -725,11 +725,29 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 }
                 HarbourLogger.log("HarbourLinter", "=== END COMPILER OUTPUT ===");
                 
+                // Read source file lines for false-positive filtering
+                List<String> sourceLines = null;
+                try {
+                    sourceLines = Files.readAllLines(
+                        Paths.get(info.getFilePath()), StandardCharsets.UTF_8);
+                } catch (Exception e) {
+                    HarbourLogger.log("HarbourLinter",
+                        "Could not read source for filtering: " + e.getMessage());
+                }
+
                 // Parse output for errors/warnings
                 int parsedCount = 0;
                 for (String line : outputLines) {
                     HarbourLintResult result = parseErrorLine(line, info.getFilePath());
                     if (result != null) {
+                        // Filter false positive: compiler treats "loca for" as LOCAL
+                        // but it is actually the LOCATE FOR command
+                        if (isLocateForFalsePositive(result, sourceLines)) {
+                            HarbourLogger.log("HarbourLinter",
+                                "Suppressed false positive E0004 for LOCATE FOR at line "
+                                + result.getLine());
+                            continue;
+                        }
                         results.add(result);
                         parsedCount++;
                         HarbourLogger.log("HarbourLinter", "PARSED ERROR/WARNING #" + parsedCount + ": " + line);
@@ -1173,7 +1191,25 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
         
         return new HarbourLintResult(lineNumber, 0, message, severity, errorCode);
     }
-    
+
+    /**
+     * Check if a compiler error is a false positive caused by the compiler
+     * treating "loca for" (LOCATE FOR command) as a LOCAL declaration.
+     */
+    private boolean isLocateForFalsePositive(
+            HarbourLintResult result, List<String> sourceLines) {
+        if (sourceLines == null) return false;
+        String msg = result.getMessage();
+        if (msg == null) return false;
+        // Only check errors about LOCAL declaration placement
+        if (!msg.toLowerCase().contains("local declaration")) return false;
+        int lineIdx = result.getLine() - 1;
+        if (lineIdx < 0 || lineIdx >= sourceLines.size()) return false;
+        String srcLine = sourceLines.get(lineIdx).trim().toLowerCase();
+        return srcLine.startsWith("loca for ") || srcLine.startsWith("locate for ")
+            || srcLine.equals("loca for") || srcLine.equals("locate for");
+    }
+
     /**
      * Find the text range of a variable declaration in the PSI tree.
      */

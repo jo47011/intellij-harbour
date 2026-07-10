@@ -154,7 +154,7 @@ public final class HarbourCompletionCache {
      * Invalidate cache when files change
      */
     private void setupFileChangeListener() {
-        MessageBusConnection connection=project.getMessageBus().connect();
+        MessageBusConnection connection=project.getMessageBus().connect(project);
         connection.subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener() {
             @Override
             public void after(@NotNull List<? extends VFileEvent> events) {

@@ -2185,7 +2185,17 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                         // Only read if file was modified and has new content
                         if (currentModified > hbmkLastModified || currentSize > hbmkLastSize) {
                             try {
-                                String content = new String(java.nio.file.Files.readAllBytes(hbmkErrorFile.toPath()));
+                                // Auto-detect log charset so umlauts work regardless of the user's
+                                // Harbour CDP / IntelliJ encoding setup:
+                                //   1. UTF-8 first — if Harbour wrote UTF-8, decode succeeds cleanly
+                                //   2. project charset (File | Settings | File Encodings) — honors user setting
+                                //   3. ISO-8859-1 — always-valid fallback (maps every byte 1:1)
+                                byte[] errBytes = java.nio.file.Files.readAllBytes(hbmkErrorFile.toPath());
+                                Charset projectCharset = com.intellij.openapi.vfs.encoding.EncodingProjectManager
+                                    .getInstance(project).getDefaultCharset();
+                                String content = decodeBestEffort(errBytes, projectCharset);
+                                HarbourLogger.log(project, "HarbourDebugger",
+                                    "Decoded pycharm_errors.log (project charset hint: " + projectCharset.name() + ")");
 
                                 if (!content.trim().isEmpty()) {
                                     // Send error to console with simple direct hyperlinks
@@ -2248,6 +2258,24 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         HarbourLogger.log(project, "HarbourDebugger", "Error file monitor started successfully");
     }
     
+    /**
+     * Decode pycharm_errors.log bytes using best-effort charset detection.
+     * Order: UTF-8 (rejected on U+FFFD), project hint, ISO-8859-1 (always succeeds).
+     */
+    private static String decodeBestEffort(byte[] bytes, Charset projectHint) {
+        String utf8 = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        if (utf8.indexOf('�') < 0) {
+            return utf8;
+        }
+        if (projectHint != null && !projectHint.equals(java.nio.charset.StandardCharsets.UTF_8)) {
+            String hinted = new String(bytes, projectHint);
+            if (hinted.indexOf('�') < 0) {
+                return hinted;
+            }
+        }
+        return new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
+    }
+
     /**
      * Display stacktrace with clickable lines - supports all formats
      */
