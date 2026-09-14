@@ -40,9 +40,10 @@ public class HarbourCompilerOutputFilter implements Filter {
     //   "  FUNCTION_NAME(line) in filename"              — current format (whitespace-indented)
     // Allow $ in function names for Windows compatibility (e.g. __TESTSIMPLEINIT$).
     // Optional (...) prefix matches Harbour block-frame indicators like (b)INIT_HB so they are clickable too.
+    // Optional CLASS: prefix matches method frames like CTRECORD:READ(658) in SEPA.prg.
     private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile(
-        "at\\s+(?:\\([^)]*\\))?([\\w$]+)\\((\\d+)\\)" +
-        "|(?:Stack:|^)\\s+(?:\\([^)]*\\))?([\\w$]+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
+        "at\\s+(?:\\([^)]*\\))?([\\w$]+(?::[\\w$]+)?)\\((\\d+)\\)" +
+        "|(?:Stack:|^)\\s+(?:\\([^)]*\\))?([\\w$]+(?::[\\w$]+)?)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
     
     // Pattern to match runtime stacktrace file references: "at filename.prg(line)"
     private static final Pattern RUNTIME_FILE_PATTERN = Pattern.compile("at\\s+([^\\s]+\\.prg)\\((\\d+)\\)");

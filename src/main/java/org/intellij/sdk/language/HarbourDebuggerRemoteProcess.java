@@ -11,6 +11,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.xdebugger.XDebugProcess;
 import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebugSessionListener;
 import com.intellij.xdebugger.XDebuggerUtil;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.XDebuggerManagerListener;
@@ -57,7 +58,9 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
     private volatile String lastCommand = "";
     private volatile long lastCommandTime = 0;
     private volatile boolean sessionInitialized = false;
-    
+    // Last known global "Mute Breakpoints" state, to detect mid-session toggles
+    private volatile boolean lastMuteState = false;
+
     // Conditional breakpoint evaluation fields
     private String conditionalBreakpointFile = null;
     private int conditionalBreakpointLine = -1;
@@ -123,7 +126,29 @@ public class HarbourDebuggerRemoteProcess extends HarbourDebuggerBaseProcess {
         this.project = session.getProject();
         this.debugPort = debugPort;
         this.breakpointHandler = new HarbourDebuggerBreakpointHandler(this);
-        
+
+        // React to a mid-session "Mute Breakpoints" toggle. The platform does not
+        // re-sync already-sent breakpoints with the running program, so push the
+        // change ourselves: on mute remove them from the target, on unmute re-send.
+        this.lastMuteState = session.areBreakpointsMuted();
+        session.addSessionListener(new XDebugSessionListener() {
+            @Override
+            public void settingsChanged() {
+                boolean muted = getSession().areBreakpointsMuted();
+                if (muted == lastMuteState) {
+                    return;
+                }
+                lastMuteState = muted;
+                HarbourLogger.log("HarbourDebuggerRemoteProcess",
+                        "Breakpoint mute toggled mid-session - muted=" + muted);
+                if (muted) {
+                    breakpointHandler.removeAllBreakpoints();
+                } else {
+                    breakpointHandler.sendAllBreakpoints();
+                }
+            }
+        });
+
         // Set up listener for proper breakpoint timing
         project.getMessageBus().connect(project).subscribe(XDebuggerManager.TOPIC, new XDebuggerManagerListener() {
             @Override
