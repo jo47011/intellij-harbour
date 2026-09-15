@@ -249,6 +249,34 @@ public class HarbourDebuggerBreakpointHandler extends XBreakpointHandler<XLineBr
     }
     
     /**
+     * Remove all registered breakpoints from the remote debugger.
+     * Used when breakpoints get globally muted mid-session so the running
+     * Harbour program stops honoring them immediately (mute does not change
+     * each breakpoint's individual enabled state, so unregisterBreakpoint is
+     * not called for them).
+     */
+    public void removeAllBreakpoints() {
+        if (!isRemoteDebugger) {
+            return;
+        }
+        HarbourDebuggerRemoteProcess remoteProcess = (HarbourDebuggerRemoteProcess) debugProcess;
+        if (!remoteProcess.canAcceptBreakpoints()) {
+            return;
+        }
+        Project project = debugProcess.getSession().getProject();
+        for (XLineBreakpoint<HarbourDebuggerBreakpointProperties> breakpoint : registeredBreakpoints) {
+            if (breakpoint.getSourcePosition() != null) {
+                String fileName = breakpoint.getSourcePosition().getFile().getName();
+                int line = breakpoint.getSourcePosition().getLine() + 1;
+                debugProcess.sendCommand("BREAKPOINT");
+                debugProcess.sendCommand("-:" + fileName + ":" + line);
+                HarbourLogger.log(project, "HarbourDebugger",
+                        "Removed breakpoint (mute): " + fileName + ":" + line);
+            }
+        }
+    }
+
+    /**
      * Send all registered breakpoints to the remote debugger
      */
     public void sendAllBreakpoints() {

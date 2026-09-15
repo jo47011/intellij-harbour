@@ -1,5 +1,6 @@
 package org.intellij.sdk.language;
 
+import com.intellij.extapi.psi.ASTWrapperPsiElement;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.ParserDefinition;
 import com.intellij.lang.PsiBuilder;
@@ -53,17 +54,36 @@ public class HarbourParserDefinition implements ParserDefinition {
     return FILE;
   }
 
+  /** Keywords that open a routine: everything up to the next one belongs to it. */
+  private static final TokenSet DECLARATION_KEYWORDS = TokenSet.create(
+          HarbourTypes.FUNCTION,
+          HarbourTypes.PROCEDURE,
+          HarbourTypes.METHOD,
+          HarbourTypes.CLASS
+  );
+
   @NotNull
   @Override
   public PsiParser createParser(Project project) {
-    // Simple fallback parser implementation for development
+    // The tokens stay flat, but each routine gets one DECLARATION_BLOCK node around it so that
+    // its text range covers the whole routine (sticky lines, breadcrumbs).
     return new PsiParser() {
       @NotNull
       @Override
       public ASTNode parse(@NotNull IElementType root, @NotNull PsiBuilder builder) {
         PsiBuilder.Marker rootMarker = builder.mark();
+        PsiBuilder.Marker declaration = null;
         while (!builder.eof()) {
+          if (DECLARATION_KEYWORDS.contains(builder.getTokenType()) && startsStatement(builder)) {
+            if (declaration != null) {
+              declaration.done(HarbourTypes.DECLARATION_BLOCK);
+            }
+            declaration = builder.mark();
+          }
           builder.advanceLexer();
+        }
+        if (declaration != null) {
+          declaration.done(HarbourTypes.DECLARATION_BLOCK);
         }
         rootMarker.done(root);
         return builder.getTreeBuilt();
@@ -71,9 +91,31 @@ public class HarbourParserDefinition implements ParserDefinition {
     };
   }
 
+  /**
+   * True if only words separated by blanks precede the current token on its line - that is what a
+   * declaration looks like ("PROCEDURE x", "STATIC FUNCTION y", "INIT PROCEDURE z"), while
+   * "METHOD m() CLASS c" or "#define CLASS" do not qualify.
+   */
+  private static boolean startsStatement(@NotNull PsiBuilder builder) {
+    CharSequence text = builder.getOriginalText();
+    for (int i = builder.getCurrentOffset() - 1; i >= 0; i--) {
+      char c = text.charAt(i);
+      if (c == '\n' || c == '\r') {
+        return true;
+      }
+      if (c != ' ' && c != '\t' && c != '_' && !Character.isLetterOrDigit(c)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   @NotNull
   @Override
   public PsiElement createElement(ASTNode node) {
+    if (node.getElementType() == HarbourTypes.DECLARATION_BLOCK) {
+      return new ASTWrapperPsiElement(node);
+    }
     return new HarbourPsiElementFactoryImpl().createElement(node);
   }
 

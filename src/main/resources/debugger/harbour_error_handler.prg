@@ -7,87 +7,92 @@
 #endif
 
 // Format the error message header
+// Uses a labeled format that shows ALL fields (even when empty) so the user
+// sees the full picture of the error.
 FUNCTION FormatErrorMessage(oError)
    LOCAL cMessage := ""
-   LOCAL cSubSystem, cDescription, cOperation
-   
-   // Safely extract error information
-   cSubSystem := IIF(ValType(oError:SubSystem) == "C", oError:SubSystem, "UNKNOWN")
-   cDescription := IIF(ValType(oError:Description) == "C", oError:Description, "Unknown error")
+   LOCAL cSubSystem, cDescription, cOperation, cFileName, cGenCode
+
+   cSubSystem := IIF(ValType(oError:SubSystem) == "C", oError:SubSystem, "")
+   cDescription := IIF(ValType(oError:Description) == "C", oError:Description, "")
    cOperation := IIF(ValType(oError:Operation) == "C", oError:Operation, "")
-   
-   // Format error header
-   cMessage := "RUNTIME ERROR: " + cDescription + CRLF
-   cMessage += "Error " + cSubSystem + "/" + LTrim(Str(oError:GenCode))
-   
-   IF !Empty(cOperation)
-      cMessage += ": " + cOperation
-   ENDIF
-   
-   cMessage += CRLF + CRLF
-   
+   cFileName := IIF(ValType(oError:FileName) == "C", oError:FileName, "")
+   cGenCode := LTrim(Str(oError:GenCode))
+
+   cMessage := "RUNTIME ERROR" + CRLF
+   cMessage += "  Fehler   : " + cDescription + CRLF
+   cMessage += "  Operation: " + cOperation + CRLF
+   cMessage += "  Filename : " + cFileName + CRLF
+   cMessage += "  Code     : " + cGenCode + CRLF
+   cMessage += "  SubSystem: " + cSubSystem + CRLF
+   cMessage += CRLF
+
    RETURN cMessage
 
 // Collect the current stack trace
+// Skips only our own plugin helpers by name so the user sees their full call chain
+// (including error-handler functions and (b)INIT_HB blocks)
 FUNCTION CollectStackTrace()
    LOCAL aStack := {}
-   LOCAL i := 3  // Skip error handler frames (start from caller of error handler)
-   LOCAL cProcName, nProcLine, cProcFile
-   
-   // Collect all stack frames
+   LOCAL i := 1
+   LOCAL cProcName, nProcLine, cProcFile, cUpper
+
    DO WHILE .T.
       cProcName := ProcName(i)
-      
+
       // Stop when we reach the top
       IF Empty(cProcName)
          EXIT
       ENDIF
-      
-      // Skip internal init procedures
-      IF "(b)" $ cProcName .OR. "$" $ cProcName
+
+      // Skip our own helper functions so they don't pollute the user's stack
+      cUpper := Upper(cProcName)
+      IF cUpper == "COLLECTSTACKTRACE" .OR. ;
+         cUpper == "PRINTDEBUGSTACKTRACE" .OR. ;
+         cUpper == "FORMATSTACKTRACE" .OR. ;
+         cUpper == "FORMATERRORMESSAGE" .OR. ;
+         cUpper == "FORMATCOMPLETEERROR" .OR. ;
+         cUpper == "MONITORANDPASSERROR"
          i++
          LOOP
       ENDIF
-      
+
       nProcLine := ProcLine(i)
       cProcFile := ProcFile(i)
-      
-      // Add frame to stack
+
       AAdd(aStack, {cProcName, nProcLine, cProcFile})
-      
+
       i++
    ENDDO
-   
+
    RETURN aStack
 
 // Format stack trace for output
+// Format: "  NAME(line) in file.prg" — matches RUNTIME_FUNCTION_PATTERN in
+// HarbourCompilerOutputFilter so PyCharm makes both function and file clickable.
+// When no file is known (e.g. (b)INIT_HB blocks), omits the " in file.prg" part.
 FUNCTION FormatStackTrace(aStack)
    LOCAL cTrace := "Stack trace:" + CRLF
    LOCAL aFrame
    LOCAL cFileName
-   
-   // Format each stack frame
+
    FOR EACH aFrame IN aStack
-      // Add filename if available
+      cTrace += "  " + aFrame[1] + "(" + LTrim(Str(aFrame[2])) + ")"
+
       IF !Empty(aFrame[3])
-         // Extract just the filename from full path
+         // Show just the filename (no full path) so the user sees what they expect
          cFileName := aFrame[3]
          IF "\" $ cFileName
             cFileName := SubStr(cFileName, RAt("\", cFileName) + 1)
          ELSEIF "/" $ cFileName
             cFileName := SubStr(cFileName, RAt("/", cFileName) + 1)
          ENDIF
-         
-         // Format: "  at filename.prg(line)" - matches FILE_PATTERN in filter
-         cTrace += "  at " + cFileName + "(" + LTrim(Str(aFrame[2])) + ")"
-      ELSE
-         // Format: "  at FUNCTION(line)" - matches RUNTIME_FUNCTION_PATTERN
-         cTrace += "  at " + aFrame[1] + "(" + LTrim(Str(aFrame[2])) + ")"
+         cTrace += " in " + cFileName
       ENDIF
-      
+
       cTrace += CRLF
    NEXT
-   
+
    RETURN cTrace
 
 // Output error message to stderr and optionally to a log file
@@ -153,41 +158,69 @@ FUNCTION GetErrorInfo(oError)
 // ================================================================================================
 
 /**
- * printDebugStackTrace() - Public procedure for custom error handlers
+ * printDebugStackTrace([oError], [cExtraStack]) - Public procedure for custom error handlers
  *
  * Call this from your custom ErrorBlock handler to generate clickable stack traces
  * in PyCharm/IntelliJ console, even when using custom error handling.
  *
- * Usage in custom error handler:
- *   ErrorBlock({|oError| MyCustomHandler(oError)})
+ * Parameters (both optional):
+ *   oError      - error object; if passed, the root cause is logged
+ *                 (Fehler / Operation / Filename / Code / SubSystem)
+ *   cExtraStack - pre-formatted stack text. When supplied this REPLACES our
+ *                 internal ProcName/ProcLine walk (no duplication). Format each
+ *                 frame as "  NAME(line) in file.prg\r\n" (two-space indent —
+ *                 mandatory for PyCharm clickability). Omit to let us walk for you.
  *
+ * Simplest usage — let us walk the stack:
  *   FUNCTION MyCustomHandler(oError)
- *      // Your custom error logic here
- *      LogToMyDatabase(oError)
- *
- *      // Generate PyCharm-compatible stack trace
  *      #if defined(DBG_PORT) || defined(PYCHARM_RUN)
- *         printDebugStackTrace()
+ *         printDebugStackTrace(oError)
  *      #endif
- *
- *      // Continue with your error handling
  *      QUIT
  *   RETURN NIL
+ *
+ * Advanced — supply your own stack (e.g., started at a different depth):
+ *   LOCAL cExtra := "", i := 1, CRLF := Chr(13) + Chr(10)
+ *   DO WHILE !Empty(ProcName(i))
+ *      cExtra += "  " + Trim(ProcName(i)) + ;
+ *                "(" + LTrim(Str(ProcLine(i))) + ")"
+ *      IF !Empty(ProcFile(i))
+ *         cExtra += " in " + ProcFile(i)
+ *      ENDIF
+ *      cExtra += CRLF
+ *      i++
+ *   ENDDO
+ *   printDebugStackTrace(oError, cExtra)
  */
 #if defined(DBG_PORT) || defined(PYCHARM_RUN)
 // Full implementation when running in PyCharm environment
-PROCEDURE printDebugStackTrace()
+PROCEDURE printDebugStackTrace(oError, cExtraStack)
    LOCAL cStackTrace, aStack
    LOCAL hFile, cLogFile
-   LOCAL i := 1
-
-   // Collect current stack trace
-   aStack := CollectStackTrace()
+   LOCAL lUseCallerStack := ValType(cExtraStack) == "C" .AND. !Empty(cExtraStack)
 
    // Format stack trace for PyCharm console pattern matching
    cStackTrace := "[" + DToS(Date()) + " " + Time() + "]" + CRLF
-   cStackTrace += "RUNTIME ERROR from custom ErrorBlock" + CRLF
-   cStackTrace += FormatStackTrace(aStack)
+
+   // Include root cause when caller passed the error object
+   IF ValType(oError) == "O"
+      cStackTrace += FormatErrorMessage(oError)
+   ELSE
+      cStackTrace += "RUNTIME ERROR from custom ErrorBlock" + CRLF
+   ENDIF
+
+   // Use the caller's stack when supplied (avoids duplicating frames the caller
+   // already walked); otherwise collect and format our own stack via ProcName/ProcLine.
+   IF lUseCallerStack
+      cStackTrace += "Stack trace:" + CRLF
+      cStackTrace += cExtraStack
+      IF Right(cExtraStack, 2) != CRLF
+         cStackTrace += CRLF
+      ENDIF
+   ELSE
+      aStack := CollectStackTrace()
+      cStackTrace += FormatStackTrace(aStack)
+   ENDIF
 
    // Write to .hbmk/pycharm_errors.log for PyCharm to detect
    IF !hb_DirExists(".hbmk")
@@ -203,6 +236,8 @@ PROCEDURE printDebugStackTrace()
    ENDIF
 
    IF hFile != -1
+      // Write in the runtime's native codepage; the plugin auto-detects
+      // (UTF-8 → project charset → ISO-8859-1) when reading.
       FWrite(hFile, cStackTrace)
       FWrite(hFile, Replicate("-", 70) + CRLF + CRLF)
       FClose(hFile)
@@ -214,8 +249,10 @@ PROCEDURE printDebugStackTrace()
 RETURN
 #else
 // Stub implementation for standalone compilation
-PROCEDURE printDebugStackTrace()
+PROCEDURE printDebugStackTrace(oError, cExtraStack)
    // Empty stub - does nothing when compiled outside PyCharm
    // This prevents "undefined reference" errors during standalone compilation
+   HB_SYMBOL_UNUSED(oError)
+   HB_SYMBOL_UNUSED(cExtraStack)
 RETURN
 #endif

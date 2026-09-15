@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * This cache uses dynamic classification instead of hardcoded function lists.
  */
 public class HarbourStandardFunctionCache {
+    private static final int MAX_CACHE_SIZE = 500;
     private static final Map<String, Boolean> FUNCTION_CLASSIFICATION_CACHE = new ConcurrentHashMap<>();
     private static volatile boolean initialized = false;
 
@@ -43,7 +44,10 @@ public class HarbourStandardFunctionCache {
             }
         }
         
-        // Cache the result
+        // Cache the result (with size guard to prevent unbounded growth)
+        if (FUNCTION_CLASSIFICATION_CACHE.size() > MAX_CACHE_SIZE) {
+            FUNCTION_CLASSIFICATION_CACHE.clear();
+        }
         FUNCTION_CLASSIFICATION_CACHE.put(normalizedName, isExternal);
         return isExternal;
     }
@@ -88,6 +92,9 @@ public class HarbourStandardFunctionCache {
      * @param isExternal Whether the function is external (true) or internal (false)
      */
     public static void cacheFunctionClassification(@NotNull String functionName, boolean isExternal) {
+        if (FUNCTION_CLASSIFICATION_CACHE.size() > MAX_CACHE_SIZE) {
+            FUNCTION_CLASSIFICATION_CACHE.clear();
+        }
         FUNCTION_CLASSIFICATION_CACHE.put(functionName.toLowerCase(), isExternal);
     }
     

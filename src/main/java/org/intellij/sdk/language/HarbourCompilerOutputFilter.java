@@ -34,9 +34,16 @@ public class HarbourCompilerOutputFilter implements Filter {
     // Pattern to match function names in stack traces: "FUNCTION_NAME in filepath(line)"
     private static final Pattern FUNCTION_PATTERN = Pattern.compile("(\\d+):\\s+(\\w+)\\s+in\\s+([^\\s]+)\\((\\d+)\\)");
     
-    // Pattern to match runtime error function references: "at FUNCTION_NAME(line)" or "Stack: FUNCTION_NAME(line) in filename"
-    // Allow $ and other chars in function names for Windows compatibility (e.g. __TESTSIMPLEINIT$)
-    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile("at\\s+([\\w$]+)\\((\\d+)\\)|Stack:\\s+([\\w$]+)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
+    // Pattern to match runtime error function references:
+    //   "at FUNCTION_NAME(line)"                         — legacy "at"-prefix format
+    //   "Stack: FUNCTION_NAME(line) in filename"         — legacy auto-monitor format
+    //   "  FUNCTION_NAME(line) in filename"              — current format (whitespace-indented)
+    // Allow $ in function names for Windows compatibility (e.g. __TESTSIMPLEINIT$).
+    // Optional (...) prefix matches Harbour block-frame indicators like (b)INIT_HB so they are clickable too.
+    // Optional CLASS: prefix matches method frames like CTRECORD:READ(658) in SEPA.prg.
+    private static final Pattern RUNTIME_FUNCTION_PATTERN = Pattern.compile(
+        "at\\s+(?:\\([^)]*\\))?([\\w$]+(?::[\\w$]+)?)\\((\\d+)\\)" +
+        "|(?:Stack:|^)\\s+(?:\\([^)]*\\))?([\\w$]+(?::[\\w$]+)?)\\((\\d+)\\)\\s+in\\s+([^\\s\\r\\n]+)");
     
     // Pattern to match runtime stacktrace file references: "at filename.prg(line)"
     private static final Pattern RUNTIME_FILE_PATTERN = Pattern.compile("at\\s+([^\\s]+\\.prg)\\((\\d+)\\)");
@@ -734,38 +741,13 @@ public class HarbourCompilerOutputFilter implements Filter {
         }
         
         // Get all .prg files in working directory
-        File[] prgFiles = workDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".prg"));
-        if (prgFiles == null || prgFiles.length == 0) {
+        File[] prgFilesArr = workDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".prg"));
+        if (prgFilesArr == null || prgFilesArr.length == 0) {
             return null;
         }
-        
-        // Search for function definitions like "PROCEDURE main(" or "FUNCTION main("
-        String searchPattern = functionName.toLowerCase() + "(";
-        java.util.List<FunctionMatch> matches = new java.util.ArrayList<>();
-        
-        for (File file : prgFiles) {
-            try {
-                java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
-                for (int i = 0; i < lines.size(); i++) {
-                    String line = lines.get(i).trim().toLowerCase();
-                    
-                    // Look for function/procedure declarations
-                    if ((line.startsWith("function ") || line.startsWith("procedure ")) 
-                        && line.contains(searchPattern)) {
-                        
-                        // Found a function definition - calculate its range
-                        int startLine = i + 1; // 1-based line numbers
-                        int endLine = findFunctionEndLine(lines, i);
-                        
-                        matches.add(new FunctionMatch(file.getAbsolutePath(), startLine, endLine));
-                    }
-                }
-            } catch (Exception e) {
-                // Skip files that can't be read
-                continue;
-            }
-        }
-        
+
+        java.util.List<FunctionMatch> matches = findFunctionMatches(java.util.Arrays.asList(prgFilesArr), functionName);
+
         // If no matches found, open search dialog as fallback
         if (matches.isEmpty()) {
             logFunctionNotFound(functionName);
@@ -792,14 +774,50 @@ public class HarbourCompilerOutputFilter implements Filter {
     }
     
     /**
+     * Search all given .prg files for a function/procedure/method declaration matching
+     * functionName. A method frame from a stack trace looks like "CLASS:METHOD" - the
+     * class name is never part of the METHOD declaration line itself, so only the part
+     * after the colon (if any) is used for matching.
+     */
+    private java.util.List<FunctionMatch> findFunctionMatches(java.util.List<File> prgFiles, String functionName) {
+        String plainName = functionName.contains(":")
+            ? functionName.substring(functionName.indexOf(':') + 1) : functionName;
+        String searchPattern = plainName.toLowerCase() + "(";
+        java.util.List<FunctionMatch> matches = new java.util.ArrayList<>();
+
+        for (File file : prgFiles) {
+            try {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i).trim().toLowerCase();
+
+                    // Look for function/procedure/method declarations
+                    if ((line.startsWith("function ") || line.startsWith("procedure ") || line.startsWith("method "))
+                        && line.contains(searchPattern)) {
+
+                        // Found a definition - calculate its range
+                        int startLine = i + 1; // 1-based line numbers
+                        int endLine = findFunctionEndLine(lines, i);
+
+                        matches.add(new FunctionMatch(file.getAbsolutePath(), startLine, endLine));
+                    }
+                }
+            } catch (Exception e) {
+                // Skip files that can't be read
+            }
+        }
+        return matches;
+    }
+
+    /**
      * Find the end line of a function by looking for RETURN statement or next function
      */
     private int findFunctionEndLine(java.util.List<String> lines, int functionStartIndex) {
         for (int i = functionStartIndex + 1; i < lines.size(); i++) {
             String line = lines.get(i).trim().toLowerCase();
-            
-            // End at next function/procedure declaration
-            if (line.startsWith("function ") || line.startsWith("procedure ")) {
+
+            // End at next function/procedure/method declaration
+            if (line.startsWith("function ") || line.startsWith("procedure ") || line.startsWith("method ")) {
                 return i; // Line before next function
             }
             
@@ -842,33 +860,8 @@ public class HarbourCompilerOutputFilter implements Filter {
             return;
         }
         
-        // Search for function definitions like "PROCEDURE main(" or "FUNCTION main("
-        String searchPattern = functionName.toLowerCase() + "(";
-        java.util.List<FunctionMatch> matches = new java.util.ArrayList<>();
-        
-        for (File file : prgFiles) {
-            try {
-                java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
-                for (int i = 0; i < lines.size(); i++) {
-                    String line = lines.get(i).trim().toLowerCase();
-                    
-                    // Look for function/procedure declarations
-                    if ((line.startsWith("function ") || line.startsWith("procedure ")) 
-                        && line.contains(searchPattern)) {
-                        
-                        // Found a function definition - calculate its range
-                        int startLine = i + 1; // 1-based line numbers
-                        int endLine = findFunctionEndLine(lines, i);
-                        
-                        matches.add(new FunctionMatch(file.getAbsolutePath(), startLine, endLine));
-                    }
-                }
-            } catch (Exception e) {
-                // Skip files that can't be read
-                continue;
-            }
-        }
-        
+        java.util.List<FunctionMatch> matches = findFunctionMatches(prgFiles, functionName);
+
         // Check if line number is in range for any function
         if (lineNumber > 0) {
             for (FunctionMatch match : matches) {

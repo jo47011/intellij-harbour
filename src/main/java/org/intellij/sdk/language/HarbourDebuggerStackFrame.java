@@ -46,6 +46,19 @@ public class HarbourDebuggerStackFrame extends XStackFrame {
         return sourcePosition;
     }
 
+    /**
+     * Stable per-frame identity used by IntelliJ's XVariablesViewBase to save/restore
+     * the variables tree expansion state across suspend events. Must NOT depend on the
+     * line number, otherwise every step would create a new "frame" and collapse all
+     * expanded nodes (objects, arrays, hashes).
+     */
+    @Override
+    public Object getEqualityObject() {
+        String fn = functionName != null ? functionName.toLowerCase() : "";
+        String fp = filePath != null ? filePath : "";
+        return fn + "@" + fp;
+    }
+
     @Override
     public void computeChildren(@NotNull XCompositeNode node) {
         // Execute on the proper thread to ensure UI safety

@@ -16,6 +16,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -89,6 +90,11 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     private boolean indexCacheEnabled = true; // Enable persistent index cache for performance
     private int indexCacheMaxSizeMB = 10; // Maximum cache size in MB
     private boolean indexCacheAutoCleanup = true; // Enable automatic cache cleanup
+
+    // Charset used for debugger socket / DBF view data.
+    // Empty value means: use the IDE project default encoding.
+    // Default windows-1252 covers typical Western xBase/Clipper data (umlauts, sharp-s).
+    private String debuggerCharset = "windows-1252";
 
 
     public HarbourSettings() {
@@ -452,9 +458,47 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     public boolean isIndexCacheAutoCleanup() {
         return indexCacheAutoCleanup;
     }
-    
+
     public void setIndexCacheAutoCleanup(boolean indexCacheAutoCleanup) {
         this.indexCacheAutoCleanup = indexCacheAutoCleanup;
+    }
+
+    // Debugger charset methods
+    public String getDebuggerCharset() {
+        return debuggerCharset == null ? "" : debuggerCharset;
+    }
+
+    public void setDebuggerCharset(String debuggerCharset) {
+        this.debuggerCharset = debuggerCharset == null ? "" : debuggerCharset;
+    }
+
+    /**
+     * Resolve the charset used for the debugger socket and DBF data view.
+     * Order: explicit setting → IDE project default encoding → windows-1252 fallback.
+     */
+    public Charset getResolvedDebuggerCharset(Project project) {
+        String name = getDebuggerCharset().trim();
+        if (!name.isEmpty()) {
+            try {
+                return Charset.forName(name);
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourSettings",
+                        "Invalid debuggerCharset '" + name + "', falling back to project default");
+            }
+        }
+        if (project != null) {
+            try {
+                Charset projectCs = com.intellij.openapi.vfs.encoding.EncodingProjectManager
+                        .getInstance(project).getDefaultCharset();
+                if (projectCs != null) {
+                    return projectCs;
+                }
+            } catch (Exception e) {
+                HarbourLogger.log("HarbourSettings",
+                        "Could not resolve project encoding: " + e.getMessage());
+            }
+        }
+        return Charset.forName("windows-1252");
     }
 
 

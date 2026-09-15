@@ -43,8 +43,8 @@ public class HarbourFileListener implements EditorFactoryListener {
         if (file != null && "prg".equals(file.getExtension())) {
             HarbourLogger.log("FileListener", "=== Harbour file opened: " + file.getName() + " ===");
 
-            // Add document listener to track changes
-            event.getEditor().getDocument().addDocumentListener(new HarbourDocumentListener(project));
+            // Add document listener to track changes (auto-removed on project close)
+            event.getEditor().getDocument().addDocumentListener(new HarbourDocumentListener(project), project);
 
             // Use NON-BLOCKING read action to prevent EDT freeze
             // This runs in background without blocking the UI

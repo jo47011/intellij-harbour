@@ -64,6 +64,9 @@ public class HarbourSettingsConfigurable implements Configurable {
     private JSpinner myMaxNavigationResultsSpinner;
     private JSpinner myMaxGridPreloadResultsSpinner;
 
+    // Debugger charset combo (editable; empty = use project default encoding)
+    private JComboBox<String> myDebuggerCharsetCombo;
+
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
     }
@@ -189,9 +192,36 @@ public class HarbourSettingsConfigurable implements Configurable {
         myMaxGridPreloadResultsSpinner.setToolTipText("Number of records to preload in DBF grid view");
         generalPanel.add(myMaxGridPreloadResultsSpinner, constraints);
 
-        // Add spacer to general panel
+        // Debugger charset (DBF view + variable values)
         constraints.gridx = 0;
         constraints.gridy = 10;
+        constraints.gridwidth = 1;
+        JLabel debuggerCharsetLabel = new JLabel("Debugger / DBF charset:");
+        generalPanel.add(debuggerCharsetLabel, constraints);
+
+        constraints.gridx = 1;
+        String[] commonCharsets = {"windows-1252", "ISO-8859-1", "ISO-8859-15",
+                "UTF-8", "CP850", "CP437", "CP866", ""};
+        myDebuggerCharsetCombo = new JComboBox<>(commonCharsets);
+        myDebuggerCharsetCombo.setEditable(true);
+        myDebuggerCharsetCombo.setToolTipText(
+                "<html>Charset used to decode strings sent by the Harbour debug agent " +
+                "(DBF field values, variable values, expressions).<br>" +
+                "Leave empty to use the IDE project default encoding.<br>" +
+                "Common values: windows-1252 (Western xBase), CP850 (DOS), UTF-8.</html>");
+        generalPanel.add(myDebuggerCharsetCombo, constraints);
+
+        constraints.gridx = 0;
+        constraints.gridy = 11;
+        constraints.gridwidth = 2;
+        JLabel charsetExplanation = new JLabel(
+                "<html><i>Empty = use project encoding. Restart the debug session to apply.</i></html>");
+        charsetExplanation.setFont(charsetExplanation.getFont().deriveFont(Font.ITALIC));
+        generalPanel.add(charsetExplanation, constraints);
+
+        // Add spacer to general panel
+        constraints.gridx = 0;
+        constraints.gridy = 12;
         constraints.weighty = 1.0;
         constraints.gridwidth = 2;
         constraints.fill = GridBagConstraints.BOTH;
@@ -795,7 +825,13 @@ public class HarbourSettingsConfigurable implements Configurable {
                 !settings.getLintExtraOptions().equals(myLintExtraOptionsField.getText()) ||
                 !settings.getLinterExclusionComment().equals(myLinterExclusionCommentField.getText()) ||
                 settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue() ||
-                settings.getMaxGridPreloadResults() != (Integer) myMaxGridPreloadResultsSpinner.getValue();
+                settings.getMaxGridPreloadResults() != (Integer) myMaxGridPreloadResultsSpinner.getValue() ||
+                !settings.getDebuggerCharset().equals(getDebuggerCharsetText());
+    }
+
+    private String getDebuggerCharsetText() {
+        Object value = myDebuggerCharsetCombo.getEditor().getItem();
+        return value == null ? "" : value.toString().trim();
     }
 
     @Override
@@ -833,6 +869,19 @@ public class HarbourSettingsConfigurable implements Configurable {
         // Save navigation settings
         settings.setMaxNavigationResults((Integer) myMaxNavigationResultsSpinner.getValue());
         settings.setMaxGridPreloadResults((Integer) myMaxGridPreloadResultsSpinner.getValue());
+
+        // Save debugger charset
+        String charsetValue = getDebuggerCharsetText();
+        if (!charsetValue.isEmpty()) {
+            try {
+                java.nio.charset.Charset.forName(charsetValue);
+            } catch (Exception ex) {
+                throw new ConfigurationException(
+                        "Unsupported charset: '" + charsetValue + "'. " +
+                        "Use a JVM-supported charset name or leave empty for the project default.");
+            }
+        }
+        settings.setDebuggerCharset(charsetValue);
 
         // Notify HarbourReferenceService to update exclusions
         HarbourReferenceService service = HarbourReferenceService.getInstance(myProject);
@@ -904,6 +953,9 @@ public class HarbourSettingsConfigurable implements Configurable {
         // Load navigation settings
         myMaxNavigationResultsSpinner.setValue(settings.getMaxNavigationResults());
         myMaxGridPreloadResultsSpinner.setValue(settings.getMaxGridPreloadResults());
+
+        // Load debugger charset
+        myDebuggerCharsetCombo.setSelectedItem(settings.getDebuggerCharset());
 
         // Default scan path to the project base path
         String defaultScanPath = myProject.getBasePath();

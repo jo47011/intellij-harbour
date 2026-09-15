@@ -384,10 +384,21 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     }
 
     /**
-     * Public formatting method with default settings - for testing and CLI usage
+     * Public formatting method with default settings - for testing and CLI usage.
+     * Runs the formatter to a fixed point (max 6 iterations) so a single call
+     * produces an idempotent result — a follow-up format pass leaves the file unchanged.
      */
     public String formatHarbourCodeWithDefaults(String text, int lineBreakPosition) {
-        return formatHarbourCodeInternal(text, lineBreakPosition, 0, 0, 0, 0, 0, 0, true);
+        String prev = text;
+        for (int iter = 0; iter < 6; iter++) {
+            String next = formatHarbourCodeInternal(prev, lineBreakPosition, 0, 0, 0, 0, 0, 0, true,
+                    true, false, true, true, true, false, true);
+            if (next.equals(prev)) {
+                return next;
+            }
+            prev = next;
+        }
+        return prev;
     }
 
     /**
@@ -397,7 +408,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         return formatHarbourCodeInternal(text, lineBreakPosition,
                 settings.LOCAL_INDENT, settings.RETURN_INDENT, settings.DATA_INDENT,
                 settings.METHOD_INDENT, settings.MEMVAR_INDENT, settings.PRIVATE_INDENT,
-                settings.SEQUENCE_LIKE_NORMAL_CODE);
+                settings.SEQUENCE_LIKE_NORMAL_CODE,
+                settings.SPACE_AFTER_COMMA, settings.SPACE_BEFORE_COMMA,
+                settings.SPACE_AROUND_ADDITIVE_OPERATORS, settings.SPACE_AROUND_MULTIPLICATIVE_OPERATORS,
+                settings.SPACE_AROUND_COMPARISON_OPERATORS, settings.SPACE_AROUND_ASSIGNMENT_OPERATOR,
+                settings.SPACE_AROUND_LOGICAL_OPERATORS);
     }
 
     /**
@@ -405,18 +420,77 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
      */
     private String formatHarbourCodeInternal(String text, int lineBreakPosition,
             int localIndent, int returnIndent, int dataIndent, int methodIndent,
-            int memvarIndent, int privateIndent, boolean sequenceLikeNormalCode) {
+            int memvarIndent, int privateIndent, boolean sequenceLikeNormalCode,
+            boolean spaceAfterComma, boolean spaceBeforeComma,
+            boolean spaceAroundAdditive, boolean spaceAroundMultiplicative,
+            boolean spaceAroundComparison, boolean spaceAroundAssignment,
+            boolean spaceAroundLogical) {
         // Normalize line endings - handle Windows CRLF by removing CR characters
         // This prevents off-by-one errors in indent calculation when lines end with \r
         boolean hadCRLF = text.contains("\r\n");
         String normalizedText = text.replace("\r\n", "\n").replace("\r", "\n");
-        String[] lines = normalizedText.split("\n", -1);
+        String[] rawLines = normalizedText.split("\n", -1);
+
+        // Pre-processing: apply spacing normalization to each line before joining/wrapping
+        // This ensures consistent line lengths for all subsequent decisions
+        boolean inPreBlockComment = false;
+        boolean inPreFmtOff = false;
+        String[] lines = new String[rawLines.length];
+        for (int li = 0; li < rawLines.length; li++) {
+            String rawLine = rawLines[li];
+            String trimmed = rawLine.trim();
+
+            // Track fmt:off/on
+            if (trimmed.toLowerCase().contains("fmt:off")) inPreFmtOff = true;
+            if (trimmed.toLowerCase().contains("fmt:on")) inPreFmtOff = false;
+
+            // Track block comments
+            if (trimmed.startsWith("/*")) inPreBlockComment = true;
+            if (trimmed.endsWith("*/")) { inPreBlockComment = false; lines[li] = rawLine; continue; }
+
+            // Skip spacing in comments, fmt:off blocks, and empty lines
+            if (inPreFmtOff || inPreBlockComment || trimmed.isEmpty() ||
+                trimmed.startsWith("//") || trimmed.startsWith("*")) {
+                lines[li] = rawLine;
+                continue;
+            }
+
+            // Skip spacing for xbase commands whose macro/file expressions are
+            // parsed strictly by the Harbour preprocessor (spaces around '+' inside
+            // '&(...)' break compilation). Leave these lines untouched.
+            String trimmedLowerPre = trimmed.toLowerCase();
+            if (trimmedLowerPre.startsWith("copy file ") ||
+                trimmedLowerPre.startsWith("copy structure ") ||
+                trimmedLowerPre.startsWith("copy to ") ||
+                trimmedLowerPre.startsWith("append from ") ||
+                trimmedLowerPre.startsWith("delete file ") ||
+                trimmedLowerPre.startsWith("rename file ")) {
+                lines[li] = rawLine;
+                continue;
+            }
+
+            // Preserve indent, normalize spacing in content only
+            int contentStart = rawLine.indexOf(trimmed);
+            String indent = contentStart > 0 ? rawLine.substring(0, contentStart) : "";
+            String normalizedContent = normalizeLineSpacing(trimmed,
+                spaceAfterComma, spaceBeforeComma,
+                spaceAroundAdditive, spaceAroundMultiplicative,
+                spaceAroundComparison, spaceAroundAssignment, spaceAroundLogical);
+            // Collapse whitespace before a trailing line-continuation ';'
+            // ("foo .and. ;" -> "foo .and.;") — the space is unneeded.
+            normalizedContent = normalizedContent.replaceAll("\\s+;$", ";");
+            lines[li] = indent + normalizedContent;
+        }
+
         StringBuilder result = new StringBuilder(text.length());
 
         int indentLevel = 0;
         boolean inFunctionBody = false;
-        boolean inSwitchBlock = false;
-        boolean inDoCaseBlock = false;
+        // Use depth counters so nested DO CASE / SWITCH blocks work correctly.
+        // (A boolean would be reset to false by an inner ENDCASE/ENDSWITCH,
+        //  losing track of the still-open outer block.)
+        int switchBlockDepth = 0;
+        int doCaseBlockDepth = 0;
         boolean inClassDefinition = false;
         boolean inBlockComment = false; // Track if we're inside a block comment
         boolean inFmtOffBlock = false; // Track if we're inside a fmt:off block
@@ -472,7 +546,68 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Check if this line ends with a continuation semicolon
             // In Harbour, semicolons are ONLY used as continuation markers, never as statement terminators
+            // Skip line comments — a trailing ';' inside a // comment is just text, not a continuation
+            if (currentTrimmed.startsWith("//")) {
+                processedLines.add(currentLine);
+                int contentStart = currentLine.indexOf(currentTrimmed);
+                String indent = contentStart > 0 ? currentLine.substring(0, contentStart) : "";
+                originalIndents.add(indent);
+                lineIdx++;
+                continue;
+            }
             if (currentTrimmed.endsWith(";") && lineIdx < lines.length - 1) {
+                    // Skip rejoining for lines that are part of a string-concat chain.
+                    // These oscillate between "joined → re-split" forms across formatter
+                    // passes and can never be made shorter (the strings themselves are
+                    // longer than the line limit).
+                    {
+                        boolean isStringConcatBlock = false;
+                        // Current ends in `"+;` or `'+;` → definitely the chain.
+                        if (currentTrimmed.endsWith("\"+;") || currentTrimmed.endsWith("'+;")) {
+                            isStringConcatBlock = true;
+                        }
+                        // Or current ends in `";`/`';` and next line is the lone `+;`
+                        // (or starts with `+ "..."`).
+                        else if ((currentTrimmed.endsWith("\";") || currentTrimmed.endsWith("';"))
+                                 && lineIdx + 1 < lines.length) {
+                            String nextT = lines[lineIdx + 1].trim();
+                            if (nextT.equals("+;") || nextT.startsWith("+ \"") || nextT.startsWith("+ '") ||
+                                nextT.startsWith("+\"") || nextT.startsWith("+'")) {
+                                isStringConcatBlock = true;
+                            }
+                        }
+                        // Or any header line (e.g. `#define X ;`, `LOCAL X := ;`) immediately
+                        // followed by a string-concat chain: scan a few lines ahead.
+                        else if (lineIdx + 1 < lines.length) {
+                            int probe = lineIdx + 1;
+                            int hits = 0;
+                            int empties = 0;
+                            while (probe < lines.length && empties < 1) {
+                                String pt = lines[probe].trim();
+                                if (pt.isEmpty()) { empties++; probe++; continue; }
+                                if (pt.endsWith("\"+;") || pt.endsWith("'+;") ||
+                                    (pt.startsWith("\"") && (pt.endsWith("\";") || pt.endsWith("\""))) ||
+                                    (pt.startsWith("'") && (pt.endsWith("';") || pt.endsWith("'"))) ||
+                                    pt.equals("+;")) {
+                                    hits++;
+                                    if (!pt.endsWith(";")) break; // chain ends here
+                                    probe++;
+                                    continue;
+                                }
+                                break;
+                            }
+                            if (hits >= 2) {
+                                isStringConcatBlock = true;
+                            }
+                        }
+                        if (isStringConcatBlock) {
+                            processedLines.add(currentLine);
+                            int csi = currentLine.indexOf(currentTrimmed);
+                            originalIndents.add(csi > 0 ? currentLine.substring(0, csi) : "");
+                            lineIdx++;
+                            continue;
+                        }
+                    }
                     // First, check if joining is needed - only join if one of the lines is too long
                     boolean needsJoining = false;
 
@@ -518,6 +653,44 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                                 }
                             }
                             tempIdx++;
+                        }
+                    }
+
+                    // SPECIAL CASE: Any continuation line in the chain starts with a logical operator
+                    // Lines like ".and.;" or ".or.;" should never be standalone - rejoin all
+                    if (!needsJoining) {
+                        int scanIdx = lineIdx + 1;
+                        while (scanIdx < lines.length) {
+                            String scanTrimmed = lines[scanIdx].trim();
+                            if (scanTrimmed.isEmpty()) break;
+                            String scanLower = scanTrimmed.toLowerCase();
+                            if (scanLower.startsWith(".and.") || scanLower.startsWith(".or.")) {
+                                log("Detected standalone logical operator at line " + scanIdx + ", forcing rejoin");
+                                needsJoining = true;
+                                break;
+                            }
+                            if (!scanTrimmed.endsWith(";")) break;
+                            scanIdx++;
+                        }
+                    }
+
+                    // SPECIAL CASE: Code block assignment split inside the block body
+                    // Pattern: aSpalte[X]:={ || ...},;  /  .t. }
+                    // Should be rejoined so the code block handler can produce:
+                    //   aSpalte[X]:=;
+                    //     { || ...},.t. }
+                    if (!needsJoining && currentTrimmed.contains(":={")) {
+                        // Check if next continuation line closes the code block
+                        if (lineIdx + 1 < lines.length) {
+                            String nextTrimmed = lines[lineIdx + 1].trim();
+                            // Remove trailing ; from next line if present
+                            String nextContent = nextTrimmed.endsWith(";") ?
+                                nextTrimmed.substring(0, nextTrimmed.length() - 1).trim() : nextTrimmed;
+                            if (nextContent.endsWith("}")) {
+                                // Joining would let the code block handler produce better wrapping
+                                log("Detected split code block assignment, forcing rejoin: " + currentTrimmed);
+                                needsJoining = true;
+                            }
                         }
                     }
 
@@ -571,9 +744,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                                 if (!nextLineTrimmed.isEmpty()) {
                                     char nextFirst = nextLineTrimmed.charAt(0);
                                     // If next line starts with a digit (like "2)") this is a split argument
-                                    if (Character.isDigit(nextFirst) ||
-                                        (Character.isLetter(nextFirst) && !nextLineTrimmed.startsWith("\"") && !nextLineTrimmed.startsWith("'"))) {
+                                    // But NOT if it starts with a function call (identifier followed by "(")
+                                    if (Character.isDigit(nextFirst)) {
                                         nextLineStartsWithBareValue = true;
+                                    } else if (Character.isLetter(nextFirst) && !nextLineTrimmed.startsWith("\"") && !nextLineTrimmed.startsWith("'")) {
+                                        // Check if this is a function call - if so, it's a valid parameter, not a bare value
+                                        int parenIdx = nextLineTrimmed.indexOf('(');
+                                        int spaceIdx = nextLineTrimmed.indexOf(' ');
+                                        boolean isFunctionCall = parenIdx > 0 && (spaceIdx < 0 || parenIdx < spaceIdx);
+                                        if (!isFunctionCall) {
+                                            nextLineStartsWithBareValue = true;
+                                        }
                                     }
                                 }
                             }
@@ -1036,8 +1217,10 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
 
             // Handle empty lines
             if (line.isEmpty()) {
-                // Always preserve empty lines - the semicolon cleanup will handle unnecessary semicolons
-                result.append("\n");
+                // Preserve empty lines, but not after the last line to avoid accumulating trailing newlines
+                if (i < lines.length - 1) {
+                    result.append("\n");
+                }
                 continue;
             }
 
@@ -1057,8 +1240,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 // Found function/procedure start or method implementation
                 indentLevel = 0;
                 inFunctionBody = true;
-                inSwitchBlock = false;
-                inDoCaseBlock = false;
+                switchBlockDepth = 0;
+                doCaseBlockDepth = 0;
             }
 
             // Check for class start/end
@@ -1073,34 +1256,34 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             // Check for switch statement
             boolean isSwitchStatement = SWITCH_PATTERN.matcher(line).matches();
             if (isSwitchStatement) {
-                // Found switch statement
-                inSwitchBlock = true;
+                switchBlockDepth++;
             }
 
             // Check for DO CASE statement
             boolean isDoCaseStatement = DO_CASE_PATTERN.matcher(line).matches();
             if (isDoCaseStatement) {
-                // Found DO CASE statement
-                inDoCaseBlock = true;
+                doCaseBlockDepth++;
             }
 
             // Check for case statement
             boolean isCaseStatement = CASE_PATTERN.matcher(line).matches();
-            
+
             // Check for otherwise statement
             boolean isOtherwiseStatement = OTHERWISE_PATTERN.matcher(line).matches();
 
+            boolean inSwitchBlock = switchBlockDepth > 0;
+            boolean inDoCaseBlock = doCaseBlockDepth > 0;
+
             // Check for endswitch statement
             boolean isEndSwitchStatement = ENDSWITCH_PATTERN.matcher(line).matches();
-            if (isEndSwitchStatement) {
-                // Found endswitch statement
-                inSwitchBlock = false;
+            if (isEndSwitchStatement && switchBlockDepth > 0) {
+                switchBlockDepth--;
             }
-            
+
             // Check for endcase statement
             boolean isEndCaseStatement = ENDCASE_PATTERN.matcher(line).matches();
-            if (isEndCaseStatement) {
-                inDoCaseBlock = false;
+            if (isEndCaseStatement && doCaseBlockDepth > 0) {
+                doCaseBlockDepth--;
             }
 
             // Detect RETURN statements - all will use normal indentation now
@@ -1328,8 +1511,25 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 }
             }
 
-            // Processed line with proper indent
-            String processedLine = newIndent + processedContent.toString();
+            // Processed line with proper indent — also normalize spacing for consistency
+            // (pre-processing handles input lines, this handles wrapping output)
+            String contentStr = processedContent.toString();
+            String trimmedLowerForSpacing = contentStr.trim().toLowerCase();
+            boolean isStrictXbaseCmd =
+                trimmedLowerForSpacing.startsWith("copy file ") ||
+                trimmedLowerForSpacing.startsWith("copy structure ") ||
+                trimmedLowerForSpacing.startsWith("copy to ") ||
+                trimmedLowerForSpacing.startsWith("append from ") ||
+                trimmedLowerForSpacing.startsWith("delete file ") ||
+                trimmedLowerForSpacing.startsWith("rename file ");
+            if (!inFmtOffBlock && !isStrictXbaseCmd && !contentStr.trim().startsWith("//") &&
+                !contentStr.trim().startsWith("/*") && !contentStr.trim().startsWith("*")) {
+                contentStr = normalizeLineSpacing(contentStr,
+                    spaceAfterComma, spaceBeforeComma,
+                    spaceAroundAdditive, spaceAroundMultiplicative,
+                    spaceAroundComparison, spaceAroundAssignment, spaceAroundLogical);
+            }
+            String processedLine = newIndent + contentStr;
 
             // EARLY CHECK: If this line has manual continuation OR is part of a continuation block, preserve it
             String checkTrimmed = processedLine.trim();
@@ -1513,13 +1713,29 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 String trimmedLower = trimmed.toLowerCase();
 
                 // Always remove semicolons from block-ending keywords (they never need continuation)
-                if (trimmedLower.startsWith("endif") ||
+                // EXCEPTION: RETURN may legitimately use ; for line continuation
+                // (e.g. "RETURN ::super:new(;\n  arg1,;\n  arg2 )")
+                boolean isBlockEndKeyword =
+                    trimmedLower.startsWith("endif") ||
                     trimmedLower.startsWith("next") ||
                     trimmedLower.startsWith("enddo") ||
                     trimmedLower.startsWith("endcase") ||
                     trimmedLower.startsWith("endswitch") ||
-                    trimmedLower.startsWith("endclass") ||
-                    trimmedLower.startsWith("return")) {
+                    trimmedLower.startsWith("endclass");
+                boolean isReturnWithContinuation = false;
+                if (trimmedLower.startsWith("return")) {
+                    // Check if next non-empty line looks like a continuation argument
+                    // (starts with ',', or is followed eventually by ')' before next statement)
+                    if (i + 1 < lines.length) {
+                        String nextNonEmpty = lines[i + 1].trim();
+                        if (!nextNonEmpty.isEmpty() &&
+                            !nextNonEmpty.startsWith("//") && !nextNonEmpty.startsWith("/*")) {
+                            isReturnWithContinuation = true;
+                        }
+                    }
+                    if (!isReturnWithContinuation) isBlockEndKeyword = true;
+                }
+                if (isBlockEndKeyword) {
                     // Remove the semicolon from block-ending keywords
                     processedLine = newIndent + trimmed.substring(0, trimmed.length() - 1);
                     log("Removed unnecessary semicolon from: " + trimmedLower);
@@ -1596,13 +1812,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     shouldKeepManualContinuation = true;
                     log("Keeping manual continuation - has inline comment");
                 } else {
-                    // Check if line (without comment) fits
-                    String lineForCheck = processedLine.trim();
-                    if (lineForCheck.length() <= lineBreakPosition) {
+                    // Check if full line (with indent) fits within the limit
+                    if (processedLine.length() <= lineBreakPosition) {
                         shouldKeepManualContinuation = true;
-                        log("Keeping manual continuation - line fits: " + lineForCheck.length() + " <= " + lineBreakPosition);
+                        log("Keeping manual continuation - line fits: " + processedLine.length() + " <= " + lineBreakPosition);
                     } else {
-                        log("NOT keeping manual continuation - line too long: " + lineForCheck.length() + " > " + lineBreakPosition);
+                        // Rule: respect the user's manual wrap only if every line in the
+                        // manual continuation block fits within the limit. If ANY line
+                        // (this one or any continuation line) is over the limit, allow
+                        // the formatter to rebreak. Length is checked at format-time so
+                        // post-spacing/post-indent lengths are used.
+                        log("NOT keeping manual continuation - line too long: " + processedLine.length() + " > " + lineBreakPosition);
                     }
                 }
 
@@ -1610,8 +1830,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 // we should keep it as part of the manual formatting
                 // BUT only if the line is not too long
                 if (prevLineHasContinuation || isLineContinuation) {
-                    if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition) {
-                        // Line is too long - don't keep, let it be re-wrapped
+                    // Inside a string-continuation block, lines ending with `";` or `';`
+                    // wrap a single string literal that often can't be split shorter without
+                    // pathological micro-splits like "S"+;"ac". Leave such lines alone — they
+                    // already show user-intended boundaries.
+                    String pTrim = processedLine.trim();
+                    if (pTrim.endsWith("\";") || pTrim.endsWith("';") ||
+                        pTrim.endsWith("\"") || pTrim.endsWith("'")) {
+                        shouldKeepManualContinuation = true;
+                        log("Keeping string-continuation line as-is to preserve idempotency");
+                    } else if (lineBreakPosition > 0 && processedLine.length() > lineBreakPosition) {
+                        // Rule: any line over the limit allows the formatter to rebreak
+                        // the manual continuation block.
                         log("NOT keeping manual continuation - line too long for continuation block");
                     } else {
                         shouldKeepManualContinuation = true;
@@ -1727,7 +1957,12 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             }
         }
 
-        return result.toString();
+        // Restore CRLF line endings if the input had them
+        String output = result.toString();
+        if (hadCRLF) {
+            output = output.replace("\n", "\r\n");
+        }
+        return output;
     }
 
     /**
@@ -1760,8 +1995,8 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         }
 
         // Check if this line already has a line continuation semicolon
-        // If it does, don't break it further as it's already been manually formatted
-        if (line.trim().endsWith(";")) {
+        // If it does and fits within the limit, don't break it further
+        if (line.trim().endsWith(";") && line.length() <= lineBreakPosition) {
             result.add(line);
             return result;
         }
@@ -1965,6 +2200,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             log("WARN: Max recursion depth reached in breakRegularLine, returning line as-is");
             result.add(line);
             return result;
+        }
+
+        // If only an inline trailing line-comment makes the line exceed the limit,
+        // don't break — inserting ';' inside or before a // comment would break syntax.
+        int lineCommentPos = findLineCommentStart(line);
+        if (lineCommentPos > 0) {
+            String beforeComment = line.substring(0, lineCommentPos).replaceAll("\\s+$", "");
+            if (beforeComment.length() <= lineBreakPosition) {
+                result.add(line);
+                return result;
+            }
         }
 
         // Debug logging for problematic cases
@@ -2171,7 +2417,13 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 result.add(continuationIndent + remaining);
                 return result;
             }
-            // If no good logical break point found, fall through to regular breaking
+            // No good logical break point — leave the line untouched and warn.
+            // Falling through to regular breaking would produce non-idempotent
+            // bad breaks like "if !;\n  Message(...)".
+            log("WARN: if-statement line " + line.length() + " chars > " +
+                lineBreakPosition + " has no logical operator to wrap; leaving as-is");
+            result.add(line);
+            return result;
         } else if (trimmedLower.startsWith("elseif ")) {
             // Special handling for elseif statements - prevent excessive breaking
             // Try to keep logical expressions together
@@ -2556,6 +2808,59 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     // If no valid string end found, fall through to regular processing
                     log("No valid string end found, falling through to regular processing");
                 }
+                // Check if this is a code block assignment (:={ |params| ... })
+                else if (afterAssign == '{') {
+                    int afterBrace = pos + 1;
+                    while (afterBrace < content.length() && content.charAt(afterBrace) == ' ') afterBrace++;
+                    if (afterBrace < content.length() && content.charAt(afterBrace) == '|') {
+                        // Code block assignment - prefer breaking at logical operators inside the block
+                        // rather than splitting {| from the block body
+                        log("Code block assignment detected at position " + pos);
+                        int lastLogicalInBlock = -1;
+                        String cbLower = content.toLowerCase();
+                        for (String op : new String[]{".and.", ".or."}) {
+                            int searchFrom = afterBrace;
+                            while (searchFrom < content.length()) {
+                                int opPos = cbLower.indexOf(op, searchFrom);
+                                if (opPos < 0) break;
+                                int afterOp = opPos + op.length();
+                                String testLine = indent + content.substring(0, afterOp) + ";";
+                                if (testLine.length() <= lineBreakPosition) {
+                                    lastLogicalInBlock = afterOp;
+                                }
+                                searchFrom = afterOp;
+                            }
+                        }
+
+                        if (lastLogicalInBlock > 0) {
+                            String firstPart = content.substring(0, lastLogicalInBlock);
+                            String remaining = content.substring(lastLogicalInBlock).trim();
+                            result.add(indent + firstPart + ";");
+                            String continuationIndent = indent + " ".repeat(indentSize);
+                            if (continuationIndent.length() + remaining.length() > lineBreakPosition) {
+                                List<String> subLines = breakRegularLineWithDepth(
+                                    continuationIndent + remaining, continuationIndent, remaining,
+                                    lineBreakPosition, indentSize, depth + 1);
+                                result.addAll(subLines);
+                            } else {
+                                result.add(continuationIndent + remaining);
+                            }
+                            return result;
+                        }
+                        // No logical operator fits - break after := and put code block on next line
+                        log("No logical operator found in code block, breaking after :=");
+                        String beforeBlock = content.substring(0, assignPos + 2);
+                        String blockPart = content.substring(pos); // from { onwards
+                        String continuationIndent = indent + " ".repeat(indentSize);
+                        if (continuationIndent.length() + blockPart.length() <= lineBreakPosition) {
+                            result.add(indent + beforeBlock + ";");
+                            result.add(continuationIndent + blockPart);
+                            return result;
+                        }
+                        // Code block itself is too long even on its own line - fall through
+                        log("Code block too long even on continuation line, falling through");
+                    }
+                }
             }
         }
 
@@ -2581,6 +2886,7 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // This keeps as much of the GET clause as possible on the first line
         // Prefer 'when' over 'valid' since it usually comes later and keeps more together
         boolean preferGetClauseBreak = false;
+        boolean useSameIndentForContinuation = false;
         String contentLowerForGet = content.toLowerCase();
         if (contentLowerForGet.contains(" get ")) {
             // Look for valid/when keywords as preferred break points
@@ -2594,6 +2900,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                     preferGetClauseBreak = true;
                     break;
                 }
+            }
+        }
+        // Also handle continuation lines: "valid ... when ..." should break before "when"
+        // Use same indent level (not deeper) since valid/when are siblings in GET syntax
+        if (!preferGetClauseBreak && contentLowerForGet.startsWith("valid ") && contentLowerForGet.contains(" when ")) {
+            int whenPos = contentLowerForGet.indexOf(" when ");
+            if (whenPos > 0 && whenPos <= maxPos) {
+                log("GET clause continuation: preferring break before 'when' at position " + whenPos);
+                bestBreakPos = whenPos + 1;
+                preferGetClauseBreak = true;
+                useSameIndentForContinuation = true;
             }
         }
 
@@ -2696,11 +3013,11 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
                     }
 
-                    // Don't break right after := or ( or :
+                    // Don't break right after := or ( or : or {
                     if (i >= 2 && content.substring(i-2, i).equals(":=")) {
                         continue;
                     }
-                    if (content.charAt(i-1) == '(' || content.charAt(i-1) == ':') {
+                    if (content.charAt(i-1) == '(' || content.charAt(i-1) == ':' || content.charAt(i-1) == '{') {
                         continue;
                     }
 
@@ -2789,6 +3106,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
                     }
 
+                    // Don't break right after declaration keywords - keep the name on the same line
+                    // PROCEDURE/FUNCTION/METHOD must stay together with their name for the
+                    // function-start regex to match across passes.
+                    {
+                        String head = content.substring(0, i).toLowerCase().trim();
+                        if (head.equals("procedure") || head.equals("function") ||
+                            head.equals("method") || head.equals("static function") ||
+                            head.equals("static procedure") || head.equals("class")) {
+                            continue;
+                        }
+                    }
+
                     // Don't break right after field name before "with" in replace command
                     // Check if this space precedes "with"
                     if (i + 4 <= content.length()) {
@@ -2814,8 +3143,27 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         }
                     }
 
+                    // Don't break right after "valid" keyword (GET clause)
+                    if (i >= 5) {
+                        String beforeSpace = content.substring(Math.max(0, i-5), i).toLowerCase();
+                        if (beforeSpace.equals("valid") || beforeSpace.endsWith(" valid")) {
+                            continue;
+                        }
+                    }
+
+                    // Don't break right after "when" keyword (GET clause)
+                    if (i >= 4) {
+                        String beforeSpace = content.substring(Math.max(0, i-4), i).toLowerCase();
+                        if (beforeSpace.equals("when") || beforeSpace.endsWith(" when")) {
+                            continue;
+                        }
+                    }
+
                     lastSpace = i + 1;
-                    if (bestBreakPos < 0 && !preferLogicalBreak) {
+                    // Track the LATEST allowed space as the best break point so we
+                    // maximize how much fits on the first line (instead of breaking
+                    // at the first eligible space, which leaves the line nearly empty).
+                    if (!preferLogicalBreak) {
                         bestBreakPos = lastSpace;
                     }
                 } else if ((c == '+' || c == '-') && !inString && i < maxPos) {
@@ -2825,27 +3173,68 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                         // This is -> accessor, don't break here
                         continue;
                     }
+                    // BUT NOT if part of compound assignment += or -=
+                    if (i + 1 < content.length() && content.charAt(i + 1) == '=') {
+                        continue;
+                    }
                     lastOperator = i + 1;
                 }
             }
         }
         } // End of else block for !preferGetClauseBreak
 
-        // If we found a preferred logical break point (before parenthesis), use it
-        // But NOT if we already have a preferred GET clause break
+        // If we found a logical break point (.and./.or.), prefer it over space breaks
+        // Logical operators are almost always better break points than arbitrary spaces
+        // (CLAUDE.md: "If possible wrap after .and. .or. etc. Also try to wrap at spaces").
+        // But NOT if we already have a preferred GET clause break.
         if (!preferGetClauseBreak) {
-            if (preferLogicalBreak && lastLogical > 0) {
+            if (lastLogical > 0 && lastLogical <= maxPos) {
                 bestBreakPos = lastLogical;
-                log("Using preferred logical operator break at " + lastLogical);
-            } else if (lastLogical > 0 && bestBreakPos < 0) {
-                // Use logical operator break if we have no other break point
-                bestBreakPos = lastLogical;
-                log("Using logical operator break as fallback at " + lastLogical);
+                log("Using logical operator break at " + lastLogical + " (over space at " + lastSpace + ")");
+            }
+        }
+
+        // Last resort: if NO break point found at all, scan full content for
+        // .and./.or. that starts within maxPos but extends past it, and break
+        // BEFORE the operator. This handles lines where a long string pushes
+        // the operator right to the boundary (e.g. GET/when with long Message).
+        if (bestBreakPos <= 0 && !preferGetClauseBreak && lastLogical <= 0) {
+            String scanLower = content.toLowerCase();
+            for (String op : new String[]{".and.", ".or."}) {
+                int pos = scanLower.indexOf(op);
+                while (pos >= 0) {
+                    int opEnd = pos + op.length();
+                    // Operator starts at or before maxPos but extends past it
+                    if (pos <= maxPos && opEnd > maxPos) {
+                        // Verify not inside a string
+                        boolean inStr = false;
+                        char strDlm = 0;
+                        for (int j = 0; j < pos; j++) {
+                            char c = content.charAt(j);
+                            if ((c == '"' || c == '\'') &&
+                                    (j == 0 || content.charAt(j - 1) != '\\')) {
+                                if (!inStr) { inStr = true; strDlm = c; }
+                                else if (c == strDlm) { inStr = false; }
+                            }
+                        }
+                        if (!inStr) {
+                            bestBreakPos = pos;
+                            log("Last resort: breaking before " + op +
+                                " at " + pos + " (extends past maxPos)");
+                            break;
+                        }
+                    }
+                    pos = scanLower.indexOf(op, pos + 1);
+                }
+                if (bestBreakPos > 0) break;
             }
         }
 
         // If we're in a string at max position, we need to break the string
-        if (inString && stringStart >= 0) {
+        // BUT if we already have a valid break point BEFORE the string, prefer that
+        // to avoid unnecessary string splitting. A break point AT stringStart means
+        // we break before the opening quote — that's not "inside" the string.
+        if (inString && stringStart >= 0 && (bestBreakPos <= 0 || bestBreakPos > stringStart)) {
             String beforeString = content.substring(0, stringStart);
 
             // First check if the string has nested quotes - if so, don't wrap
@@ -3244,7 +3633,9 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 remaining = remaining.substring(1);
             }
 
-            String continuationIndent = indent + " ".repeat(indentSize);
+            // For GET clause siblings (valid/when), use same indent; otherwise add indentSize
+            String continuationIndent = useSameIndentForContinuation
+                ? indent : indent + " ".repeat(indentSize);
 
             // Check if the remaining line is still too long
             if (continuationIndent.length() + remaining.length() > maxLen) {
@@ -3313,10 +3704,18 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
             return false;
         }
 
-        // Don't break CASE statements - breaking them requires proper continuation handling
-        // which the current line breaker doesn't do correctly
         String trimmedLower = trimmed.toLowerCase();
-        if (trimmedLower.startsWith("case ")) {
+
+        // Don't break Harbour xbase commands whose keyword pair (e.g. COPY FILE)
+        // cannot survive a ';' continuation between the two leading words. Wrapping
+        // these would produce code the Harbour preprocessor rejects.
+        if (trimmedLower.startsWith("copy file ") ||
+            trimmedLower.startsWith("copy structure ") ||
+            trimmedLower.startsWith("copy to ") ||
+            trimmedLower.startsWith("append from ") ||
+            trimmedLower.startsWith("delete file ") ||
+            trimmedLower.startsWith("rename file ")) {
+            log("Not breaking xbase command line (>" + line.length() + " chars): " + trimmed);
             return false;
         }
 
@@ -3426,6 +3825,40 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
     /**
      * Find a good break point, avoiding splitting Harbour keywords
      */
+    /**
+     * Find position of inline // line comment, ignoring occurrences inside strings
+     * or inside /* ... *​/ block comments. Returns -1 if not found.
+     */
+    private int findLineCommentStart(String line) {
+        boolean inString = false;
+        char stringDelim = 0;
+        int len = line.length();
+        for (int i = 0; i < len; i++) {
+            char c = line.charAt(i);
+            if (!inString && (c == '"' || c == '\'')) {
+                inString = true;
+                stringDelim = c;
+                continue;
+            }
+            if (inString) {
+                if (c == stringDelim && (i == 0 || line.charAt(i - 1) != '\\')) {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < len) {
+                char n = line.charAt(i + 1);
+                if (n == '/') return i;
+                if (n == '*') {
+                    int end = line.indexOf("*/", i + 2);
+                    if (end < 0) return -1;
+                    i = end + 1;
+                }
+            }
+        }
+        return -1;
+    }
+
     private int findBreakPoint(String content, int startPos, int endPos) {
         if (endPos >= content.length()) return content.length();
 
@@ -3534,7 +3967,17 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
                 if (i < content.length()-1 && content.charAt(i+1) == '=') continue; // First = in ==
                 // Check if part of :=
                 if (i > 0 && content.charAt(i-1) == ':') continue; // = in :=
+                // Check if part of compound assignment: += -= *= /= %=
+                if (i > 0) {
+                    char prev = content.charAt(i - 1);
+                    if (prev == '+' || prev == '-' || prev == '*' || prev == '/' || prev == '%') continue;
+                }
+                // Check if part of => (hash literal marker)
+                if (i < content.length()-1 && content.charAt(i+1) == '>') continue;
             }
+            // Don't break before = when c is the first char of a compound assignment
+            if ((c == '+' || c == '-' || c == '*' || c == '/' || c == '%') &&
+                i < content.length()-1 && content.charAt(i+1) == '=') continue;
 
             // Check if we're inside or at the boundary of any Harbour keyword
             if (isWithinHarbourKeyword(content, i)) {
@@ -3774,6 +4217,358 @@ public class HarbourPostFormatProcessor implements PostFormatProcessor {
         // }
 
         return result;
+    }
+
+    /**
+     * Normalize spacing in a single line of code content (without leading indent).
+     * Handles commas and operators while respecting strings, comments, and Harbour-specific syntax.
+     *
+     * Protected operators that must NEVER get spaces added:
+     * - -> (alias operator: TABLE->Field)
+     * - : (send operator: obj:method)
+     * - := when spaceAroundAssignment is false
+     * - Unary minus/plus (prefix operators)
+     */
+    private String normalizeLineSpacing(String content,
+            boolean spaceAfterComma, boolean spaceBeforeComma,
+            boolean spaceAroundAdditive, boolean spaceAroundMultiplicative,
+            boolean spaceAroundComparison, boolean spaceAroundAssignment,
+            boolean spaceAroundLogical) {
+
+        if (content.isEmpty()) return content;
+
+        StringBuilder result = new StringBuilder(content.length() + 32);
+        boolean inString = false;
+        char stringDelim = 0;
+        int len = content.length();
+
+        for (int i = 0; i < len; i++) {
+            char c = content.charAt(i);
+
+            // Track string state — toggle on matching quote (not escaped)
+            if ((c == '"' || c == '\'') && (i == 0 || content.charAt(i - 1) != '\\')) {
+                if (!inString) {
+                    inString = true;
+                    stringDelim = c;
+                } else if (c == stringDelim) {
+                    inString = false;
+                }
+                result.append(c);
+                continue;
+            }
+
+            // Inside string — pass through unchanged
+            if (inString) {
+                result.append(c);
+                continue;
+            }
+
+            // Inline comment — pass through rest of line unchanged
+            if (c == '/' && i + 1 < len && content.charAt(i + 1) == '/') {
+                result.append(content.substring(i));
+                break;
+            }
+
+            // Inline block comment /* ... */ — pass through unchanged
+            // (without this, '*' and '/' inside would be treated as operators)
+            if (c == '/' && i + 1 < len && content.charAt(i + 1) == '*') {
+                int end = content.indexOf("*/", i + 2);
+                if (end < 0) {
+                    // Unterminated on this line — pass through to end of line
+                    result.append(content.substring(i));
+                    return result.toString();
+                }
+                result.append(content, i, end + 2);
+                i = end + 1; // for-loop will increment to end+2
+                continue;
+            }
+
+            // --- Comma handling ---
+            if (c == ',') {
+                if (spaceBeforeComma) {
+                    ensureSpaceBefore(result);
+                } else {
+                    trimTrailingSpaces(result);
+                }
+                result.append(',');
+                if (spaceAfterComma) {
+                    // Skip existing spaces after comma, we'll add exactly one
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    // Don't add space if next is end of line, semicolon, or comment
+                    if (i + 1 < len && content.charAt(i + 1) != ';' && content.charAt(i + 1) != '/') {
+                        result.append(' ');
+                    }
+                } else {
+                    // Remove spaces after comma
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                }
+                continue;
+            }
+
+            // --- Logical operators: .and. .or. .not. ---
+            if (c == '.' && spaceAroundLogical) {
+                String rest = content.substring(i).toLowerCase();
+                String op = null;
+                if (rest.startsWith(".and.")) op = ".and.";
+                else if (rest.startsWith(".or.")) op = ".or.";
+                else if (rest.startsWith(".not.")) op = ".not.";
+
+                if (op != null) {
+                    // Preserve original case
+                    String originalOp = content.substring(i, i + op.length());
+                    ensureSpaceBefore(result);
+                    result.append(originalOp);
+                    i += op.length() - 1;
+                    // Ensure space after (skip existing spaces) — but not before ;
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    continue;
+                }
+            }
+
+            // --- Assignment operator := ---
+            if (c == ':' && i + 1 < len && content.charAt(i + 1) == '=') {
+                if (spaceAroundAssignment) {
+                    ensureSpaceBefore(result);
+                    result.append(":=");
+                    i++; // skip =
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                } else {
+                    trimTrailingSpaces(result);
+                    result.append(":=");
+                    i++; // skip =
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                }
+                continue;
+            }
+
+            // --- Protect => (hash literal marker) — emit unchanged ---
+            // Used in hash declarations: { "key" => value, ... } and { => }
+            if (c == '=' && i + 1 < len && content.charAt(i + 1) == '>') {
+                result.append("=>");
+                i++; // skip >
+                continue;
+            }
+
+            // --- Protect -> (alias operator) and : (send operator) ---
+            if (c == '-' && i + 1 < len && content.charAt(i + 1) == '>') {
+                result.append("->");
+                i++; // skip >
+                continue;
+            }
+            if (c == ':' && (i + 1 >= len || content.charAt(i + 1) != '=')) {
+                // This is : (send operator) — pass through, no spacing
+                result.append(c);
+                continue;
+            }
+
+            // --- Comparison operators: == != <= >= < > ---
+            if (spaceAroundComparison) {
+                // ==
+                if (c == '=' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append("==");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // != (Harbour also uses <> but handle ! separately)
+                if (c == '!' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append("!=");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // <=
+                if (c == '<' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append("<=");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // >=
+                if (c == '>' && i + 1 < len && content.charAt(i + 1) == '=') {
+                    ensureSpaceBefore(result);
+                    result.append(">=");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // <> (Harbour not-equal)
+                if (c == '<' && i + 1 < len && content.charAt(i + 1) == '>') {
+                    ensureSpaceBefore(result);
+                    result.append("<>");
+                    i++;
+                    skipSpacesAndAdd(result, content, i, len);
+                    i = skipSpacesAfter(content, i, len);
+                    continue;
+                }
+                // Standalone < or > (not part of -> or <> or <= or >=)
+                if (c == '<' || c == '>') {
+                    // < already handled <= and <> above, so this is standalone
+                    ensureSpaceBefore(result);
+                    result.append(c);
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    continue;
+                }
+            }
+
+            // --- Multiplicative operators: * / % ---
+            if (spaceAroundMultiplicative && (c == '*' || c == '/' || c == '%')) {
+                // Protect compound assignment: *= /= %=
+                if (i + 1 < len && content.charAt(i + 1) == '=') {
+                    if (spaceAroundAssignment) {
+                        ensureSpaceBefore(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                        if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    } else {
+                        trimTrailingSpaces(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    }
+                    continue;
+                }
+                // Don't touch ** (power operator) — treat as single unit
+                if (c == '*' && i + 1 < len && content.charAt(i + 1) == '*') {
+                    ensureSpaceBefore(result);
+                    result.append("**");
+                    i++;
+                    while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    continue;
+                }
+                // Don't touch // (comment start)
+                if (c == '/' && i + 1 < len && content.charAt(i + 1) == '/') {
+                    result.append(content.substring(i));
+                    return result.toString();
+                }
+                ensureSpaceBefore(result);
+                result.append(c);
+                while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                if (i + 1 < len) result.append(' ');
+                continue;
+            }
+
+            // --- Additive operators: + - ---
+            if (spaceAroundAdditive && (c == '+' || c == '-')) {
+                // Protect -> (already handled above, but double-check)
+                if (c == '-' && i + 1 < len && content.charAt(i + 1) == '>') {
+                    result.append("->");
+                    i++;
+                    continue;
+                }
+                // Protect ++ and -- (increment/decrement)
+                if (c == '+' && i + 1 < len && content.charAt(i + 1) == '+') {
+                    result.append("++");
+                    i++;
+                    continue;
+                }
+                if (c == '-' && i + 1 < len && content.charAt(i + 1) == '-') {
+                    result.append("--");
+                    i++;
+                    continue;
+                }
+                // Protect compound assignment: += -=
+                if (i + 1 < len && content.charAt(i + 1) == '=') {
+                    if (spaceAroundAssignment) {
+                        ensureSpaceBefore(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                        if (i + 1 < len && content.charAt(i + 1) != ';') result.append(' ');
+                    } else {
+                        trimTrailingSpaces(result);
+                        result.append(c); result.append('=');
+                        i++;
+                        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                    }
+                    continue;
+                }
+                // Detect if this is a unary operator (prefix) vs binary
+                // Unary: after ( , := = < > ! + - * / % [ { ; or at start of content
+                boolean isUnary = isUnaryContext(result, content, i);
+                if (isUnary) {
+                    // Unary — no space before, just append
+                    result.append(c);
+                    continue;
+                }
+                // Check for string continuation +; pattern — don't add space after +
+                if (c == '+' && i + 1 < len && content.charAt(i + 1) == ';') {
+                    result.append(c);
+                    continue;
+                }
+                // Binary operator — space around
+                ensureSpaceBefore(result);
+                result.append(c);
+                while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+                if (i + 1 < len) result.append(' ');
+                continue;
+            }
+
+            // --- Default: pass through ---
+            result.append(c);
+        }
+
+        return result.toString();
+    }
+
+    /** Ensure the result ends with exactly one space (add if missing, don't double) */
+    private void ensureSpaceBefore(StringBuilder sb) {
+        if (sb.length() > 0 && sb.charAt(sb.length() - 1) != ' ') {
+            sb.append(' ');
+        }
+    }
+
+    /** Remove trailing spaces from StringBuilder */
+    private void trimTrailingSpaces(StringBuilder sb) {
+        while (sb.length() > 0 && sb.charAt(sb.length() - 1) == ' ') {
+            sb.setLength(sb.length() - 1);
+        }
+    }
+
+    /** Skip spaces in content after position i, add one space to result if needed (not before ;) */
+    private void skipSpacesAndAdd(StringBuilder result, String content, int i, int len) {
+        // Find next non-space char
+        int next = i + 1;
+        while (next < len && content.charAt(next) == ' ') next++;
+        if (next < len && content.charAt(next) != ';') result.append(' ');
+    }
+
+    /** Skip spaces after position i in content, return new i */
+    private int skipSpacesAfter(String content, int i, int len) {
+        while (i + 1 < len && content.charAt(i + 1) == ' ') i++;
+        return i;
+    }
+
+    /**
+     * Determine if +/- at position i is a unary (prefix) operator.
+     * Unary if preceded by: ( , := = < > ! + - * / % [ { ; or nothing.
+     */
+    private boolean isUnaryContext(StringBuilder resultSoFar, String content, int i) {
+        // At start of content
+        if (resultSoFar.length() == 0) return true;
+
+        // Find last non-space char in result
+        int pos = resultSoFar.length() - 1;
+        while (pos >= 0 && resultSoFar.charAt(pos) == ' ') pos--;
+        if (pos < 0) return true;
+
+        char prev = resultSoFar.charAt(pos);
+        // After these chars, +/- is unary
+        return prev == '(' || prev == ',' || prev == '=' || prev == '<' || prev == '>' ||
+               prev == '!' || prev == '+' || prev == '-' || prev == '*' || prev == '/' ||
+               prev == '%' || prev == '[' || prev == '{' || prev == ';';
     }
 
     /**
