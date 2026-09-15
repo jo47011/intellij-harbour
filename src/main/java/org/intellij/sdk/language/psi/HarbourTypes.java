@@ -93,6 +93,10 @@ public interface HarbourTypes {
     IElementType SEMICOLON = new HarbourTokenType("SEMICOLON");
     IElementType PREPROC_DIRECTIVE = new HarbourTokenType("PREPROC_DIRECTIVE");
 
+    // One node per FUNCTION / PROCEDURE / METHOD / CLASS, spanning the whole routine.
+    // Needed by features that work on ranges (sticky lines, breadcrumbs).
+    IElementType DECLARATION_BLOCK = new HarbourElementType("DECLARATION_BLOCK");
+
     // Element types from .bnf file
     IElementType FUNCTION_DECLARATION = new HarbourElementType("FUNCTION_DECLARATION");
     IElementType PROCEDURE_DECLARATION = new HarbourElementType("PROCEDURE_DECLARATION");

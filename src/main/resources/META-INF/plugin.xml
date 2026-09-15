@@ -92,6 +92,11 @@
         <lang.psiStructureViewFactory language="Harbour"
                                       implementationClass="org.intellij.sdk.language.HarbourStructureViewFactory"/>
 
+        <!-- Sticky lines for CLASS / FUNCTION / PROCEDURE / METHOD.
+             The platform collects them through the breadcrumbs provider; the breadcrumb bar
+             itself is off by default (HarbourBreadcrumbsProvider.isShownByDefault). -->
+        <breadcrumbsInfoProvider implementation="org.intellij.sdk.language.HarbourBreadcrumbsProvider"/>
+
         <!-- Go to Declaration -->
         <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourGoToDeclarationHandler" order="first"/>
         <gotoDeclarationHandler implementation="org.intellij.sdk.language.HarbourExternalDocumentationHandler" order="last"/>

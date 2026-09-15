@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.intellij.sdk'
-version = '1.1.86'
+version = '1.1.89'
 
 repositories {
     mavenCentral()
@@ -28,6 +28,7 @@ dependencies {
         // Note: Database plugin not available in Community Edition
         // Will implement custom DBF viewing without database plugin dependency
         instrumentationTools()
+        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform.INSTANCE)
     }
 }
 
