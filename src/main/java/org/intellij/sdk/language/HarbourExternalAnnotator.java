@@ -8,6 +8,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
@@ -862,6 +863,9 @@ public class HarbourExternalAnnotator extends ExternalAnnotator<HarbourLintInfo,
                 }
             }
             
+        } catch (ProcessCanceledException e) {
+            // Rethrow without logging
+            throw e;
         } catch (Exception e) {
             LOG.error("Error running Harbour linter", e);
             HarbourLogger.log("HarbourLinter", "Error: " + e.getMessage());
