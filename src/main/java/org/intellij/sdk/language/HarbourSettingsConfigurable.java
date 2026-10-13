@@ -67,6 +67,9 @@ public class HarbourSettingsConfigurable implements Configurable {
     // Debugger charset combo (editable; empty = use project default encoding)
     private JComboBox<String> myDebuggerCharsetCombo;
 
+    // Runtime trace log (.hbmk/debug.log) of harbour_debug.prg
+    private JCheckBox myRuntimeDebugLogCheckBox;
+
     public HarbourSettingsConfigurable(Project project) {
         myProject = project;
     }
@@ -219,9 +222,19 @@ public class HarbourSettingsConfigurable implements Configurable {
         charsetExplanation.setFont(charsetExplanation.getFont().deriveFont(Font.ITALIC));
         generalPanel.add(charsetExplanation, constraints);
 
-        // Add spacer to general panel
+        // Runtime trace log of the debug agent (passed as HB_DBG_LOG=1 to the debugged program)
         constraints.gridx = 0;
         constraints.gridy = 12;
+        constraints.gridwidth = 2;
+        myRuntimeDebugLogCheckBox = new JCheckBox("Write debugger runtime log (.hbmk/debug.log)");
+        myRuntimeDebugLogCheckBox.setToolTipText(
+                "<html>Debug sessions only. The debug agent logs every executed line to " +
+                ".hbmk/debug.log.<br>Slows the program down - enable for troubleshooting only.</html>");
+        generalPanel.add(myRuntimeDebugLogCheckBox, constraints);
+
+        // Add spacer to general panel
+        constraints.gridx = 0;
+        constraints.gridy = 13;
         constraints.weighty = 1.0;
         constraints.gridwidth = 2;
         constraints.fill = GridBagConstraints.BOTH;
@@ -826,7 +839,8 @@ public class HarbourSettingsConfigurable implements Configurable {
                 !settings.getLinterExclusionComment().equals(myLinterExclusionCommentField.getText()) ||
                 settings.getMaxNavigationResults() != (Integer) myMaxNavigationResultsSpinner.getValue() ||
                 settings.getMaxGridPreloadResults() != (Integer) myMaxGridPreloadResultsSpinner.getValue() ||
-                !settings.getDebuggerCharset().equals(getDebuggerCharsetText());
+                !settings.getDebuggerCharset().equals(getDebuggerCharsetText()) ||
+                settings.isRuntimeDebugLogEnabled() != myRuntimeDebugLogCheckBox.isSelected();
     }
 
     private String getDebuggerCharsetText() {
@@ -882,6 +896,7 @@ public class HarbourSettingsConfigurable implements Configurable {
             }
         }
         settings.setDebuggerCharset(charsetValue);
+        settings.setRuntimeDebugLogEnabled(myRuntimeDebugLogCheckBox.isSelected());
 
         // Notify HarbourReferenceService to update exclusions
         HarbourReferenceService service = HarbourReferenceService.getInstance(myProject);
@@ -956,6 +971,7 @@ public class HarbourSettingsConfigurable implements Configurable {
 
         // Load debugger charset
         myDebuggerCharsetCombo.setSelectedItem(settings.getDebuggerCharset());
+        myRuntimeDebugLogCheckBox.setSelected(settings.isRuntimeDebugLogEnabled());
 
         // Default scan path to the project base path
         String defaultScanPath = myProject.getBasePath();
