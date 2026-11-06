@@ -124,6 +124,10 @@
         
         <!-- FileBasedIndex for #define navigation -->
         <fileBasedIndex implementation="org.intellij.sdk.language.index.HarbourDefineIndex"/>
+
+        <!-- Declarations-only index + Go to Symbol (Ctrl+Alt+Shift+N) -->
+        <fileBasedIndex implementation="org.intellij.sdk.language.index.HarbourDeclarationIndex"/>
+        <gotoSymbolContributor implementation="org.intellij.sdk.language.HarbourGotoSymbolContributor"/>
         
         <!-- Stub Indexes for Fast Navigation - Disabled until PSI elements are updated
         <stubIndex implementation="org.intellij.sdk.language.psi.stub.HarbourFunctionNameIndex"/>
