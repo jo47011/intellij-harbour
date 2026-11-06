@@ -53,23 +53,8 @@ public class HarbourDebuggerConnection {
             HarbourLogger.log("HarbourDebuggerConnection", "=== STARTING PYCHARM DEBUG SERVER v1.0.260 ===");
             HarbourLogger.log("HarbourDebuggerConnection", "Starting to listen on port " + port);
             
-            // Aggressive port cleanup before binding
-            if (!isPortAvailable(port)) {
-                HarbourLogger.log("HarbourDebuggerConnection", "Port " + port + " is in use, attempting to free it");
-                forceReleasePort(port);
-                
-                // Wait a moment for port to be released
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                
-                // Check again
-                if (!isPortAvailable(port)) {
-                    HarbourLogger.log("HarbourDebuggerConnection", "WARNING: Port " + port + " still appears to be in use");
-                }
-            }
+            // Never kill processes to free the port - only report it
+            warnIfPortInUse();
             
             serverSocket = new ServerSocket(port);
             serverSocket.setReuseAddress(true); // Allow quick restart
@@ -181,23 +166,8 @@ public class HarbourDebuggerConnection {
         try {
             HarbourLogger.log("HarbourDebuggerConnection", "Starting debug server on port " + port);
             
-            // Aggressive port cleanup before binding
-            if (!isPortAvailable(port)) {
-                HarbourLogger.log("HarbourDebuggerConnection", "Port " + port + " is in use, attempting to free it");
-                forceReleasePort(port);
-                
-                // Wait a moment for port to be released
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                
-                // Check again
-                if (!isPortAvailable(port)) {
-                    HarbourLogger.log("HarbourDebuggerConnection", "WARNING: Port " + port + " still appears to be in use");
-                }
-            }
+            // Never kill processes to free the port - only report it
+            warnIfPortInUse();
             
             serverSocket = new ServerSocket(port);
             serverSocket.setReuseAddress(true); // Allow quick restart
@@ -588,41 +558,16 @@ public class HarbourDebuggerConnection {
             return false;
         }
     }
-    
+
     /**
-     * Force release of a port by killing processes using it
+     * Warn (console + log) if the debug port is busy. Binding will then fail with a clear error.
      */
-    private void forceReleasePort(int port) {
-        try {
-            String os = System.getProperty("os.name").toLowerCase();
-            ProcessBuilder pb;
-            
-            if (os.contains("windows")) {
-                // Windows: netstat and taskkill
-                pb = new ProcessBuilder("cmd", "/c", 
-                    "for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :" + port + "') do taskkill /f /pid %a");
-            } else {
-                // Linux/Unix: lsof and kill
-                pb = new ProcessBuilder("bash", "-c", 
-                    "lsof -ti:" + port + " | xargs -r kill -9");
-            }
-            
-            Process process = pb.start();
-            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
-            
-            if (finished) {
-                int exitCode = process.exitValue();
-                HarbourLogger.log("HarbourDebuggerConnection", 
-                    "Port cleanup command finished with exit code: " + exitCode);
-            } else {
-                HarbourLogger.log("HarbourDebuggerConnection", 
-                    "Port cleanup command timed out");
-                process.destroyForcibly();
-            }
-            
-        } catch (Exception e) {
-            HarbourLogger.log("HarbourDebuggerConnection", 
-                "Error during port cleanup: " + e.getMessage());
+    private void warnIfPortInUse() {
+        if (!isPortAvailable(port)) {
+            HarbourLogger.log(null, "HarbourDebuggerConnection",
+                    "Debug port " + port + " is already in use (another debug session or program?)."
+                            + " Stop it and restart the debug session, or change the debug port.",
+                    HarbourLogger.LogLevel.WARNING);
         }
     }
     

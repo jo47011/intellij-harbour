@@ -6,6 +6,7 @@ import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
@@ -85,6 +86,9 @@ public class HarbourIncludeAnnotator implements Annotator {
                     }
                 }
             }
+        } catch (ProcessCanceledException e) {
+            // Rethrow without logging
+            throw e;
         } catch (Exception e) {
             LOG.error("Error in HarbourIncludeAnnotator", e);
             HarbourLogger.log(COMPONENT, "Include Annotator Error: " + e.getMessage());

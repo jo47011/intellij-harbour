@@ -96,6 +96,10 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
     // Default windows-1252 covers typical Western xBase/Clipper data (umlauts, sharp-s).
     private String debuggerCharset = "windows-1252";
 
+    // Runtime trace log (.hbmk/debug.log) written by harbour_debug.prg.
+    // Off by default: it opens/writes/closes the file on every executed PRG line.
+    private boolean runtimeDebugLogEnabled = false;
+
 
     public HarbourSettings() {
         // Empty constructor
@@ -470,6 +474,14 @@ public class HarbourSettings implements PersistentStateComponent<HarbourSettings
 
     public void setDebuggerCharset(String debuggerCharset) {
         this.debuggerCharset = debuggerCharset == null ? "" : debuggerCharset;
+    }
+
+    public boolean isRuntimeDebugLogEnabled() {
+        return runtimeDebugLogEnabled;
+    }
+
+    public void setRuntimeDebugLogEnabled(boolean runtimeDebugLogEnabled) {
+        this.runtimeDebugLogEnabled = runtimeDebugLogEnabled;
     }
 
     /**

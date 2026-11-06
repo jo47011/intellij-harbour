@@ -109,6 +109,8 @@ automatically updated while preserving code functionality.
 The structure view panel (**Alt+7**) shows a tree overview of functions, procedures, classes, and variables in the
 current file for easy navigation.
 
+**Go to Symbol** (**Ctrl+Alt+Shift+N**) lists all functions, procedures and methods of the whole project.
+
 <p align="center">
   <img src="img/structure-view.png" alt="Structure View"/>
   <br>

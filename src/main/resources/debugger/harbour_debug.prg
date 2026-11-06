@@ -1,4 +1,4 @@
-// IntelliJ Harbour Debug Handler - COMPLETE VERSION 1.4.4
+// IntelliJ Harbour Debug Handler - COMPLETE VERSION 1.4.6
 // Combines working variable names + breakpoint functionality + GLOBAL ERROR HANDLING
 // Based on working VSCode pattern with socket integration
 
@@ -55,14 +55,20 @@ STATIC t_oDebugInfo
 STATIC s_lSocketEnabled := .T.  // Socket communication enabled for debugger breakpoints
 STATIC s_lThisProcessConnected := .F.  // Track if THIS process successfully connected to debugger
 STATIC s_aTracepoints := {}  // Array of {varName, lastValue} for data breakpoints
+STATIC s_lLogEnabled  // NIL until first LogDebugInfo() call, then .T. if HB_DBG_LOG=1
 
 // Debug logging function - writes to .hbmk/debug.log
+// Only active if the IDE passes HB_DBG_LOG=1 (setting "Write debugger runtime log")
 STATIC PROCEDURE LogDebugInfo(cMessage)
    LOCAL hFile
    LOCAL cLogFile := ".hbmk/debug.log"
-   
-   // Only log if .hbmk directory exists (means we're in debug mode)
-   IF hb_DirExists(".hbmk")
+
+   IF s_lLogEnabled == NIL
+      s_lLogEnabled := GetEnv("HB_DBG_LOG") == "1"
+   ENDIF
+
+   // Only log if enabled and .hbmk directory exists (means we're in debug mode)
+   IF s_lLogEnabled .AND. hb_DirExists(".hbmk")
       hFile := FOpen(cLogFile, 1)  // Open for writing, append mode
       IF hFile == -1
          hFile := FCreate(cLogFile)  // Create if doesn't exist
@@ -77,45 +83,24 @@ STATIC PROCEDURE LogDebugInfo(cMessage)
    ENDIF
 RETURN
 
-// Low-level keyboard filter - intercepts Alt-D before application processes it
-STATIC FUNCTION KeyboardFilter(nKey)
-   LOCAL oDebugInfo
-
-   // Check for Alt-D (K_ALT_D = 288)
-   IF nKey == 288
-      oDebugInfo := __DEBUGITEM()
-      IF oDebugInfo["socket"] != NIL .AND. oDebugInfo["lRunning"]
-         oDebugInfo["lRunning"] := .F.
-         LogDebugInfo("Alt-D intercepted - sending STOP:AltD")
-         // Send STOP to IDE so it knows we're paused
-         IF Len(oDebugInfo["aStack"]) > 0
-            hb_inetSend(oDebugInfo["socket"], ;
-               "STOP:AltD:" + ;
-               ATail(oDebugInfo["aStack"])[HB_DBG_CS_MODULE] + ;
-               ":" + ;
-               AllTrim(Str( ;
-               ATail(oDebugInfo["aStack"])[HB_DBG_CS_LINE])) + ;
-               CRLF)
-         ENDIF
-         RETURN 0
-      ENDIF
-   ENDIF
-
-   // Return the key unchanged to pass to application
-RETURN nKey
-
 // Idle block to check socket for commands during GET/READ/MENU
 STATIC FUNCTION IdleSocketCheck()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL tmp, cCurrentFile, nCurrentLine, i
+   LOCAL tmp, cCurrentFile, nCurrentLine, i, cReason
 
    // Skip if internal operation in progress to prevent recursion
    IF oDebugInfo["lInternalRun"] == .T.
       RETURN NIL
    ENDIF
 
-   IF oDebugInfo["socket"] != NIL .AND. hb_inetDataReady(oDebugInfo["socket"]) == 1
-      tmp := hb_inetRecvLine(oDebugInfo["socket"])
+   IF oDebugInfo["socket"] != NIL
+      // Alt-D in the program window only flags a debug request; no PRG line runs while
+      // waiting in GET/READ, so handle the request here like a PAUSE from the IDE
+      IF oDebugInfo["lRunning"] .AND. __dbgInvokeDebug()
+         tmp := "ALTD"
+      ELSEIF hb_inetDataReady(oDebugInfo["socket"]) == 1
+         tmp := hb_inetRecvLine(oDebugInfo["socket"])
+      ENDIF
       IF !Empty(tmp)
          // Get current location for all commands
          cCurrentFile := ""
@@ -135,11 +120,12 @@ STATIC FUNCTION IdleSocketCheck()
          ENDIF
 
          DO CASE
-            CASE tmp == "PAUSE"
+            CASE tmp == "PAUSE" .OR. tmp == "ALTD"
                // Send STOP message immediately to unblock IntelliJ
-               hb_inetSend(oDebugInfo["socket"], "STOP:pause:" + cCurrentFile + ":" + ;
+               cReason := IF(tmp == "ALTD", "AltD", "pause")
+               hb_inetSend(oDebugInfo["socket"], "STOP:" + cReason + ":" + cCurrentFile + ":" + ;
                   AllTrim(Str(nCurrentLine)) + CRLF)
-               LogDebugInfo("PAUSE received in idle - sent STOP:pause:" + cCurrentFile + ":" + ;
+               LogDebugInfo(tmp + " in idle - sent STOP:" + cReason + ":" + cCurrentFile + ":" + ;
                   AllTrim(Str(nCurrentLine)))
                // Set flag to break at next line execution
                oDebugInfo["lRunning"] := .F.
@@ -240,16 +226,12 @@ STATIC FUNCTION IdleSocketCheck()
 
 RETURN NIL
 
-// Install keyboard filter and idle block
-STATIC PROCEDURE InstallKeyboardFilter()
+// Install idle block (Alt-D is detected via __dbgInvokeDebug() in SHOWLINE and the idle block)
+STATIC PROCEDURE InstallIdleBlock()
    LOCAL oDebugInfo := __DEBUGITEM()
-   LOCAL bOldFilter, nIdleHandle
+   LOCAL nIdleHandle
 
-   IF oDebugInfo["bOldKeyFilter"] == NIL
-      bOldFilter := hb_SetKeyCheck({|nKey| KeyboardFilter(nKey)})
-      oDebugInfo["bOldKeyFilter"] := bOldFilter
-      LogDebugInfo("Installed keyboard filter for Alt-D detection")
-
+   IF oDebugInfo["nIdleHandle"] == NIL
       // Install idle block to check socket during GET/READ
       nIdleHandle := hb_IdleAdd({|| IdleSocketCheck()})
       oDebugInfo["nIdleHandle"] := nIdleHandle
@@ -258,15 +240,9 @@ STATIC PROCEDURE InstallKeyboardFilter()
 
 RETURN
 
-// Remove keyboard filter and idle block
-STATIC PROCEDURE RemoveKeyboardFilter()
+// Remove idle block
+STATIC PROCEDURE RemoveIdleBlock()
    LOCAL oDebugInfo := __DEBUGITEM()
-
-   IF oDebugInfo["bOldKeyFilter"] != NIL
-      hb_SetKeyCheck(oDebugInfo["bOldKeyFilter"])
-      oDebugInfo["bOldKeyFilter"] := NIL
-      LogDebugInfo("Removed keyboard filter")
-   ENDIF
 
    IF oDebugInfo["nIdleHandle"] != NIL
       hb_IdleDel(oDebugInfo["nIdleHandle"])
@@ -295,7 +271,6 @@ STATIC FUNCTION __DEBUGITEM(xValue)
          "lSingleStep" => .F., ;
          "maxLevel" => NIL, ;
          "debugHandle" => NIL, ;
-         "bOldKeyFilter" => NIL, ;
          "nIdleHandle" => NIL ;
       }
    ENDIF
@@ -382,10 +357,9 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       oDebugInfo := __DEBUGITEM()
       oDebugInfo["__dbgEntryLevel"] := __dbgProcLevel()
       
-      lAltDInvoked := __dbgInvokeDebug()  // Check without clearing
-      IF lAltDInvoked
-         __dbgInvokeDebug(.T.)  // Clear the flag after detecting
-      ENDIF
+      // __dbgInvokeDebug() returns the pending Alt-D request and clears it
+      // (__dbgInvokeDebug(.T.) would set it again)
+      lAltDInvoked := __dbgInvokeDebug()
       
       // Update current line in stack
       IF Len(oDebugInfo["aStack"]) > 0
@@ -456,7 +430,7 @@ PROCEDURE __dbgEntry(nMode, uParam1, uParam2, uParam3, uParam4)
       IF !Empty(oDebugInfo["socket"])
          hb_inetSend(oDebugInfo["socket"], "VMQUIT" + CRLF)
          hb_inetClose(oDebugInfo["socket"])
-         RemoveKeyboardFilter()
+         RemoveIdleBlock()
          oDebugInfo["socket"] := NIL
       ENDIF
    ENDCASE
@@ -600,7 +574,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
       ENDIF
 
       IF tmp != "HELLO"
-         RemoveKeyboardFilter()
+         RemoveIdleBlock()
          oDebugInfo["socket"] := NIL
          oDebugInfo["timeCheckForDebug"]++
       ELSE
@@ -609,8 +583,8 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          hb_SetEnv("HB_DBG_SKIP", "1")
          LogDebugInfo("Main process connected to debugger - setting HB_DBG_SKIP=1 for child processes")
 
-         // Install keyboard filter for Alt-D detection
-         InstallKeyboardFilter()
+         // Install idle block to process IDE commands while waiting in READ/MENU
+         InstallIdleBlock()
       ENDIF
    ENDIF
    
@@ -632,7 +606,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
 
       IF Empty(oDebugInfo["socket"]) .OR. ;
          hb_inetErrorCode(oDebugInfo["socket"]) != 0
-         RemoveKeyboardFilter()
+         RemoveIdleBlock()
          oDebugInfo["socket"] := NIL
          oDebugInfo["lRunning"] := .T.
          oDebugInfo["aBreaks"] := {=>}
@@ -830,7 +804,7 @@ STATIC PROCEDURE CheckSocket(lStopSent)
                   ENDIF
                   
                CASE tmp == "DISCONNECT"
-                  RemoveKeyboardFilter()
+                  RemoveIdleBlock()
                   oDebugInfo["socket"] := NIL
                   oDebugInfo["lRunning"] := .T.
                   oDebugInfo["aBreaks"] := {=>}
@@ -924,9 +898,8 @@ STATIC PROCEDURE CheckSocket(lStopSent)
          ENDIF
          
          // Check for ALTD
-         IF __dbgInvokeDebug()
+         IF __dbgInvokeDebug()  // returns the pending request and clears it
             oDebugInfo["lRunning"] := .F.
-            __dbgInvokeDebug(.T.)  // Clear flag after detecting
             IF !lStopSent
                // Get current file and line
                cCurrentFile := ""
@@ -1406,8 +1379,7 @@ RETURN lResult
 
 // Check if current HB_DBG_ACTIVATE was triggered by AltD()
 STATIC FUNCTION IsAltDStop()
-   IF __dbgInvokeDebug()
-      __dbgInvokeDebug(.T.)  // Clear flag after detecting
+   IF __dbgInvokeDebug()  // returns the pending request and clears it
       RETURN .T.
    ENDIF
    

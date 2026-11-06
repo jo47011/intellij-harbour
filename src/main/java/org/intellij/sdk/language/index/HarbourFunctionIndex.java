@@ -22,8 +22,8 @@ import java.util.regex.Pattern;
 public class HarbourFunctionIndex extends FileBasedIndexExtension<String, HarbourFunctionIndex.FunctionInfo> {
     public static final ID<String, FunctionInfo> INDEX_ID = ID.create("harbour.function.index");
     
-    // Pattern for finding function/procedure declarations
-    private static final Pattern DECLARATION_PATTERN = Pattern.compile(
+    // Pattern for finding function/procedure declarations (shared with HarbourDeclarationIndex)
+    static final Pattern DECLARATION_PATTERN = Pattern.compile(
         "(?i)^\\s*(STATIC\\s+)?(FUNCTION|PROCEDURE|METHOD)\\s+(\\w+)", Pattern.MULTILINE);
     
     // Pattern for finding function calls/usages
@@ -103,29 +103,32 @@ public class HarbourFunctionIndex extends FileBasedIndexExtension<String, Harbou
     @NotNull
     @Override
     public DataExternalizer<FunctionInfo> getValueExternalizer() {
-        return new DataExternalizer<FunctionInfo>() {
-            @Override
-            public void save(@NotNull DataOutput out, FunctionInfo value) throws IOException {
-                out.writeUTF(value.name);
-                out.writeUTF(value.type);
-                out.writeInt(value.lineNumber);
-                out.writeBoolean(value.isStatic);
-                out.writeBoolean(value.isDeclaration);
-                out.writeUTF(value.fileName);
-            }
-
-            @Override
-            public FunctionInfo read(@NotNull DataInput in) throws IOException {
-                String name = in.readUTF();
-                String type = in.readUTF();
-                int lineNumber = in.readInt();
-                boolean isStatic = in.readBoolean();
-                boolean isDeclaration = in.readBoolean();
-                String fileName = in.readUTF();
-                return new FunctionInfo(name, type, lineNumber, isStatic, isDeclaration, fileName);
-            }
-        };
+        return INFO_EXTERNALIZER;
     }
+
+    // Serializer for a single FunctionInfo (shared with HarbourDeclarationIndex)
+    static final DataExternalizer<FunctionInfo> INFO_EXTERNALIZER = new DataExternalizer<FunctionInfo>() {
+        @Override
+        public void save(@NotNull DataOutput out, FunctionInfo value) throws IOException {
+            out.writeUTF(value.name);
+            out.writeUTF(value.type);
+            out.writeInt(value.lineNumber);
+            out.writeBoolean(value.isStatic);
+            out.writeBoolean(value.isDeclaration);
+            out.writeUTF(value.fileName);
+        }
+
+        @Override
+        public FunctionInfo read(@NotNull DataInput in) throws IOException {
+            String name = in.readUTF();
+            String type = in.readUTF();
+            int lineNumber = in.readInt();
+            boolean isStatic = in.readBoolean();
+            boolean isDeclaration = in.readBoolean();
+            String fileName = in.readUTF();
+            return new FunctionInfo(name, type, lineNumber, isStatic, isDeclaration, fileName);
+        }
+    };
 
     @Override
     public int getVersion() {
@@ -138,13 +141,16 @@ public class HarbourFunctionIndex extends FileBasedIndexExtension<String, Harbou
         // Use explicit extension check in addition to file type to avoid indexing
         // backup files like .old, .bak etc. that IntelliJ may associate with Harbour
         // due to cached VFS file type associations
-        return file -> {
-            if (file.getFileType() != HarbourFileType.INSTANCE) {
-                return false;
-            }
-            String ext = file.getExtension();
-            return ext != null && (ext.equalsIgnoreCase("prg") || ext.equalsIgnoreCase("ch"));
-        };
+        return HarbourFunctionIndex::isHarbourSource;
+    }
+
+    // Shared with HarbourDeclarationIndex
+    static boolean isHarbourSource(VirtualFile file) {
+        if (file.getFileType() != HarbourFileType.INSTANCE) {
+            return false;
+        }
+        String ext = file.getExtension();
+        return ext != null && (ext.equalsIgnoreCase("prg") || ext.equalsIgnoreCase("ch"));
     }
 
     @Override

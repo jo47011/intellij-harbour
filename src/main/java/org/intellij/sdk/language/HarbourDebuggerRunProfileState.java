@@ -245,6 +245,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
                                 if (isDebugMode) {
                                     launchCommand.withEnvironment("HB_REMOTE_DEBUG", "1");
                                     launchCommand.withEnvironment("HB_DBG_PATH", projectDir.getAbsolutePath());
+                                    addRuntimeDebugLogEnv(launchCommand);
                                 }
 
                                 // Add program arguments if specified
@@ -257,6 +258,12 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
 
                                 // Launch as separate process
                                 OSProcessHandler launchHandler = new OSProcessHandler(launchCommand);
+                                launchHandler.addProcessListener(new ProcessAdapter() {
+                                    @Override
+                                    public void processTerminated(@NotNull ProcessEvent exitEvent) {
+                                        reportProgramExit(exeName, exitEvent.getExitCode());
+                                    }
+                                });
                                 launchHandler.startNotify();
 
                                 HarbourLogger.log(env.getProject(), "HarbourDebugger",
@@ -765,6 +772,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
             String debugPath = finalWorkingDir != null ? finalWorkingDir : ".";
             commandLine.withEnvironment("HB_DBG_PATH", debugPath);
             commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+            addRuntimeDebugLogEnv(commandLine);
             HarbourLogger.log(env.getProject(), "HarbourDebugger", 
                     "DEBUG MODE: Set debug environment variables - HB_DBG_PATH=" + debugPath + ", HB_REMOTE_DEBUG=1");
         } else {
@@ -983,6 +991,7 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         if (isDebugMode) {
             commandLine.withEnvironment("HB_DBG_PATH", ".");
             commandLine.withEnvironment("HB_REMOTE_DEBUG", "1");
+            addRuntimeDebugLogEnv(commandLine);
         }
         
         // Log the complete executable command for debugging - make it very visible
@@ -1663,6 +1672,34 @@ public class HarbourDebuggerRunProfileState extends CommandLineState {
         return new DefaultExecutionResult(console, processHandler);
     }
     
+    /**
+     * Show the exit code of the separately launched GUI executable in the Run/Debug console.
+     * Hex form makes Windows status codes readable (e.g. 0xC0000005 access violation,
+     * 0xC00000FD stack overflow, 0xC000041D exception in a window callback).
+     */
+    private void reportProgramExit(String exeName, int exitCode) {
+        String message = exeName + " exited with code " + exitCode
+                + String.format(" (0x%08X)", exitCode);
+        HarbourLogger.log(env.getProject(), "HarbourDebugger", message);
+        ConsoleView console = HarbourLogger.getCurrentConsole();
+        if (console != null) {
+            console.print("\n" + message + "\n", exitCode == 0
+                    ? ConsoleViewContentType.SYSTEM_OUTPUT : ConsoleViewContentType.ERROR_OUTPUT);
+        }
+    }
+
+    /**
+     * Enable the trace log of harbour_debug.prg (.hbmk/debug.log) if switched on in the settings.
+     */
+    private void addRuntimeDebugLogEnv(GeneralCommandLine commandLine) {
+        HarbourSettings settings = HarbourSettings.getInstance(env.getProject());
+        if (settings != null && settings.isRuntimeDebugLogEnabled()) {
+            commandLine.withEnvironment("HB_DBG_LOG", "1");
+            HarbourLogger.log(env.getProject(), "HarbourDebugger",
+                    "Runtime debug log enabled - HB_DBG_LOG=1");
+        }
+    }
+
     /**
      * Copy the remote debug library from resources to working directory
      */
